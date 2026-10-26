@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Tandem: two screens side by side, the second one smaller (the phone). -->
+  <rect width="32" height="32" fill="#000"/>
+  <rect x="4" y="9" width="15" height="11" fill="none" stroke="#F8FAFD" stroke-width="2.4"/>
+  <rect x="22" y="12" width="6" height="11" fill="none" stroke="#F8FAFD" stroke-width="2.4"/>
+  <rect x="8" y="22" width="7" height="2.4" fill="#F8FAFD"/>
+</svg>

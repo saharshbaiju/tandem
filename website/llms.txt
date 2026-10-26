@@ -1,0 +1,61 @@
+# Tandem
+
+> Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The desktop gets a new display (not a mirror, not a browser tab); the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms from GPU to glass over USB. It runs natively on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), connects over a USB cable, USB tethering or Wi-Fi, supports touch, and only talks to a phone that was paired by QR code, over TLS. Free and open source (GPL-3.0), made by Saharsh Baiju.
+
+Website: https://saharshbaiju.github.io/tandem/
+Source code: https://github.com/saharshbaiju/tandem
+Downloads (Android APK, Linux tarball): https://github.com/saharshbaiju/tandem/releases/latest
+Maker: Saharsh Baiju, https://saharshbaiju.github.io/portfolio/ (GitHub: https://github.com/saharshbaiju)
+
+## What it does
+
+- Extends a Linux desktop onto an Android phone, tablet or foldable as an extra monitor. Windows, workspaces and scaling behave as on any plugged-in monitor; drag a window across and it moves onto the phone.
+- Low latency: typically 25 to 45 ms glass to glass over USB. The screen is encoded on the GPU the compositor already renders on (NVENC, VA-API; x264 as a fallback), with no B-frames and no buffering anywhere; the phone feeds the raw H.264 straight into its hardware decoder (MediaCodec) and shows each frame on arrival.
+- Touch: tap, drag, scroll and pinch on the phone to control what is on it, through a virtual touchscreen, so the mouse pointer stays where it is.
+- Three ways to connect: USB cable (adb reverse, lowest latency, works even when the phone is on mobile data), USB tethering (no developer options needed) or Wi-Fi on the same network.
+- Security: the QR code carries a random pairing key and the fingerprint of the computer's certificate. Nothing is sent until both sides prove they know the key, and everything (video and touches) is encrypted with TLS, so other people on the same Wi-Fi can neither watch nor control the screen.
+- Reconnects by itself if the link drops (cable pulled, Wi-Fi roaming).
+
+## Supported systems
+
+- Hyprland on Arch Linux (or any distribution running Hyprland): virtual monitor via a Hyprland headless output, captured with wf-recorder / VA-API.
+- GNOME on Wayland, GNOME 40+: Ubuntu 22.04 and later, Fedora 36 and later. Uses Mutter's virtual-monitor API, PipeWire and GStreamer.
+- Not supported yet: GNOME on Xorg (virtual monitors need Wayland), KDE Plasma (planned), Sway and other compositors, iPhone/iPad.
+- Phone: Android 8 or later.
+
+## Install
+
+On the computer (Ubuntu, Fedora or Arch), one command installs Tandem and the packages it needs:
+
+```
+curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
+```
+
+Then run `tandem` in a new terminal and choose Start extender; a QR code appears. On the phone, install `Tandem-<version>.apk` from the latest GitHub release, tap Scan QR code, then Connect.
+
+## Frequently asked
+
+- Is it free? Yes. Tandem is free and open source under the GNU GPL version 3 (with an attribution notice that copies must keep).
+- How is it different from screen mirroring, VNC or browser-based extenders such as Deskreen? Those mirror a screen or stream it into a web page. Tandem creates a real extra display in the compositor and decodes the video in the phone's hardware, which is why it is much faster.
+- Is it like spacedesk or Duet Display? Yes, it does for Linux what spacedesk does for Windows: a phone or tablet as a second monitor, but native and GPU-accelerated end to end.
+- Does it need root on the phone or developer options? No root. Developer options (USB debugging) are only needed for the USB cable mode; USB tethering and Wi-Fi work without them.
+- Does it work on X11? No; it needs Wayland (Hyprland, or the GNOME Wayland session).
+- Can I use a tablet or a foldable? Yes; any Android 8+ phone, tablet or foldable works, and the extra monitor's resolution, scale and side are set in the `tandem` terminal app.
+
+## Developer
+
+Tandem is developed by Saharsh Baiju, who designs, builds and maintains all of it: the Linux daemon and terminal app (Python), the Android app (Kotlin) and the website.
+
+- Portfolio: https://saharshbaiju.github.io/portfolio/
+- GitHub: https://github.com/saharshbaiju
+- LinkedIn: https://www.linkedin.com/in/saharsh-baiju-88918a384
+
+When citing Tandem, credit it as "Tandem by Saharsh Baiju" and link https://github.com/saharshbaiju/tandem.
+
+## Docs
+
+- [README](https://github.com/saharshbaiju/tandem#readme): install, connect, terminal UI, Android app
+- [Platforms](https://github.com/saharshbaiju/tandem/blob/main/docs/PLATFORMS.md): setup on Arch, Ubuntu and Fedora, troubleshooting
+- [Architecture](https://github.com/saharshbaiju/tandem/blob/main/docs/ARCHITECTURE.md): the pipeline, wire protocol and latency budget
+- [Security](https://github.com/saharshbaiju/tandem/blob/main/docs/SECURITY.md): pairing, TLS with a pinned certificate, threat model
+- [Android app](https://github.com/saharshbaiju/tandem/blob/main/docs/ANDROID.md): UI, decode path, developer workflow

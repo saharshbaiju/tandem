@@ -1,0 +1,2154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tandem: use your Android phone as a second monitor on Linux</title>
+<meta name="description" content="Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux (about 30 ms over USB). Free and open source. Works on Hyprland and GNOME (Arch, Ubuntu, Fedora) over USB, USB tethering or Wi-Fi, with touch input.">
+<meta name="theme-color" content="#000000">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="author" content="Saharsh Baiju">
+<!-- The developer's own profiles, so search engines tie Tandem to its maker. -->
+<link rel="author" href="https://saharshbaiju.github.io/portfolio/">
+<link rel="me" href="https://github.com/saharshbaiju">
+<link rel="me" href="https://www.linkedin.com/in/saharsh-baiju-88918a384">
+<link rel="canonical" href="https://saharshbaiju.github.io/tandem/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<!-- A plain-text summary for AI assistants and crawlers (llmstxt.org). -->
+<link rel="alternate" type="text/markdown" href="llms.txt" title="Tandem summary for LLMs">
+
+<!-- Link previews (Open Graph: WhatsApp, Discord, LinkedIn, Slack; Twitter/X card). -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Tandem">
+<meta property="og:url" content="https://saharshbaiju.github.io/tandem/">
+<meta property="og:title" content="Tandem: your Android phone as a second monitor for Linux">
+<meta property="og:description" content="A real, low-latency second monitor from the phone in your pocket. Native on Hyprland and GNOME, over USB or Wi-Fi, with touch. Free and open source.">
+<meta property="og:image" content="https://saharshbaiju.github.io/tandem/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Tandem: your Android phone as a real, low-latency second monitor for Linux.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Tandem: your Android phone as a second monitor for Linux">
+<meta name="twitter:description" content="A real, low-latency second monitor from the phone in your pocket. Hyprland and GNOME, USB or Wi-Fi, with touch. Free and open source.">
+<meta name="twitter:image" content="https://saharshbaiju.github.io/tandem/assets/og.png">
+
+<!-- Structured data for search engines: what Tandem is and who makes it. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://saharshbaiju.github.io/tandem/#app",
+      "name": "Tandem",
+      "alternateName": ["Tandem screen extender", "amVD", "Screen Extender"],
+      "description": "Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The compositor gets a new virtual display; the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms end to end over USB. Works on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), over a USB cable, USB tethering or Wi-Fi, with touch input and an encrypted, QR-paired connection.",
+      "url": "https://saharshbaiju.github.io/tandem/",
+      "applicationCategory": "UtilitiesApplication",
+      "applicationSubCategory": "Second monitor / screen extender",
+      "operatingSystem": "Linux (Hyprland, GNOME on Wayland), Android 8+",
+      "downloadUrl": "https://github.com/saharshbaiju/tandem/releases/latest",
+      "installUrl": "https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh",
+      "softwareHelp": "https://github.com/saharshbaiju/tandem#readme",
+      "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "image": "https://saharshbaiju.github.io/tandem/assets/og.png",
+      "featureList": [
+        "Extends the Linux desktop onto an Android phone, tablet or foldable as a real monitor (not mirroring)",
+        "About 30 ms latency over USB: GPU H.264 encoding, hardware decoding on the phone, no buffering",
+        "Hyprland (Arch) and GNOME on Wayland (Ubuntu, Fedora) backends",
+        "USB cable (adb), USB tethering or Wi-Fi",
+        "Touch input: tap, drag, scroll and pinch on the phone",
+        "QR-code pairing, TLS encryption with a pinned certificate",
+        "One-command install on Ubuntu, Fedora and Arch"
+      ],
+      "author": { "@id": "https://saharshbaiju.github.io/tandem/#maker" },
+      "creator": { "@id": "https://saharshbaiju.github.io/tandem/#maker" },
+      "copyrightHolder": { "@id": "https://saharshbaiju.github.io/tandem/#maker" },
+      "copyrightYear": 2026,
+      "sameAs": ["https://github.com/saharshbaiju/tandem"]
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "name": "Tandem source code",
+      "codeRepository": "https://github.com/saharshbaiju/tandem",
+      "programmingLanguage": ["Python", "Kotlin"],
+      "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "author": { "@id": "https://saharshbaiju.github.io/tandem/#maker" },
+      "targetProduct": { "@id": "https://saharshbaiju.github.io/tandem/#app" }
+    },
+    {
+      "@type": "Person",
+      "@id": "https://saharshbaiju.github.io/tandem/#maker",
+      "name": "Saharsh Baiju",
+      "description": "Saharsh Baiju is the developer of Tandem, the open-source app that turns an Android phone into a low-latency second monitor for Linux, and designs, builds and maintains all of it: the Linux daemon and terminal app in Python, the Android app in Kotlin, and this website.",
+      "jobTitle": "Software developer",
+      "url": "https://saharshbaiju.github.io/portfolio/",
+      "knowsAbout": ["Linux", "Wayland", "Hyprland", "GNOME", "Android", "Kotlin", "Python", "Low-latency video streaming", "H.264", "TLS"],
+      "image": "https://saharshbaiju.github.io/tandem/assets/saharsh.jpg",
+      "sameAs": [
+        "https://github.com/saharshbaiju",
+        "https://www.linkedin.com/in/saharsh-baiju-88918a384"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "name": "Tandem",
+      "url": "https://saharshbaiju.github.io/tandem/",
+      "publisher": { "@id": "https://saharshbaiju.github.io/tandem/#maker" }
+    }
+  ]
+}
+</script>
+<script>
+  // Apply a saved theme before first paint, so there's no flash.
+  try { const t = localStorage.getItem("tandem-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Non-blocking: the boot script waits for the fonts itself before the splash. -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Geist:wght@300..800&family=Geist+Mono:wght@400..700&display=swap" rel="stylesheet" media="print" id="fontCss" onload="this.media='all'; this.dataset.loaded = 1">
+<style>
+/* Black and white. Grays only where something needs to step back. */
+:root {
+  --black: #000000;
+  --white: #F8FAFD;
+  --gray-1: #8E918F;   /* secondary text */
+  --gray-2: #3C3F41;   /* rules, inactive */
+  --gray-3: #161718;   /* grid lines */
+  --live: #81C995;
+  --red: #E5161B;      /* the "World's first" highlight; the page's only colour */
+  --gutter: clamp(16px, 4vw, 64px);
+  --text: "Geist", system-ui, sans-serif;          /* body, UI and headings */
+  --display: "Archivo", system-ui, sans-serif;     /* only where type stretches (wdth axis) */
+  --mono: "Geist Mono", ui-monospace, monospace;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+}
+/*
+ * Light theme: --black and --white swap, so every surface, rule and the
+ * inverted security section flip together. Follows the system unless the
+ * nav switch picked one (stored as data-theme on <html>).
+ */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --black: #F8FAFD; --white: #000000; --gray-1: #5F6368; --gray-2: #C4C7C5; --gray-3: #E8EAED; }
+}
+:root[data-theme="light"] { --black: #F8FAFD; --white: #000000; --gray-1: #5F6368; --gray-2: #C4C7C5; --gray-3: #E8EAED; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; background: var(--black); }
+body {
+  background: var(--black);
+  color: var(--white);
+  font-family: var(--text);
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+body.locked { overflow: hidden; }
+a { color: inherit; }
+img, svg, canvas { display: block; }
+:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+::selection { background: var(--white); color: var(--black); }
+
+main, footer, .nav { position: relative; z-index: 1; }
+
+/* Shared type ---------------------------------------------------------- */
+.mega { font-weight: 900; line-height: .86; letter-spacing: -.02em; font-variation-settings: "wdth" 125; }
+.h2 {
+  font-size: clamp(40px, 6.6vw, 112px);
+  font-weight: 600;
+  line-height: .98;
+  letter-spacing: -.045em;
+}
+.lede { font-size: clamp(19px, 1.7vw, 23px); line-height: 1.45; max-width: 32em; color: var(--gray-1); }
+.lede b { color: var(--white); font-weight: 600; }
+.mono { font-family: var(--mono); }
+.wrap { padding-inline: var(--gutter); }
+
+/* Buttons: square, flat. */
+.btn {
+  display: inline-flex; align-items: center;
+  padding: 15px 22px;
+  font: 500 15px/1 var(--text);
+  letter-spacing: -.01em;
+  text-decoration: none;
+  border: 1px solid var(--white);
+  background: transparent;
+  color: var(--white);
+  cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.btn:hover, .btn.solid { background: var(--white); color: var(--black); }
+.btn.solid:hover { background: var(--black); color: var(--white); }
+.light .btn { border-color: var(--black); color: var(--black); }
+.light .btn:hover { background: var(--black); color: var(--white); }
+
+/* Splash ---------------------------------------------------------------- */
+#splash {
+  position: fixed; inset: 0;
+  width: 100vw; height: 100vh; height: 100dvh;
+  z-index: 100;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* Nav ------------------------------------------------------------------- */
+.nav {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 20px var(--gutter);
+  border-bottom: 1px solid var(--gray-2);
+  background: var(--black);
+}
+.wordmark { font: 800 20px/1 var(--display); font-variation-settings: "wdth" 110; letter-spacing: -.01em; text-decoration: none; }
+.nav ul { display: flex; gap: clamp(16px, 3vw, 36px); list-style: none; font: 500 15px var(--text); letter-spacing: -.01em; }
+.nav ul a { text-decoration: none; color: var(--gray-1); transition: color .15s; }
+.nav ul a:hover { color: var(--white); }
+.nav ul { align-items: center; }
+.theme-btn { font: 500 14px var(--text); color: var(--white); background: transparent; border: 1px solid var(--gray-2); padding: 6px 10px; cursor: pointer; }
+.theme-btn:hover { border-color: var(--white); }
+
+/* Hero ------------------------------------------------------------------- */
+.hero { min-height: calc(100vh - 61px); min-height: calc(100dvh - 61px); display: flex; flex-direction: column; }
+.hero-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 7fr);
+  gap: 32px clamp(24px, 3vw, 48px);
+  align-items: center;
+  padding: clamp(24px, 5vh, 64px) var(--gutter);
+}
+.hero-title {
+  font-size: clamp(40px, 4.4vw, 84px);
+  font-weight: 600;
+  line-height: .98;
+  letter-spacing: -.05em;
+}
+.hero-title > span { display: block; }
+/*
+ * The marketing tag: "World's first" gets a red block that wipes in from the
+ * left once the intro lands, the text turning white over it. Plays once.
+ */
+.claim { font-style: normal; position: relative; display: inline-block; padding: 0 .12em; margin-left: -.12em; z-index: 0; }
+.claim::before {
+  content: ""; position: absolute; inset: .06em 0 .02em;
+  background: var(--red); z-index: -1;
+  transform: scaleX(0); transform-origin: left;
+}
+.in .claim { color: #fff; transition: color .2s .75s; }
+.in .claim::before { transform: scaleX(1); transition: transform .6s cubic-bezier(.7, 0, .2, 1) .45s; }
+.hero-sub { margin-top: 24px; }
+.ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.hero-art { position: relative; aspect-ratio: 1000 / 620; }
+.hero-art canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.intro { opacity: 0; transform: translateY(8px); }
+.in .intro { opacity: 1; transform: none; transition: opacity .35s ease-out, transform .35s var(--ease); transition-delay: calc(var(--i, 0) * 60ms); }
+
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--gray-2); }
+.facts > div { padding: 20px 20px 26px; }
+.facts > div:first-child { padding-left: var(--gutter); }
+.facts > div + div { border-left: 1px solid var(--gray-2); }
+.facts b { display: block; font: 600 16px var(--text); letter-spacing: -.02em; margin-bottom: 6px; }
+.facts span { color: var(--gray-1); font-size: 16px; }
+
+/* ASCII field band ------------------------------------------------------- */
+.field { height: clamp(140px, 26vh, 260px); border-block: 1px solid var(--gray-2); background: var(--black); }
+.field canvas { width: 100%; height: 100%; }
+
+/* Statement: the words widen as you scroll ------------------------------- */
+.statement { height: 220vh; }
+.statement-pin {
+  position: sticky; top: 0;
+  height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 0 var(--gutter);
+}
+.st-line {
+  white-space: nowrap;
+  font-weight: 900; line-height: .9; letter-spacing: -.02em;
+  font-variation-settings: "wdth" 62;
+  color: var(--gray-2);
+}
+.st-note { margin-top: 32px; max-width: 34em; }
+
+/* Device rig (scroll demo) -----------------------------------------------
+ * Front views of real kinds of hardware, without logos: a 14" gaming
+ * ultrabook in gunmetal, a titanium slab phone, a silver 16:10 tablet and a
+ * book-style foldable. Bodies are brushed metal (a padding-box / border-box
+ * background pair, so the metal edge follows the rounded corners), screens
+ * get a faint glass sheen. Everything on the screens is fixed dark UI, the
+ * same in both page themes. */
+.stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.rig { position: absolute; inset: 0; }
+.lid {
+  position: absolute; left: 60px; top: 60px; width: 644px; height: 424px;
+  padding: 10px 10px 24px;
+  border: 2px solid transparent;
+  border-radius: 16px 16px 4px 4px;
+  background:
+    linear-gradient(#08080A, #08080A) padding-box,
+    linear-gradient(160deg, #8A8E94 0%, #2E3034 20%, #5C6066 45%, #25272A 70%, #6A6E74 100%) border-box;
+}
+.lid::before { content: ""; position: absolute; left: 50%; top: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: #23262B; }
+.base {
+  position: absolute; left: 18px; top: 484px; width: 728px; height: 17px;
+  border-radius: 3px 3px 12px 12px / 3px 3px 9px 9px;   /* straight sides, soft corners */
+  background: linear-gradient(#A3A7AD 0, #5E6268 1.5px, #3E4146 45%, #1E1F22 100%);
+}
+.base::before { content: ""; position: absolute; left: 50%; top: 0; width: 118px; height: 6px; margin-left: -59px; border-radius: 0 0 8px 8px; background: #1B1C1F; }
+.floor { position: absolute; left: 40px; top: 497px; width: 684px; height: 16px; background: radial-gradient(closest-side, rgba(0, 0, 0, .32), transparent); }
+.device {
+  --metal: linear-gradient(150deg, #B2B5B9 0%, #4A4D52 22%, #A4A8AC 46%, #393C40 70%, #8E9296 100%);
+  position: absolute; left: 752px; top: 70px;
+  border: 3px solid transparent;
+  background: linear-gradient(#030304, #030304) padding-box, var(--metal) border-box;
+}
+.device[data-kind="tablet"] { --metal: linear-gradient(150deg, #F0F2F4 0%, #9A9EA3 24%, #E0E3E6 48%, #85898E 72%, #D2D5D9 100%); }
+.device[data-kind="fold"] { --metal: linear-gradient(150deg, #8D9196 0%, #2F3236 24%, #7E8287 48%, #2A2D30 72%, #6F7378 100%); }
+.device .key { position: absolute; background: #7C8085; border-radius: 1px; }
+.device .k1 { right: -6px; top: 92px; width: 3px; height: 30px; }
+.device .k2 { right: -6px; top: 136px; width: 3px; height: 62px; }
+.device[data-kind="land"] .k1 { right: 92px; top: -6px; width: 30px; height: 3px; }
+.device[data-kind="land"] .k2 { right: 136px; top: -6px; width: 62px; height: 3px; }
+.device[data-kind="tablet"] .k1 { right: 60px; top: -6px; width: 34px; height: 3px; }
+.device[data-kind="tablet"] .k2 { right: 110px; top: -6px; width: 56px; height: 3px; }
+.device[data-kind="fold"] .k2 { top: 120px; height: 46px; }
+.device .cam { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: #000; border: 2px solid #1E2024; z-index: 6; left: 50%; margin-left: -4.5px; top: 8px; }
+.device[data-kind="tablet"] .cam { top: -11px; width: 6px; height: 6px; margin-left: -3px; border-width: 1px; }
+.device[data-kind="land"] .cam { left: 8px; top: 50%; margin: -4.5px 0 0; }
+.device[data-kind="fold"] .cam { left: 76%; }
+.device .crease { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(255, 255, 255, .06); z-index: 6; display: none; }
+.device[data-kind="fold"] .crease { display: block; }
+.screen { position: relative; width: 100%; height: 100%; overflow: hidden; background: #000; }
+/* Glass: a faint diagonal reflection over whatever the screen shows. */
+.screen::after { content: ""; position: absolute; inset: 0; z-index: 7; pointer-events: none; background: linear-gradient(118deg, rgba(255, 255, 255, .07) 0%, rgba(255, 255, 255, .02) 34%, transparent 34.2%); }
+.reveal { position: absolute; inset: 0; }
+.world { position: absolute; left: 0; top: 0; width: 1500px; height: 800px; background: #0A0912; }
+.world .wall { position: absolute; left: 0; top: 0; width: 1500px; height: 800px; }
+/* Waybar, floating, Hyprland style. */
+.waybar {
+  position: absolute; left: 6px; top: 5px; width: 608px; height: 22px; z-index: 2;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 8px;
+  border-radius: 9px; background: rgba(13, 14, 22, .82); color: #E4E4EE;
+  font: 500 9.5px/1 var(--text); white-space: nowrap;
+}
+.waybar .ws { display: flex; gap: 3px; }
+.waybar .ws i { font-style: normal; min-width: 15px; padding: 3px 0; text-align: center; border-radius: 5px; color: #8E8FA3; }
+.waybar .ws i.on { background: #E4E4EE; color: #0D0E16; }
+.waybar .mods { display: flex; gap: 9px; justify-content: flex-end; align-items: center; }
+.waybar svg { width: 11px; height: 11px; display: block; }
+.waybar .mods span { display: flex; gap: 3px; align-items: center; }
+/* Hyprland windows: gaps, rounded corners, the default gradient border on the active one. */
+.win { position: absolute; overflow: hidden; border: 2px solid #595959; border-radius: 10px; }
+.win.active { border-color: transparent; }
+.firefox { background: linear-gradient(#1C1B22, #1C1B22) padding-box, linear-gradient(45deg, #33CCFF, #00FF99) border-box; color: #FBFBFE; font: 400 9px/1.3 var(--text); }
+.ff-tabs { height: 22px; display: flex; align-items: center; padding: 0 4px; }
+.ff-tab { display: flex; align-items: center; gap: 5px; height: 16px; padding: 0 7px; border-radius: 4px; background: #42414D; width: 150px; white-space: nowrap; overflow: hidden; }
+.ff-tab svg { width: 9px; height: 9px; flex: none; }
+.ff-tab .x { margin-left: auto; color: #A8A8B3; }
+.ff-nav { height: 22px; display: flex; align-items: center; gap: 7px; padding: 0 7px; background: #2B2A33; color: #CFCFD8; }
+.ff-nav svg { width: 9px; height: 9px; flex: none; }
+.ff-url { flex: 1; height: 15px; border-radius: 4px; background: #1C1B22; display: flex; align-items: center; gap: 4px; padding: 0 6px; white-space: nowrap; overflow: hidden; }
+.ff-url b { font-weight: 400; color: #FBFBFE; } .ff-url span { color: #8F8F9D; }
+.gh { background: #0D1117; color: #E6EDF3; height: 100%; padding: 8px 9px; }
+.gh-head { display: flex; align-items: center; gap: 5px; font-size: 10.5px; white-space: nowrap; }
+.gh-head span { color: #4493F8; } .gh-head b { color: #4493F8; font-weight: 600; }
+.gh-badge { border: 1px solid #3D444D; border-radius: 9px; padding: 0 5px; font-size: 7.5px; color: #9198A1; }
+.gh-btns { display: flex; gap: 4px; margin: 7px 0 0; }
+.gh-btns i { font-style: normal; border: 1px solid #3D444D; border-radius: 4px; padding: 2px 6px; background: #212830; font-size: 8px; display: flex; gap: 3px; align-items: center; }
+.gh-btns i b { background: #3D444D; border-radius: 6px; padding: 0 4px; font-weight: 500; }
+.gh-tabs { display: flex; gap: 10px; border-bottom: 1px solid #3D444D; margin: 7px -9px 8px; padding: 0 9px 5px; font-size: 8.5px; color: #9198A1; }
+.gh-tabs .on { color: #E6EDF3; box-shadow: 0 6px 0 -4px #F78166; }
+.gh-files { border: 1px solid #3D444D; border-radius: 6px; overflow: hidden; font-size: 8.5px; }
+.gh-files > div { display: grid; grid-template-columns: 12px 64px 1fr auto; gap: 5px; align-items: center; padding: 4px 7px; border-top: 1px solid #3D444D; white-space: nowrap; }
+.gh-files > div:first-child { border-top: 0; background: #151B23; grid-template-columns: 12px 1fr auto; }
+.gh-files em { font-style: normal; color: #9198A1; overflow: hidden; text-overflow: ellipsis; }
+.gh-files svg { width: 10px; height: 10px; display: block; }
+.gh-readme { margin-top: 8px; border: 1px solid #3D444D; border-radius: 6px; padding: 7px 8px; }
+.gh-readme b { display: block; font-size: 14px; border-bottom: 1px solid #3D444D; padding-bottom: 4px; margin-bottom: 5px; }
+.gh-readme p { color: #9198A1; font-size: 8px; }
+/* kitty, translucent with Hyprland's blur behind it. */
+.term { background: rgba(14, 15, 23, .78); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: #CDD6F4; }
+.term .tb { margin: 6px 7px 0; background: #CDD6F4; color: #11111B; font: 600 9px/15px var(--mono); padding: 0 6px; white-space: nowrap; overflow: hidden; }
+.term .log { padding: 5px 9px; font: 400 9.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.term .g { color: #A6E3A1; }
+.term .y { color: #F9E2AF; }
+.cursor { position: absolute; left: 0; top: 0; width: 18px; height: 24px; pointer-events: none; z-index: 5; }
+.tap { position: absolute; width: 0; height: 0; z-index: 4; }
+.tap::before {
+  content: ""; position: absolute; left: -24px; top: -24px; width: 48px; height: 48px;
+  border: 3px solid #F8FAFD; border-radius: 50%;
+  animation: ring .7s var(--ease) forwards;
+}
+@keyframes ring { from { transform: scale(.2); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+
+/* Magnetic stops: on touch-size screens the scroll settles on each beat of
+   the pinned sections (see Magnet in the script) instead of flying past. */
+.snap-stop { display: none; }
+@media (max-width: 900px) {
+  html { scroll-snap-type: y proximity; }
+  .statement, .pipe { position: relative; }
+  .snap-stop {
+    display: block; position: absolute; left: 0; width: 1px; height: 1px;
+    scroll-snap-align: start; scroll-snap-stop: always; pointer-events: none;
+  }
+}
+
+/* Demo ------------------------------------------------------------------ */
+.demo { height: 600vh; position: relative; }
+.demo-pin {
+  position: sticky; top: 0;
+  height: 100vh; height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: clamp(20px, 4vh, 48px) var(--gutter) clamp(16px, 3vh, 32px);
+}
+.demo-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: start; }
+.caption {
+  font-size: clamp(26px, 3.8vw, 60px);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -.04em;
+  max-width: 16em;
+  min-height: 2em;
+}
+.caption.swap { animation: swap .28s ease-out; }
+@keyframes swap { from { opacity: 0; transform: translateY(6px); } }
+.steps { display: flex; gap: 4px; padding-top: 12px; font: 500 13px var(--text); color: var(--gray-1); align-items: center; }
+.steps i { width: clamp(14px, 2.6vw, 36px); height: 3px; background: var(--gray-2); transition: background-color .2s; }
+.steps i.on { background: var(--white); }
+/* The stage is scaled to fit, so clipping only stops its unscaled layout box from widening the page. */
+.stage-box { position: relative; min-height: 0; overflow: hidden; contain: paint; }   /* the 3D rig must not widen the page */
+.label-row { display: flex; justify-content: space-between; align-items: end; gap: 16px; border-top: 1px solid var(--gray-2); padding-top: 12px; font: 500 14px var(--text); }
+.dev-label { color: var(--white); }
+.dev-hint { color: var(--gray-1); }
+
+/* Pipeline --------------------------------------------------------------- */
+.pipe { padding: clamp(72px, 12vh, 140px) 0 clamp(64px, 10vh, 120px); border-top: 1px solid var(--gray-2); }
+.ms { font-size: clamp(110px, 22vw, 380px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ms small { font-size: .3em; font-variation-settings: "wdth" 62; letter-spacing: 0; margin-left: .1em; }
+.pipe .lede { margin-top: 24px; }
+/* The rail: an ASCII laptop on the left, an ASCII phone on the right, and
+   the field lines between them running through the six stages above their
+   columns. The stages sit between the two devices so each column lines up
+   with its stretch of the line. */
+.rail { --lap: clamp(96px, 15%, 230px); --ph: clamp(56px, 8%, 120px); position: relative; margin-top: clamp(48px, 8vh, 96px); }
+#pipeArt { display: block; width: 100%; height: clamp(150px, 20vw, 230px); }
+.stages { display: grid; grid-template-columns: repeat(6, 1fr); margin: 0 var(--ph) 0 var(--lap); }
+.stage-col { padding: 18px 14px 22px; border-left: 1px solid var(--gray-2); }
+.stage-col .n { font: 500 13px var(--text); font-variant-numeric: tabular-nums; color: var(--gray-1); transition: color .2s; }
+.stage-col h3 { font-size: clamp(18px, 1.8vw, 30px); font-weight: 600; letter-spacing: -.035em; margin: 8px 0 6px; transition: color .2s; }
+.stage-col p { font-size: 15px; color: var(--gray-1); }
+.stage-col .t { font: 600 15px var(--mono); margin-top: 14px; color: var(--gray-1); transition: color .2s; }
+.stage-col.on .n, .stage-col.on .t { color: var(--white); }
+.stage-col.past h3, .stage-col.on h3 { color: var(--white); }
+.stage-col h3 { color: var(--gray-1); }
+
+/* Ways in ------------------------------------------------------------------ */
+.ways { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
+.ways-list { margin-top: clamp(32px, 6vh, 64px); border-top: 1px solid var(--white); }
+.way {
+  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px 48px;
+  padding: 28px 0; border-bottom: 1px solid var(--gray-2);
+  align-items: center;
+}
+.way h3 {
+  font-size: clamp(40px, 6.4vw, 110px); line-height: .95; letter-spacing: -.03em; font-weight: 800;
+  font-variation-settings: "wdth" 62;
+  transition: font-variation-settings .3s var(--ease);
+}
+.way:hover h3 { font-variation-settings: "wdth" 110; }
+.way p { max-width: 30em; color: var(--gray-1); }
+.way .speed { display: block; font: 500 14px var(--text); color: var(--white); margin-top: 10px; }
+
+/* Install ----------------------------------------------------------------- */
+.install { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
+.install-steps { list-style: none; margin-top: clamp(40px, 7vh, 80px); counter-reset: s; }
+.install-steps > li {
+  display: grid; grid-template-columns: clamp(64px, 10vw, 170px) minmax(0, 1fr) minmax(0, 1fr); gap: 24px 40px;
+  padding: 36px 0; border-top: 1px solid var(--gray-2);
+}
+.install-steps > li > * { min-width: 0; }
+.install-steps > li::before {
+  counter-increment: s; content: counter(s, decimal-leading-zero);
+  font: 300 clamp(40px, 5vw, 80px)/1 var(--text); font-variant-numeric: tabular-nums; letter-spacing: -.04em;
+  color: var(--gray-1);
+}
+.install-steps h3 { font-size: clamp(24px, 2.4vw, 38px); font-weight: 600; line-height: 1.08; letter-spacing: -.035em; margin-bottom: 12px; }
+.install-steps p { color: var(--gray-1); max-width: 32em; }
+.install-steps p b { color: var(--white); }
+.install-steps p + p { margin-top: 10px; }
+.cmd { display: flex; align-items: stretch; border: 1px solid var(--white); margin-top: 18px; }
+.cmd code { flex: 1; min-width: 0; padding: 16px; font: 400 14px/1.5 var(--mono); overflow-x: auto; white-space: nowrap; }
+/* Still scrolls sideways (swipe, trackpad, selecting), just without the browser's scrollbar. */
+.cmd code { scrollbar-width: none; }
+.cmd code::-webkit-scrollbar { display: none; }
+.cmd button { flex: none; border: 0; border-left: 1px solid var(--white); background: var(--white); color: var(--black); padding: 0 20px; font: 500 15px var(--text); cursor: pointer; }
+.cmd button:hover { background: var(--black); color: var(--white); }
+.cmd .prompt { color: var(--gray-1); user-select: none; }
+/* The hero's copy of the command, small, under the buttons. */
+.hero-cmd { margin-top: 28px; max-width: 40em; }
+.hero-cmd p { font-size: 15px; color: var(--gray-1); }
+.hero-cmd .cmd { margin-top: 10px; }
+/* One line, like a terminal; scroll it sideways, the fade says there's more. */
+.hero-cmd .cmd code {
+  font-size: 13px; padding: 13px 14px;
+  -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, #000 88%, transparent);
+}
+/* The install section leads with it, big. */
+.one-cmd { margin-top: clamp(32px, 6vh, 64px); }
+.one-cmd p { margin-top: 18px; color: var(--gray-1); max-width: 40em; font-size: 18px; }
+.one-cmd p b { color: var(--white); }
+.cmd.big { border-width: 2px; }
+.cmd.big code { font-size: clamp(14px, 1.3vw, 21px); padding: clamp(18px, 2.4vw, 30px); }
+.cmd.big button { font-size: 17px; padding: 0 clamp(20px, 2.4vw, 36px); border-left-width: 2px; }
+.typed {
+  border: 1px solid var(--gray-2);
+  font: 400 13px/1.6 var(--mono); padding: 16px; min-height: 230px; color: var(--white);
+  white-space: pre-wrap; word-break: break-word; background: var(--black);
+}
+.typed .p { color: var(--live); }
+.qr-box { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.qr { position: relative; background: var(--white); padding: 12px; width: 200px; height: 200px; }
+.qr canvas { width: 100%; height: 100%; image-rendering: pixelated; }
+.qr .scan { position: absolute; left: 0; right: 0; height: 2px; background: #000; top: 12px; animation: scan 2s ease-in-out infinite alternate; }
+@keyframes scan { to { top: calc(100% - 14px); } }
+.qr-box dl { font-size: 15px; }
+.qr-box dt { color: var(--gray-1); font: 400 14px var(--text); }
+.qr-box dd { font: 600 15px var(--mono); margin-bottom: 10px; }
+.tabs { display: flex; flex-wrap: wrap; border: 1px solid var(--white); width: fit-content; max-width: 100%; }
+.tabs button {
+  border: 0; background: transparent; color: var(--white);
+  padding: 12px 16px; font: 500 15px var(--text); cursor: pointer;
+}
+.tabs button + button { border-left: 1px solid var(--white); }
+.tabs button[aria-selected="true"] { background: var(--white); color: var(--black); }
+.vendor { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.vendor h4 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.vendor ol { padding-left: 1.3em; color: var(--gray-1); font-size: 16px; }
+.vendor ol li + li { margin-top: 4px; }
+.vendor.swap { animation: swap .25s ease-out; }
+.note { border-left: 2px solid var(--white); padding: 4px 0 4px 16px; margin-top: 22px; font-size: 16px; color: var(--gray-1); max-width: 40em; }
+
+/* Security: the one inverted section --------------------------------------- */
+.secure { background: var(--white); color: var(--black); padding: clamp(72px, 12vh, 140px) 0; position: relative; }
+.secure .h2 { max-width: 9em; }
+.secure-grid { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: clamp(40px, 7vh, 80px); border-top: 1px solid var(--black); }
+.secure-grid > div { padding: 24px 24px 0 0; }
+.secure-grid > div + div { border-left: 1px solid var(--black); padding-left: 24px; }
+.secure-grid h3 { font-size: 22px; font-weight: 600; letter-spacing: -.025em; margin-bottom: 8px; }
+.secure-grid p { opacity: .72; }
+
+/* Desktops ------------------------------------------------------------------ */
+.desktops { padding: clamp(72px, 12vh, 140px) 0; }
+.desk-table { width: 100%; border-collapse: collapse; margin-top: clamp(32px, 6vh, 64px); }
+.desk-table th, .desk-table td { text-align: left; padding: 20px 24px 20px 0; border-top: 1px solid var(--gray-2); vertical-align: top; }
+.desk-table th { font-size: clamp(26px, 3vw, 46px); font-weight: 600; line-height: 1.05; letter-spacing: -.04em; width: 34%; }
+.desk-table td { font-size: 17px; color: var(--gray-1); }
+.desk-table tr:last-child th, .desk-table tr:last-child td { border-bottom: 1px solid var(--gray-2); }
+
+/* Open source: repo, stars, maker, donate ------------------------------------ */
+.oss { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
+.oss-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px clamp(32px, 5vw, 96px); align-items: end; }
+.oss .lede { margin-top: 24px; }
+.btn svg { width: 15px; height: 15px; margin-right: 9px; flex: none; }
+.btn .count { border-left: 1px solid currentColor; padding-left: 12px; margin-left: 12px; font-variant-numeric: tabular-nums; }
+.maker { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; text-decoration: none; border-top: 1px solid var(--white); padding-top: 24px; }
+.maker img { width: clamp(112px, 11vw, 160px); height: auto; aspect-ratio: 1; display: block; filter: grayscale(1); background: var(--gray-3); transition: filter .3s; }
+.maker:hover img { filter: none; }
+.maker a { color: inherit; }
+.maker-name { display: block; font-size: clamp(28px, 3vw, 44px); font-weight: 600; letter-spacing: -.04em; line-height: 1.02; }
+.maker-role { display: block; color: var(--gray-1); margin-top: 6px; }
+.maker-name { text-decoration: none; }
+.maker-name:hover { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; }
+/* Icon links: portfolio, GitHub, LinkedIn. Bare icons, dimmed until hovered. */
+.socials { display: flex; gap: 6px; margin: 12px 0 0 -8px; }
+.socials a { display: grid; place-items: center; width: 36px; height: 36px; color: var(--gray-1); transition: color .15s; }
+.socials a:hover { color: var(--white); }
+.socials svg { width: 20px; height: 20px; }
+.gh-link { display: inline-flex; align-items: center; gap: 8px; }
+.gh-link > svg { width: 20px; height: 20px; }
+.gh-stars { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.gh-stars svg { width: 12px; height: 12px; }
+
+/* Footer --------------------------------------------------------------------- */
+footer { border-top: 1px solid var(--gray-2); background: var(--black); }
+.foot-word { padding: 4vw var(--gutter) 0; white-space: nowrap; user-select: none; font-size: 22vw; }
+.foot-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 28px var(--gutter) 36px; border-top: 1px solid var(--gray-2); margin-top: 3vw; font: 400 15px var(--text); color: var(--gray-1); }
+.foot-row ul { display: flex; flex-wrap: wrap; gap: 24px; list-style: none; }
+.foot-row a { text-decoration: none; color: var(--white); }
+.foot-row a:hover { text-decoration: underline; }
+
+/* Small screens --------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .hero-main { grid-template-columns: minmax(0, 1fr); }   /* minmax: the one-line command mustn't widen the column */
+  .facts { grid-template-columns: 1fr 1fr; }
+  .facts > div, .facts > div:first-child { padding: 16px var(--gutter); }
+  .facts > div:nth-child(odd) { border-left: 0; }
+  .facts > div:nth-child(n+3) { border-top: 1px solid var(--gray-2); }
+  /* Small screens: the section pins while you scroll, and the scroll slides
+     the stages sideways (the packet and the count follow), then lets go. */
+  .pipe { height: 340vh; padding: 0; }
+  .pipe-pin {
+    position: sticky; top: 0; height: 100vh; height: 100dvh;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .pipe .ms { font-size: clamp(96px, 30vw, 200px); }
+  .pipe .lede { margin-top: 12px; font-size: 17px; }
+  .rail { overflow: hidden; margin: 20px calc(-1 * var(--gutter)) 0; }   /* full bleed: cards slide off the screen edge */
+  #pipeArt { height: 120px; width: calc(100% - 2 * var(--gutter)); margin: 0 var(--gutter); }   /* only the card strip bleeds */
+  .stages { display: flex; margin: 0; padding: 0 var(--gutter); will-change: transform; border-top: 1px solid var(--gray-2); border-bottom: 1px solid var(--gray-2); }
+  .stage-col { flex: 0 0 72%; }
+  .stage-col:first-child { border-left: 0; }
+  .way { grid-template-columns: 1fr; }
+  .install-steps > li { grid-template-columns: 1fr; }
+  /* One line that you swipe; the fade at the right edge says there's more. */
+  .cmd code, .hero-cmd .cmd code {
+    white-space: nowrap; overflow-wrap: normal; font-size: 13px; padding: 14px 12px;
+    -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+    mask-image: linear-gradient(90deg, #000 85%, transparent);
+  }
+  .cmd.big code { font-size: 14px; padding: 16px 12px; }
+  .cmd button, .cmd.big button { padding: 0 16px; font-size: 15px; }
+  .vendor { grid-template-columns: 1fr; }
+  .secure-grid { grid-template-columns: 1fr; }
+  .oss-grid { grid-template-columns: 1fr; }
+  .secure-grid > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--black); margin-top: 24px; }
+  .desk-table th, .desk-table td { display: block; width: 100%; padding-right: 0; }
+  .desk-table td { border-top: 0; padding-top: 0; }
+  .nav ul li.opt { display: none; }
+  .demo-head { grid-template-columns: 1fr; }
+  .dev-hint { display: none; }
+}
+/* Phones: tighter rhythm, no screens of empty space. */
+@media (max-width: 600px) {
+  .ways, .install, .secure, .desktops, .oss { padding: 56px 0; }
+  .hero-main { padding-block: 20px 32px; gap: 24px; }
+  .hero-sub { margin-top: 16px; }
+  .ctas { margin-top: 20px; }
+  .hero-cmd { margin-top: 20px; }
+  .facts > div, .facts > div:first-child { padding: 14px var(--gutter) 16px; }
+  .facts b { font-size: 15px; margin-bottom: 4px; }
+  .facts span { font-size: 14px; }
+  .field { height: 110px; }
+  /* Statement: each line breaks in two, so the type is half again as big
+     and fills the pinned screen instead of floating in it. */
+  .statement { height: 150vh; }
+  .st-line span { display: block; }
+  .st-line + .st-line { margin-top: .06em; }
+  .st-note { margin-top: 20px; font-size: 17px; }
+  /* Demo: the stage is only as tall as the rig, and the whole block is
+     centred, so caption, devices and label sit together. */
+  .demo { height: 330vh; }
+  .demo-pin { grid-template-rows: auto auto auto; align-content: center; gap: 14px; }
+  .stage-box { aspect-ratio: 780 / 980; max-height: 64vh; max-height: 64dvh; }
+  .caption { min-height: 2.1em; font-size: 28px; }
+  .pipe { height: 240vh; }
+  .h2 { font-size: clamp(38px, 11.5vw, 56px); }
+  .ways-list, .install-steps, .secure-grid, .desk-table { margin-top: 28px; }
+  .way { padding: 20px 0; gap: 8px; }
+  .one-cmd { margin-top: 24px; }
+  .one-cmd p { font-size: 16px; margin-top: 14px; }
+  /* Install: the step number sits on the heading's line, not its own row. */
+  .install-steps > li { padding: 24px 0; gap: 14px; position: relative; }
+  .install-steps > li::before { position: absolute; top: 28px; right: 0; font-size: 26px; }
+  .install-steps h3 { padding-right: 48px; font-size: 24px; }
+  .typed { min-height: 150px; font-size: 12px; }
+  .qr { width: 160px; height: 160px; }
+  .secure-grid > div { padding-top: 18px; }
+  .secure-grid > div + div { margin-top: 18px; }
+  .desk-table th { padding: 16px 0 6px; }
+  .desk-table td { padding: 0 0 16px; }
+  .oss-grid { gap: 32px; }
+  .maker { gap: 16px; padding-top: 18px; }
+  .foot-row { padding: 22px var(--gutter) 28px; }
+}
+
+/* Scroll reveals ---------------------------------------------------------------
+ * Only with JS and motion allowed (the "rv" class on <html>); without them
+ * everything is simply visible. Rows fade in; the connect ripple opens the
+ * inverted section; a ripple runs through the footer wordmark. */
+.rv [data-rv="head"] { transition: opacity .45s ease-out, letter-spacing .7s var(--ease); }
+.rv [data-rv="head"]:not(.seen) { opacity: 0; letter-spacing: .05em; }
+.rv [data-rv="row"] { position: relative; }
+.rv [data-rv="row"] > * { transition: opacity .45s ease-out .12s; }
+.rv [data-rv="row"]:not(.seen) > * { opacity: .06; }
+.rv .way:not(.seen) h3 { font-variation-settings: "wdth" 110; }
+.way h3 { transition: font-variation-settings .7s var(--ease); }
+.install-steps > li::before { transition: color .25s; }
+.install-steps > li.cur::before { color: var(--white); }
+.rv tr[data-rv] { transition: opacity .45s ease-out calc(var(--i, 0) * 90ms); }
+.rv tr[data-rv]:not(.seen) { opacity: 0; }
+/* The connect ripple opens the inverted section from its centre. */
+.rv .secure { background: transparent; overflow: clip; isolation: isolate; }
+.rv .secure::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--white);
+  clip-path: circle(0 at 50% 50%); transition: clip-path .8s cubic-bezier(.3, 0, .1, 1);
+}
+.rv .secure.seen::before { clip-path: circle(75% at 50% 50%); }
+.rv .secure::after {
+  content: ""; position: absolute; left: 50%; top: 50%; z-index: -2; width: 0; height: 0;
+  border: 2px solid var(--white); border-radius: 50%; transform: translate(-50%, -50%); opacity: 0;
+}
+.rv .secure.seen::after { animation: wave 1.3s ease-out; }
+@keyframes wave { from { width: 0; height: 0; opacity: 1; } to { width: 300vmax; height: 300vmax; opacity: 0; } }
+/* Text waits until the fill has covered the section, so nothing shows half cut. */
+.rv .secure > .wrap { transition: opacity .35s ease-out .7s; }
+.rv .secure:not(.seen) > .wrap { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* No pinning: the stages are a strip you swipe through instead. */
+  .pipe { height: auto; padding: 72px 0; }
+  .pipe-pin { position: static; height: auto; }
+  .stages { overflow-x: auto; scrollbar-width: none; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body class="locked">
+
+<canvas id="splash" aria-hidden="true"></canvas>
+
+<nav class="nav" aria-label="Main">
+  <a class="wordmark" href="#top">Tandem</a>
+  <ul>
+    <li class="opt"><a href="#demo">See it work</a></li>
+    <li class="opt"><a href="#install">Install</a></li>
+    <li><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a></li>
+    <li><button class="theme-btn" type="button" id="themeBtn" aria-label="Switch to light theme">Light</button></li>
+  </ul>
+</nav>
+
+<main>
+<section class="hero" id="top">
+  <div class="hero-main">
+    <div>
+      <h1 class="hero-title">
+        <span class="intro" style="--i:0">The <em class="claim">world's first</em></span>
+        <span class="intro" style="--i:1">native screen</span>
+        <span class="intro" style="--i:2">extender for Linux.</span>
+      </h1>
+      <p class="lede hero-sub intro" style="--i:3"><b>Your Android phone or tablet becomes a real second monitor.</b> Not a web page in a browser tab: your GPU encodes the screen and the phone's hardware decodes it, so a window you drag across keeps up with your hand.</p>
+      <div class="ctas intro" style="--i:4">
+        <a class="btn solid" href="#install">Install on Linux</a>
+        <a class="btn" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK</a>
+      </div>
+      <div class="hero-cmd intro" style="--i:5">
+        <p>Install with one command on Ubuntu, Fedora or Arch:</p>
+        <div class="cmd"><code><span class="prompt" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash</code><button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash">Copy</button></div>
+      </div>
+    </div>
+    <div class="hero-art intro" style="--i:2" role="img" aria-label="ASCII drawing of a laptop whose desktop extends onto a phone, with field lines between them">
+      <canvas id="heroArt"></canvas>
+    </div>
+  </div>
+  <div class="facts">
+    <div><b>~30 ms</b><span>from your GPU to the phone's glass over USB.</span></div>
+    <div><b>Hyprland + GNOME</b><span>on Arch, Ubuntu 22.04+ and Fedora 36+.</span></div>
+    <div><b>Touch</b><span>Tap, drag and scroll on the phone. Your mouse stays put.</span></div>
+    <div><b>Paired + TLS</b><span>Only the phone that scanned your QR code connects.</span></div>
+  </div>
+</section>
+
+<div class="field" aria-hidden="true"><canvas id="field"></canvas></div>
+
+<section class="statement" id="statement" aria-label="Not a mirror, not a browser tab: a real monitor">
+  <div class="statement-pin">
+    <p class="st-line mega"><span>Not a</span> <span>mirror.</span></p>
+    <p class="st-line mega"><span>Not a</span> <span>browser tab.</span></p>
+    <p class="st-line mega"><span>A real</span> <span>monitor.</span></p>
+    <p class="lede st-note">Your compositor gets a new display, so windows, workspaces and scaling work like on any monitor you plug in. The phone shows it full screen, frame by frame, the moment each one arrives.</p>
+  </div>
+</section>
+
+<section class="demo" id="demo" aria-label="How extending works">
+  <div class="demo-pin">
+    <div class="demo-head">
+      <p class="caption" id="caption" aria-live="polite"></p>
+      <div class="steps" id="steps"></div>
+    </div>
+    <div class="stage-box" id="stageBox"></div>
+    <div class="label-row">
+      <span class="dev-label" id="devLabel"></span>
+      <span class="dev-hint">scroll</span>
+    </div>
+  </div>
+</section>
+
+<section class="pipe" id="pipe" aria-labelledby="pipeTitle">
+  <div class="wrap pipe-pin">
+    <h2 class="ms mega" id="pipeTitle"><span id="msNum">0</span><small>ms</small></h2>
+    <p class="lede">From the moment a pixel changes on your computer to the moment it lights up on the phone. Typically 25 to 45 ms over USB, with no buffering anywhere in between.</p>
+    <div class="rail" id="rail">
+      <canvas id="pipeArt" aria-hidden="true"></canvas>
+      <div class="stages" id="stages"></div>
+    </div>
+  </div>
+</section>
+
+<section class="ways" aria-labelledby="waysTitle">
+  <div class="wrap">
+    <h2 class="h2" id="waysTitle" data-rv="head">Three ways to plug in</h2>
+    <div class="ways-list">
+      <div class="way" data-rv="row">
+        <h3>USB cable</h3>
+        <p>The fastest. Turn on USB debugging once and plug in; Tandem sets up the link by itself. Works even when the phone is on mobile data.<span class="speed">lowest latency</span></p>
+      </div>
+      <div class="way" data-rv="row">
+        <h3>USB tethering</h3>
+        <p>Same cable, no developer options. Switch on USB tethering in the phone's hotspot settings and the computer finds it.<span class="speed">no setup on the phone</span></p>
+      </div>
+      <div class="way" data-rv="row">
+        <h3>Wi-Fi</h3>
+        <p>No cable at all. Put both on the same network. If a firewall blocks the phone, the live view tells you and opens port 5000 when you press f.<span class="speed">cable-free</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="install" id="install" aria-labelledby="installTitle">
+  <div class="wrap">
+    <h2 class="h2" id="installTitle" data-rv="head">One command.<br>That's the install.</h2>
+    <div class="one-cmd" data-rv="row">
+      <div class="cmd big"><code><span class="prompt" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash</code><button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash">Copy</button></div>
+      <p>Paste it into a terminal on Ubuntu, Fedora or Arch. It works out what your desktop is missing, asks for your password once, and adds the <b>tandem</b> command. Nothing to compile, nothing to configure. Run it again to update.</p>
+    </div>
+    <ol class="install-steps">
+      <li data-rv="row">
+        <div>
+          <h3>Run the command</h3>
+          <p>The one above, in any terminal. Here's what it prints: about a minute on a fresh system, seconds when you update.</p>
+        </div>
+        <div class="typed" id="typed" aria-label="Example install output"></div>
+      </li>
+      <li data-rv="row">
+        <div>
+          <h3>Start the extender</h3>
+          <p>Open a new terminal, run <b>tandem</b> and pick Start extender. A QR code appears with the computer's addresses and a pairing code.</p>
+          <p>While it waits, the live view checks the cable, the firewall and Wi-Fi, and says why a phone can't connect yet.</p>
+        </div>
+        <div class="qr-box">
+          <div class="qr"><canvas id="qr" width="29" height="29"></canvas><div class="scan"></div></div>
+          <dl>
+            <dt>link</dt><dd>USB cable</dd>
+            <dt>address</dt><dd>127.0.0.1:5000</dd>
+            <dt>pairing code</dt><dd>4821 7730</dd>
+          </dl>
+        </div>
+      </li>
+      <li data-rv="row">
+        <div>
+          <h3>Install the app on the phone</h3>
+          <p>Download the APK from the latest release on the phone and open it. Android 8 or newer. Each phone maker words the permission a little differently:</p>
+          <a class="btn" style="margin-top:18px" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK</a>
+          <p class="note">Had it before as Screen Extender? Tandem installs as a separate app, so uninstall the old one.</p>
+        </div>
+        <div>
+          <div class="tabs" role="tablist" id="tabs"></div>
+          <div class="vendor" id="vendor" role="tabpanel"></div>
+        </div>
+      </li>
+      <li data-rv="row">
+        <div>
+          <h3>Scan and connect</h3>
+          <p>In the app tap Scan QR code, point it at the terminal and tap Connect. Ripples spread from your finger, then the screen dissolves into your extended desktop.</p>
+          <p>The phone's own camera app works too: the code opens Tandem and asks you to confirm the computer.</p>
+          <button class="btn" style="margin-top:20px" type="button" id="replay">Replay the connect ripple</button>
+        </div>
+        <div>
+          <p>Touch the phone's screen to use it. On GNOME there's nothing to set up. On Hyprland, touch needs a one-time permission: the installer offers it, or press t in the live view.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="secure light" aria-labelledby="secTitle" data-rv="ripple">
+  <div class="wrap">
+    <h2 class="h2" id="secTitle" data-rv="head">Only your phone can connect</h2>
+    <div class="secure-grid">
+      <div><h3>The QR code is the key</h3><p>It carries a random pairing key and the fingerprint of the computer's certificate. Typing an address instead? Enter the pairing code too.</p></div>
+      <div><h3>Both sides prove it</h3><p>Nothing reaches a phone until the phone and the computer have each shown they know the key.</p></div>
+      <div><h3>Everything is encrypted</h3><p>Video and touches travel over TLS. Others on the same Wi-Fi can neither watch nor touch.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="desktops" aria-labelledby="deskTitle">
+  <div class="wrap">
+    <h2 class="h2" id="deskTitle" data-rv="head">Runs where you work</h2>
+    <table class="desk-table">
+      <tr data-rv style="--i:0"><th>Hyprland</th><td>Arch, or anything running Hyprland. A headless output becomes the phone's monitor, encoded with NVENC or VA-API.</td></tr>
+      <tr data-rv style="--i:1"><th>GNOME on Wayland</th><td>Ubuntu 22.04+, Fedora 36+, any GNOME 40+. Mutter makes the virtual monitor, PipeWire and GStreamer carry it.</td></tr>
+      <tr data-rv style="--i:2"><th>Android 8+</th><td>Phones, tablets and foldables. The app decodes in hardware and draws each frame the moment it arrives.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="oss" id="oss" aria-labelledby="ossTitle">
+  <div class="wrap oss-grid">
+    <div>
+      <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
+      <p class="lede">Every line of Tandem is on GitHub. Star the repository to follow new releases, open an issue when something breaks, or send a fix. If it saved you buying a monitor, a donation keeps it going.</p>
+      <div class="ctas">
+        <a class="btn solid" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Star<span class="count" data-stars hidden></span></a>
+        <a class="btn" href="https://github.com/saharshbaiju/tandem">View the source</a>
+        <a class="btn" href="https://github.com/sponsors/saharshbaiju" id="donate">Donate</a>
+      </div>
+    </div>
+    <div class="maker" data-rv="row">
+      <a href="https://saharshbaiju.github.io/portfolio/" tabindex="-1" aria-hidden="true"><img src="assets/saharsh.jpg" alt="Saharsh Baiju, developer of Tandem" width="160" height="160" loading="lazy"></a>
+      <div>
+        <a class="maker-name" href="https://saharshbaiju.github.io/portfolio/" rel="author">Saharsh Baiju</a>
+        <span class="maker-role">Designs, builds and maintains Tandem.</span>
+        <span class="socials"><a href="https://saharshbaiju.github.io/portfolio/" rel="me" aria-label="Saharsh Baiju's portfolio" title="Portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2c2.8 2.9 4 6.3 4 10s-1.2 7.1-4 10c-2.8-2.9-4-6.3-4-10s1.2-7.1 4-10z"/></g></svg></a><a href="https://github.com/saharshbaiju" rel="me" aria-label="Saharsh Baiju on GitHub" title="GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a><a href="https://www.linkedin.com/in/saharsh-baiju-88918a384" rel="me" aria-label="Saharsh Baiju on LinkedIn" title="LinkedIn"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg></a></span>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="foot-word mega" id="footWord" aria-hidden="true">Tandem</div>
+  <div class="foot-row">
+    <span>Tandem for Linux and Android. Made by <a href="https://saharshbaiju.github.io/portfolio/">Saharsh Baiju</a>.</span>
+    <ul>
+      <li><a href="https://github.com/saharshbaiju/tandem">Source</a></li>
+      <li><a href="https://github.com/saharshbaiju/tandem/releases/latest">Releases</a></li>
+      <li><a href="https://github.com/saharshbaiju/tandem/blob/main/docs/ARCHITECTURE.md">How it works</a></li>
+      <li><a href="https://github.com/saharshbaiju/tandem/blob/main/docs/SECURITY.md">Security</a></li>
+      <li><a href="https://github.com/saharshbaiju/tandem/blob/main/LICENSE">GPL-3.0</a></li>
+      <li><a href="https://github.com/sponsors/saharshbaiju">Donate</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+"use strict";
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const smallScreen = matchMedia("(max-width: 700px)");
+
+/**
+ * Frame gate for the ASCII canvases. Each cell is a fillText call, which is
+ * heavy on phones, so small screens redraw at about 30 fps; the motion is
+ * time-based, so it only gets coarser, not slower.
+ */
+function frameGate() {
+  let lastDraw = -1e9;
+  return now => {
+    if (!smallScreen.matches) return true;
+    if (now - lastDraw < 30) return false;
+    lastDraw = now;
+    return true;
+  };
+}
+
+/*
+ * Theme: canvases read their colors from the CSS tokens. `bg` is the page
+ * surface, `fg` the ink (ASCII characters), `dim` secondary text.
+ */
+const Theme = (() => {
+  const root = document.documentElement;
+  const btn = document.getElementById("themeBtn");
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const t = { bg: "#000", fg: "#F8FAFD", dim: "#8E918F" };
+  function read() {
+    const cs = getComputedStyle(root);
+    t.bg = cs.getPropertyValue("--black").trim();
+    t.fg = cs.getPropertyValue("--white").trim();
+    t.dim = cs.getPropertyValue("--gray-1").trim();
+    const dark = t.bg.toLowerCase() === "#000000";
+    btn.textContent = dark ? "Light" : "Dark";
+    btn.setAttribute("aria-label", `Switch to ${dark ? "light" : "dark"} theme`);
+    meta.content = t.bg;
+    t.onChange?.();
+  }
+  btn.addEventListener("click", () => {
+    const next = t.bg.toLowerCase() === "#000000" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("tandem-theme", next); } catch {}
+    read();
+  });
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", read);
+  read();
+  return t;
+})();
+
+/** CSS-style cubic-bezier easing, solved with Newton steps. */
+function bezier(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const sx = t => ((ax * t + bx) * t + cx) * t;
+  const sy = t => ((ay * t + by) * t + cy) * t;
+  const dx = t => (3 * ax * t + 2 * bx) * t + cx;
+  return x => {
+    let t = x;
+    for (let i = 0; i < 6; i++) { const d = dx(t); if (Math.abs(d) < 1e-6) break; t -= (sx(t) - x) / d; }
+    return sy(clamp(t, 0, 1));
+  };
+}
+
+/**
+ * Size a display line so that at its widest (wdth 125) it fills its parent's
+ * content box. Measured on a padding-free copy at 100px.
+ */
+function fitWidest(el) {
+  const probe = el.cloneNode(true);
+  Object.assign(probe.style, { position: "absolute", visibility: "hidden", padding: "0", fontSize: "100px", fontVariationSettings: '"wdth" 125, "wght" 900' });
+  document.body.appendChild(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  // Room = the parent's content box, less the element's own padding.
+  const ps = getComputedStyle(el.parentElement), es = getComputedStyle(el);
+  const avail = el.parentElement.clientWidth
+    - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight)
+    - parseFloat(es.paddingLeft) - parseFloat(es.paddingRight);
+  el.style.fontSize = (100 * avail / w) * .99 + "px";
+}
+
+/* ===================================================================
+ * ASCII renderer. A source (a low-res canvas, one pixel per cell, or a
+ * brightness function) is turned into characters from a density ramp.
+ * Everything ASCII on the page goes through this.
+ * =================================================================== */
+const RAMP = " .:-=+*#%@";
+const charFor = b => RAMP[clamp(Math.floor(b * RAMP.length), 0, RAMP.length - 1)];
+
+function createAscii(canvas, cellW, cellH) {
+  const g = canvas.getContext("2d");
+  const src = document.createElement("canvas");
+  const sg = src.getContext("2d", { willReadFrequently: true });
+  const a = { g, sg, cols: 0, rows: 0, W: 0, H: 0, cellW, cellH };
+  a.resize = () => {
+    const r = canvas.getBoundingClientRect();
+    a.W = r.width; a.H = r.height;
+    canvas.width = Math.round(a.W * dpr); canvas.height = Math.round(a.H * dpr);
+    a.cols = Math.max(1, Math.floor(a.W / cellW)); a.rows = Math.max(1, Math.floor(a.H / cellH));
+    src.width = a.cols; src.height = a.rows;
+  };
+  /** Begin a frame: clear, set the font. */
+  a.begin = (fillBg = false) => {
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, a.W, a.H);
+    if (fillBg) { g.fillStyle = Theme.bg; g.fillRect(0, 0, a.W, a.H); }
+    g.font = `600 ${Math.round(cellH * .82)}px "Geist Mono", monospace`;
+    g.textBaseline = "top";
+    g.fillStyle = Theme.fg;
+  };
+  /** Draw one cell's character for brightness b (0..1). */
+  a.cell = (c, r, b) => {
+    const ch = charFor(b);
+    if (ch !== " ") g.fillText(ch, c * cellW, r * cellH + cellH * .06);
+  };
+  /** Render the source canvas: brightness = red channel. */
+  a.drawSource = () => {
+    const px = sg.getImageData(0, 0, a.cols, a.rows).data;
+    for (let r = 0; r < a.rows; r++) for (let c = 0; c < a.cols; c++) a.cell(c, r, px[(r * a.cols + c) * 4] / 255);
+  };
+  a.resize();
+  return a;
+}
+
+/* ===================================================================
+ * Splash: the app's connect ripple, in ASCII. The wordmark sits in a
+ * field of characters; drops spread from the tap point and bend it like
+ * water; then a hole with a bright rim opens and uncovers the page.
+ * Wave maths ported from RippleRevealLayout's AGSL shader.
+ * =================================================================== */
+const Splash = (() => {
+  const canvas = document.getElementById("splash");
+  const easeReveal = bezier(.3, 0, .1, 1);
+  let A, word, phase = "idle", ripple0 = 0, reveal0 = 0, ox = 0, oy = 0, autoTimer = 0, onDone = null, status = "";
+
+  /** One expanding wave train (AGSL wave()), in cell units: front speed ~ 520 px/s. */
+  function wave(distPx, t) {
+    const front = t * 520;
+    if (distPx > front) return 0;
+    const x = front - distPx;
+    return Math.sin(x * .11) * Math.exp(-x * .012) * Math.exp(-t * .9);
+  }
+
+  /** Paint the wordmark into a cell-resolution bitmap (aspect-corrected). */
+  function paintWord() {
+    A.resize();
+    const s = A.sg;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.fillStyle = "#000"; s.fillRect(0, 0, A.cols, A.rows);
+    // design in pixel space, scale into cells
+    s.setTransform(1 / A.cellW, 0, 0, 1 / A.cellH, 0, 0);
+    let size = Math.min(A.W * .26, A.H * .32);
+    const font = px => `900 ${px}px Archivo, "Arial Black", sans-serif`;
+    s.font = font(size);
+    size *= Math.min(1, A.W * (A.W < 600 ? .88 : .78) / s.measureText("Tandem").width);
+    s.font = font(size);
+    s.textAlign = "center"; s.textBaseline = "middle";
+    s.fillStyle = "#fff";
+    s.fillText("Tandem", A.W / 2, A.H / 2 - size * .1);
+    word = s.getImageData(0, 0, A.cols, A.rows).data;
+  }
+
+  function frame(now) {
+    if (phase === "done") return;
+    const t = phase === "waiting" ? 0 : (now - ripple0) / 1000;
+    let radius = 0;
+    if (phase === "rippling" && now >= reveal0) {
+      const far = Math.max(...[[0, 0], [A.W, 0], [0, A.H], [A.W, A.H]].map(([x, y]) => Math.hypot(x - ox, y - oy))) + 80;
+      const k = (now - reveal0) / 800;
+      if (k >= 1) return finish();
+      radius = Math.max(1, easeReveal(k) * far);
+    }
+    A.begin();
+    const g = A.g;
+    // the surface everywhere except the hole
+    g.fillStyle = Theme.bg;
+    if (radius > 0) {
+      g.beginPath(); g.rect(0, 0, A.W, A.H); g.arc(ox, oy, radius, 0, Math.PI * 2); g.fill("evenodd");
+    } else g.fillRect(0, 0, A.W, A.H);
+    g.fillStyle = Theme.fg;
+    const amp = 7;
+    for (let r = 0; r < A.rows; r++) {
+      for (let c = 0; c < A.cols; c++) {
+        const px = (c + .5) * A.cellW, py = (r + .5) * A.cellH;
+        const dx = px - ox, dy = py - oy, dist = Math.hypot(dx, dy);
+        if (radius > 0 && dist < radius) continue;
+        let w = 0;
+        if (t > 0) for (let i = 0; i < 3; i++) { const ti = t - i * .5333; if (ti > 0) w += wave(dist, ti % 1.6); }
+        // refraction: sample the wordmark from a point pushed along the radius
+        const disp = w * amp * 2.2;
+        const sc = clamp(Math.round((px - (dist ? dx / dist : 0) * disp) / A.cellW - .5), 0, A.cols - 1);
+        const sr = clamp(Math.round((py - (dist ? dy / dist : 0) * disp) / A.cellH - .5), 0, A.rows - 1);
+        let b = word[(sr * A.cols + sc) * 4] / 255;
+        b = Math.max(b, Math.max(w, 0) * .55);                       // crests show as characters
+        if (radius > 0) b = Math.max(b, Math.exp(-((dist - radius - 10) ** 2) / 120)); // bright rim
+        A.cell(c, r, b);
+      }
+    }
+    g.font = `400 13px "Geist Mono", monospace`;
+    g.textAlign = "center";
+    g.fillStyle = Theme.dim;
+    if (radius === 0) g.fillText(status, A.W / 2, A.H - 56);
+    g.textAlign = "start";
+    requestAnimationFrame(frame);
+  }
+
+  function startRipple(x, y) {
+    if (phase !== "waiting") return;
+    clearTimeout(autoTimer);
+    phase = "rippling";
+    ox = x; oy = y;
+    status = "connecting";
+    ripple0 = performance.now();
+    reveal0 = ripple0 + 1000;   // let the drops breathe before the water opens
+  }
+
+  function finish() {
+    phase = "done";
+    canvas.style.display = "none";
+    document.body.classList.remove("locked");
+    onDone?.();
+    onDone = null;
+  }
+
+  canvas.addEventListener("pointerdown", e => startRipple(e.clientX, e.clientY));
+  addEventListener("keydown", e => { if (phase === "waiting" && (e.key === "Enter" || e.key === " ")) startRipple(innerWidth / 2, innerHeight / 2); });
+  const repaint = () => { if (phase === "waiting" || phase === "rippling") paintWord(); };
+  addEventListener("resize", repaint);
+  document.fonts.addEventListener("loadingdone", repaint);   // Archivo arrived after the timeout
+
+  return {
+    /** Show the connect screen; it ripples on tap, or by itself shortly after. */
+    run(done) {
+      onDone = done;
+      // Deep links (#install) and ?nosplash go straight to the page.
+      const skip = done && (location.hash.length > 1 || new URLSearchParams(location.search).has("nosplash"));
+      if (reduceMotion || skip) { canvas.style.display = "none"; return finish(); }
+      canvas.style.display = "block";
+      document.body.classList.add("locked");
+      A ??= createAscii(canvas, innerWidth < 600 ? 5 : 10, innerWidth < 600 ? 9 : 17);
+      paintWord();
+      phase = "waiting";
+      status = "tap anywhere to connect";
+      requestAnimationFrame(frame);
+      autoTimer = setTimeout(() => startRipple(innerWidth / 2, innerHeight / 2), 900);
+    },
+  };
+})();
+
+/* ===================================================================
+ * Hero art: the product in ASCII. A laptop and a phone, one desktop
+ * across both: the wallpaper and the terminal continue past the bezel.
+ * Field lines run from the laptop to the phone; the terminal hops
+ * across, gets tapped, and comes back.
+ * Scene units: 1000 × 620 (devices drawn 70 down), laptop screen at (70,71) 620×386.
+ * =================================================================== */
+const HeroArt = (() => {
+  const canvas = document.getElementById("heroArt");
+  const A = innerWidth < 700 ? createAscii(canvas, 5, 9) : createAscii(canvas, 7, 12);
+  const SCREEN_A = { x: 70, y: 71, w: 620, h: 386 };
+  const SCREEN_B = { x: 761, y: 80, w: 172, h: 362 };
+  const HILLS = [
+    [[0, 250], [180, 170], [340, 230], [520, 140], [700, 220], [880, 150], [1060, 210]],
+    [[0, 310], [220, 240], [400, 300], [610, 220], [820, 290], [990, 230], [1200, 300]],
+    [[0, 370], [260, 320], [470, 360], [700, 310], [930, 365], [1150, 320]],
+  ];
+  // Dark tones become sparse characters, so the screens stay readable.
+  const HILL_TONE = ["#141414", "#222222", "#333333"];
+  const TERM_HOME = { x: 300, y: 150, w: 290, h: 200 };          // world coords
+  const termOnPhone = { x: 620 + 8, y: 8, w: 172 - 16, h: 362 - 16 };
+  const cur = { ...TERM_HOME }, target = { ...TERM_HOME };
+  const taps = [];
+  let unit = 1, ox = 0, oy = 0, last = 0, t0 = 0, visible = true, running = false;
+
+  function layout() {
+    A.resize();
+    unit = Math.min(A.W / 1000, A.H / 620);
+    ox = (A.W - 1000 * unit) / 2; oy = (A.H - 620 * unit) / 2;
+  }
+
+  /** Draw a slice of the shared desktop ("world") into a screen rect. */
+  function drawWorld(s, screen, worldX) {
+    s.save();
+    s.beginPath(); s.rect(screen.x, screen.y, screen.w, screen.h); s.clip();
+    s.translate(screen.x - worldX, screen.y);
+    s.fillStyle = "#000"; s.fillRect(worldX, 0, screen.w, screen.h);
+    HILLS.forEach((pts, i) => {
+      s.beginPath(); s.moveTo(pts[0][0], pts[0][1]);
+      pts.forEach(([x, y]) => s.lineTo(x, y));
+      s.lineTo(1500, 420); s.lineTo(0, 420); s.closePath();
+      s.fillStyle = HILL_TONE[i]; s.fill();
+    });
+    s.fillStyle = "#DADADA"; s.beginPath(); s.arc(1020 - 260, 110, 30, 0, Math.PI * 2); s.fill();
+    if (worldX === 0) {
+      s.fillStyle = "#5A5A5A"; s.fillRect(0, 0, 620, 12);                  // top bar
+      s.fillStyle = "#000"; s.fillRect(24, 40, 250, 220);                  // browser
+      s.strokeStyle = "#9A9A9A"; s.lineWidth = 3; s.strokeRect(24, 40, 250, 220);
+      s.fillStyle = "#6A6A6A"; s.fillRect(24, 40, 250, 18);
+      s.fillStyle = "#444"; for (let i = 0; i < 6; i++) s.fillRect(40, 78 + i * 26, 150 + (i * 37) % 60, 7);
+    }
+    // terminal (the window that travels)
+    s.fillStyle = "#000"; s.fillRect(cur.x, cur.y, cur.w, cur.h);
+    s.strokeStyle = "#FFFFFF"; s.lineWidth = 4; s.strokeRect(cur.x, cur.y, cur.w, cur.h);
+    s.fillStyle = "#FFFFFF"; s.fillRect(cur.x, cur.y, cur.w, 18);
+    s.fillStyle = "#7A7A7A";
+    const lines = Math.max(0, Math.floor((cur.h - 30) / 18));
+    for (let i = 0; i < lines; i++) s.fillRect(cur.x + 10, cur.y + 28 + i * 18, Math.max(10, (cur.w - 30) * (.45 + ((i * 7 + Math.floor(last / 400)) % 5) / 10)), 5);
+    s.restore();
+  }
+
+  function draw(now) {
+    const s = A.sg;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.fillStyle = "#000"; s.fillRect(0, 0, A.cols, A.rows);
+    // scene units → cells; the devices sit 70 units down to leave room for the field
+    s.setTransform(unit / A.cellW, 0, 0, unit / A.cellH, ox / A.cellW, oy / A.cellH);
+    s.translate(0, 70);
+
+    // Field lines: from the laptop's lid over the top into the phone, dashes
+    // flowing toward the phone like the stream they stand for.
+    const t = (now - t0) / 1000;
+    const fieldLine = i => {
+      const sx = 330 + i * 75, ex = 790 + i * 28, h = 18 + i * 13;
+      s.beginPath(); s.moveTo(sx, 62);
+      s.bezierCurveTo(sx + 40, -h, ex - 50, -h, ex, 72);
+      s.stroke();
+    };
+    s.lineWidth = 6;
+    s.strokeStyle = "#3A3A3A";                       // the dim track
+    for (let i = 0; i < 5; i++) fieldLine(i);
+    s.strokeStyle = "#FFFFFF";                       // bright pulses riding it
+    s.setLineDash([26, 90]);
+    s.lineDashOffset = -t * 110;
+    for (let i = 0; i < 5; i++) fieldLine(i);
+    s.setLineDash([]);
+
+    // laptop
+    s.fillStyle = "#000"; s.fillRect(60, 60, 640, 412);
+    s.strokeStyle = "#FFFFFF"; s.lineWidth = 7; s.strokeRect(60, 60, 640, 412);
+    drawWorld(s, SCREEN_A, 0);
+    s.fillStyle = "#D0D0D0";
+    s.beginPath(); s.moveTo(20, 474); s.lineTo(740, 474); s.lineTo(718, 494); s.lineTo(42, 494); s.closePath(); s.fill();
+    s.fillStyle = "#555"; s.fillRect(320, 474, 120, 6);
+
+    // phone
+    s.fillStyle = "#000"; s.beginPath(); s.roundRect(750, 70, 194, 382, 26); s.fill();
+    s.strokeStyle = "#FFFFFF"; s.lineWidth = 7; s.stroke();
+    drawWorld(s, SCREEN_B, 620);
+    s.fillStyle = "#000"; s.beginPath(); s.arc(847, 92, 6, 0, Math.PI * 2); s.fill();
+
+    // touch ripples on the phone
+    for (let i = taps.length - 1; i >= 0; i--) {
+      const k = (now - taps[i].t) / 700;
+      if (k >= 1) { taps.splice(i, 1); continue; }
+      s.strokeStyle = `rgba(255,255,255,${1 - k})`; s.lineWidth = 6;
+      s.beginPath(); s.arc(taps[i].x, taps[i].y, 8 + k * 46, 0, Math.PI * 2); s.stroke();
+    }
+
+    A.begin();
+    A.drawSource();
+    // monitor labels, like `hyprctl monitors`
+    const g = A.g;
+    g.font = `400 ${Math.max(10, Math.round(13 * unit / .8))}px "Geist Mono", monospace`;
+    g.fillStyle = Theme.dim;
+    g.fillText("eDP-1  2880×1800", ox + 60 * unit, oy + 582 * unit);
+    g.fillText("HEADLESS-2", ox + 750 * unit, oy + 540 * unit);
+    g.fillText("1080×2400", ox + 750 * unit, oy + 540 * unit + 16);
+  }
+
+  // [ms into the loop, action]
+  const SCRIPT = [
+    [0, () => Object.assign(target, TERM_HOME)],
+    [1400, () => Object.assign(target, termOnPhone)],
+    [2600, () => taps.push({ x: 820, y: 200, t: performance.now() })],
+    [3300, () => taps.push({ x: 880, y: 330, t: performance.now() })],
+    [4000, () => taps.push({ x: 800, y: 380, t: performance.now() })],
+    [5200, () => Object.assign(target, TERM_HOME)],
+  ];
+  const LOOP_MS = 7000;
+  let loop0 = 0, next = 0;
+  const heroGate = frameGate();
+
+  function frame(now) {
+    if (!visible) { running = false; return; }
+    const dt = last ? Math.min(now - last, 250) : 16;
+    last = now;
+    const tt = now - loop0;
+    if (tt >= LOOP_MS) { loop0 = now; next = 0; }
+    while (next < SCRIPT.length && tt >= SCRIPT[next][0]) SCRIPT[next++][1]();
+    const k = 1 - Math.exp(-dt / 160);
+    for (const key in cur) cur[key] += (target[key] - cur[key]) * k;
+    if (heroGate(now)) draw(now);
+    requestAnimationFrame(frame);
+  }
+  const resume = () => { if (!running && visible) { running = true; last = 0; requestAnimationFrame(frame); } };
+  addEventListener("resize", () => { layout(); if (reduceMotion) draw(performance.now()); });
+  return {
+    start() {
+      layout();
+      t0 = loop0 = performance.now();
+      if (reduceMotion) { Object.assign(cur, termOnPhone); draw(t0); return; }
+      new IntersectionObserver(([e]) => { visible = e.isIntersecting; resume(); }).observe(canvas);
+      resume();
+    },
+  };
+})();
+
+/* ===================================================================
+ * Field band: horizontal field lines in ASCII. The pointer drops
+ * ripples into them, the same wave as the connect screen.
+ * =================================================================== */
+(() => {
+  const canvas = document.getElementById("field");
+  const A = createAscii(canvas, 9, 16);
+  const LINES = [
+    { a: .30, f: .9, s: .5, p: 0 },
+    { a: .22, f: 1.4, s: -.35, p: 2 },
+    { a: .36, f: .6, s: .25, p: 4 },
+    { a: .18, f: 2.1, s: .7, p: 1 },
+  ];
+  let mx = -1e4, my = -1e4, hit = -1e4, visible = false;
+  const t0 = performance.now();
+  const gate = frameGate();
+  function draw(now) {
+    if (!gate(now)) { if (visible && !reduceMotion) requestAnimationFrame(draw); return; }
+    const t = reduceMotion ? 0 : (now - t0) / 1000;
+    A.begin(true);
+    for (let r = 0; r < A.rows; r++) {
+      for (let c = 0; c < A.cols; c++) {
+        const u = c / A.cols, v = r / A.rows;
+        const px = (c + .5) * A.cellW, py = (r + .5) * A.cellH;
+        // ripple from the last pointer position
+        const d = Math.hypot(px - mx, py - my), rt = (now - hit) / 1000;
+        let shift = 0;
+        if (rt > 0 && rt < 2.5 && d < rt * 520) { const x = rt * 520 - d; shift = Math.sin(x * .05) * Math.exp(-x * .01) * Math.exp(-rt * 1.4) * .12; }
+        let b = 0;
+        for (const L of LINES) {
+          const y = .5 + L.a * Math.sin(u * Math.PI * 2 * L.f + t * L.s * 2 + L.p) * Math.cos(u * Math.PI * .8 - t * .2);
+          b = Math.max(b, Math.exp(-(((v + shift) - y) ** 2) / .0035));
+        }
+        A.cell(c, r, b);
+      }
+    }
+    if (visible && !reduceMotion) requestAnimationFrame(draw);
+  }
+  // Mouse only: on a phone, a scrolling finger would drop ripples everywhere.
+  canvas.addEventListener("pointermove", e => {
+    if (e.pointerType !== "mouse") return;
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    if (Math.hypot(x - mx, y - my) > 90 || performance.now() - hit > 900) { mx = x; my = y; hit = performance.now(); }
+  });
+  new IntersectionObserver(([e]) => {
+    const was = visible;
+    visible = e.isIntersecting;
+    if (visible && !was) requestAnimationFrame(draw);
+  }).observe(canvas);
+  addEventListener("resize", () => { A.resize(); draw(performance.now()); });
+  draw(performance.now());
+})();
+
+/* ===================================================================
+ * Statement: each line widens from narrow to full width (Archivo's
+ * wdth axis) as you scroll through, and turns white when it lands.
+ * =================================================================== */
+const Statement = (() => {
+  const section = document.getElementById("statement");
+  const lines = [...section.querySelectorAll(".st-line")];
+  // Each line's full size: the size at which, at full width, it fills the column.
+  const full = new Map();
+  const fit = () => lines.forEach(el => { fitWidest(el); full.set(el, parseFloat(el.style.fontSize)); });
+  /**
+   * Scrubbed by scroll, one line after another: each starts small, narrow and
+   * dim, and grows to full size and width as it brightens. Never wider than
+   * the fitted size, so nothing overflows.
+   */
+  function update() {
+    const r = section.getBoundingClientRect();
+    const p = clamp(-r.top / (r.height - innerHeight), 0, 1);
+    lines.forEach((el, i) => {
+      const k = reduceMotion ? 1 : clamp(p * (lines.length + .5) - i, 0, 1);
+      const e = 1 - (1 - k) ** 3;
+      el.style.fontSize = (full.get(el) * (.26 + .74 * e)).toFixed(2) + "px";
+      el.style.fontVariationSettings = `"wdth" ${(62 + 63 * e).toFixed(1)}`;
+      el.style.color = `color-mix(in srgb, var(--white) ${(15 + 85 * e).toFixed(1)}%, var(--gray-2))`;
+      el.classList.toggle("on", k >= 1);
+    });
+  }
+  addEventListener("scroll", update, { passive: true });
+  addEventListener("resize", () => { fit(); update(); });
+  return { fit, update };
+})();
+
+/* ===================================================================
+ * Device rig: a silver laptop and an Android device beside it (or, on
+ * portrait screens, below it). Both screens show one shared "world" (the
+ * virtual desktop); the device views it offset by the laptop's size, so
+ * wallpaper and windows continue across the bezel exactly as on real
+ * monitors arranged that way.
+ * =================================================================== */
+const LAPTOP_W = 620, LAPTOP_H = 386;
+const DEVICES = {
+  tablet: { w: 400, h: 250, b: 14, r: 18 },
+  phone:  { w: 178, h: 370, b: 7, r: 26 },
+  fold:   { w: 340, h: 300, b: 8, r: 20 },
+  land:   { w: 370, h: 178, b: 7, r: 26 },
+};
+const LOG = [
+  ["listening on :5000 (TLS)", ""],
+  ["client 192.168.42.129 paired", "g"],
+  ["client connected (total 1)", "g"],
+  ["started on keyframe", ""],
+  ["touch input: ready", "y"],
+  ["encoder: vaapi h264, 60 fps", ""],
+  ["backend: Hyprland", ""],
+  ["started on keyframe", ""],
+];
+/** A seeded random generator, so the generated wallpaper is the same on every visit. */
+function seeded(seed) {
+  return () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/** A mountain ridge by midpoint displacement: an SVG path closed at `floor`. */
+function ridge(rand, base, amp, floor, rough = .55) {
+  const n = 256, ys = new Array(n + 1).fill(base);
+  ys[0] = base - rand() * amp; ys[n] = base - rand() * amp;
+  for (let step = n, a = amp; step > 1; step /= 2, a *= rough)
+    for (let i = step / 2; i < n; i += step) ys[i] = (ys[i - step / 2] + ys[i + step / 2]) / 2 - (rand() - .45) * a;
+  return `M0 ${floor} ` + ys.map((y, i) => `L${(i * 1500 / n).toFixed(1)} ${y.toFixed(1)}`).join(" ") + ` L1500 ${floor}Z`;
+}
+/**
+ * Wallpaper: dusk over mountains and a still lake, generated (no image
+ * files). The horizon sits at y=200, inside every screen's slice of the
+ * desktop, so the peaks and the lake continue from the laptop onto the
+ * device beside it or below it.
+ */
+const WALLPAPER = (() => {
+  const rand = seeded(26);
+  const H = 200, SUN = 860;
+  const far = ridge(rand, 140, 100, H), mid = ridge(rand, 166, 70, H), near = ridge(rand, 186, 42, H);
+  const stars = Array.from({ length: 70 }, () => `<circle cx="${(rand() * 1500).toFixed(0)}" cy="${(rand() * 110).toFixed(0)}" r="${(rand() * .9 + .3).toFixed(2)}" opacity="${(rand() * .6 + .2).toFixed(2)}"/>`).join("");
+  const glints = Array.from({ length: 14 }, (_, k) => `<rect x="${(SUN - 30 + rand() * 60 - k * 1.5).toFixed(0)}" y="${H + 6 + k * 9}" width="${(60 - k * 3.4).toFixed(0)}" height="1.6" opacity="${(.7 - k * .045).toFixed(2)}"/>`).join("");
+  return `<svg class="wall" viewBox="0 0 1500 800" preserveAspectRatio="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="wSky" x1="0" y1="0" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#05070F"/><stop offset=".45" stop-color="#1A2140"/><stop offset=".75" stop-color="#5A4468"/><stop offset=".92" stop-color="#C77A6E"/><stop offset="1" stop-color="#F2B07A"/>
+    </linearGradient>
+    <radialGradient id="wSun" cx="${SUN}" cy="${H}" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD9A0" stop-opacity=".75"/><stop offset=".35" stop-color="#F29A6B" stop-opacity=".25"/><stop offset="1" stop-color="#F29A6B" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wLake" x1="0" y1="${H}" x2="0" y2="800" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6B4E6B"/><stop offset=".25" stop-color="#262443"/><stop offset="1" stop-color="#07070D"/>
+    </linearGradient>
+    <linearGradient id="wHaze" x1="0" y1="40" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C6488"/><stop offset="1" stop-color="#3B3256"/>
+    </linearGradient>
+    <filter id="wGrain"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .07 0"/></filter>
+  </defs>
+  <rect width="1500" height="${H}" fill="url(#wSky)"/>
+  <g fill="#FFFFFF">${stars}</g>
+  <rect width="1500" height="${H}" fill="url(#wSun)"/>
+  <circle cx="${SUN}" cy="${H - 6}" r="15" fill="#FFE9C9"/>
+  <path d="${far}" fill="url(#wHaze)"/>
+  <path d="${mid}" fill="#2A2442"/>
+  <path d="${near}" fill="#141226"/>
+  <rect y="${H}" width="1500" height="${800 - H}" fill="url(#wLake)"/>
+  <g transform="translate(0 ${2 * H}) scale(1 -1)" opacity=".35"><path d="${far}" fill="url(#wHaze)"/><path d="${mid}" fill="#2A2442"/><path d="${near}" fill="#141226"/></g>
+  <g fill="#FFE2B8">${glints}</g>
+  <rect width="1500" height="800" filter="url(#wGrain)"/>
+</svg>`;
+})();
+const CURSOR = `<svg class="cursor" viewBox="0 0 18 24" aria-hidden="true"><path d="M1.5 1.5v18l4.6-4.4 3.3 7.2 3.2-1.5-3.2-7h6.4z" fill="#F8FAFD" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+const WIFI = `<svg viewBox="0 0 13 11"><path d="M6.5 10.5 0 3.6a9.4 9.4 0 0 1 13 0z" fill="currentColor"/></svg>`;
+const BATTERY = `<svg viewBox="0 0 17 11" style="width:15px"><rect x=".5" y="2" width="14" height="7" rx="1.5" fill="none" stroke="currentColor"/><rect x="2" y="3.5" width="10" height="4" rx=".5" fill="currentColor"/><rect x="15" y="4.2" width="1.5" height="2.6" fill="currentColor"/></svg>`;
+const VOLUME = `<svg viewBox="0 0 12 11"><path d="M1 4h2.5L7 1v9L3.5 7H1zM8.5 3.2a3.4 3.4 0 0 1 0 4.6M10 1.8a5.4 5.4 0 0 1 0 7.4" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>`;
+const FOLDER = `<svg viewBox="0 0 16 16"><path d="M1.5 3h4.3l1.5 1.6h7.2v8.9H1.5z" fill="#7D8590"/></svg>`;
+const FILE = `<svg viewBox="0 0 16 16"><path d="M3 1.5h6.5L13 5v9.5H3z" fill="none" stroke="#7D8590" stroke-width="1.2"/></svg>`;
+const ICON = (d, w = 1.4) => `<svg viewBox="0 0 10 10"><path d="${d}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+/** The GitHub repository page in Firefox, as it looks in dark mode. */
+const FIREFOX = `
+      <div class="win firefox active" style="left:8px;top:34px;width:342px;height:344px">
+        <div class="ff-tabs"><div class="ff-tab">${ICON("M5 1a4 4 0 1 0 0 8 4 4 0 0 0 0-8z", 1.6)}<span>saharshbaiju/tandem</span><span class="x">×</span></div></div>
+        <div class="ff-nav">${ICON("M6.5 1.5 3 5l3.5 3.5")}${ICON("M3.5 1.5 7 5 3.5 8.5")}${ICON("M8 5a3 3 0 1 1-1-2.2M7.5 1v2h-2")}
+          <div class="ff-url">${ICON("M2.5 4.5h5v4h-5zM3.5 4.5V3a1.5 1.5 0 0 1 3 0v1.5", 1.1)}<span>github.com/</span><b>saharshbaiju/tandem</b></div></div>
+        <div class="gh">
+          <div class="gh-head"><span>saharshbaiju</span> / <b>tandem</b> <span class="gh-badge">Public</span></div>
+          <div class="gh-btns"><i>Watch <b>1</b></i><i>Fork <b>0</b></i><i>☆ Star <b>1</b></i></div>
+          <div class="gh-tabs"><span class="on">Code</span><span>Issues</span><span>Pull requests</span><span>Actions</span></div>
+          <div class="gh-files">
+            <div><span>${FOLDER}</span><span>saharshbaiju <em>v0.5: TLS and pairing</em></span><em>2 hours ago</em></div>
+            <div>${FOLDER}<span>android</span><em>Touch input: the phone becomes a touch monitor</em><em>3 days</em></div>
+            <div>${FOLDER}<span>docs</span><em>Document the rename</em><em>2 hours</em></div>
+            <div>${FOLDER}<span>linux</span><em>Run under the system Python</em><em>4 days</em></div>
+            <div>${FOLDER}<span>website</span><em>Landing page</em><em>now</em></div>
+            <div>${FILE}<span>README.md</span><em>Explain the one-time uninstall</em><em>5 days</em></div>
+            <div>${FILE}<span>install.sh</span><em>One-line installer</em><em>5 days</em></div>
+          </div>
+          <div class="gh-readme"><b>Tandem</b><p>Turn an Android phone into a real, low-latency second monitor for Linux, native and GPU-accelerated end to end.</p></div>
+        </div>
+      </div>`;
+
+/** `below`: put the device under the laptop (a monitor placed below), for portrait screens. */
+function createRig(stage, below = false) {
+  stage.innerHTML = `
+    <div class="rig">
+      <div class="floor"></div>
+      <div class="base"></div>
+      <div class="lid"><div class="screen"></div></div>
+      <div class="device"><span class="key k1"></span><span class="key k2"></span><div class="screen"><span class="cam"></span><span class="crease"></span></div></div>
+    </div>`;
+  const [scrA, scrB] = stage.querySelectorAll(".screen");
+  const device = stage.querySelector(".device");
+  const world = laptop => `
+    <div class="reveal"><div class="world">
+      ${WALLPAPER}
+      ${laptop ? `<div class="waybar">
+        <span class="ws"><i class="on">1</i><i>2</i><i>3</i><i>4</i></span>
+        <span>Mon 26 Oct  10:42</span>
+        <span class="mods"><span>${VOLUME}64%</span><span>${WIFI}home</span><span>${BATTERY}87%</span></span>
+      </div>` : ""}
+      ${FIREFOX}
+      <div class="win term"><div class="tb">tandem  live view  USB cable</div><div class="log"></div></div>
+      ${CURSOR}
+    </div></div>`;
+  scrA.insertAdjacentHTML("beforeend", world(true));
+  scrB.insertAdjacentHTML("beforeend", world(false));
+  const views = [scrA, scrB].map(s => ({
+    reveal: s.querySelector(".reveal"),
+    world: s.querySelector(".world"),
+    term: s.querySelector(".term"),
+    log: s.querySelector(".log"),
+    cursor: s.querySelector(".cursor"),
+  }));
+  // Where the device's top-left sits in the shared desktop.
+  const deviceOrigin = w => below ? { x: (LAPTOP_W - w) / 2, y: LAPTOP_H } : { x: LAPTOP_W, y: 0 };
+
+  const TERM_HOME = { wx: 356, wy: 34, ww: 256, wh: 344 };   // tiled right of Firefox
+  const cur = { dw: 178, dh: 370, db: 7, dr: 26, dop: 0, dx: 60, ...TERM_HOME, cx: 420, cy: 300 };
+  const target = { ...cur };
+  const easeReveal = bezier(.3, 0, .1, 1);
+  let kind = null, logOffset = 0, lastRender = 0, revealStart = -1e9;
+
+  function renderLog() {
+    const lines = [];
+    for (let i = 0; i < 12; i++) {
+      const [text, cls] = LOG[(i + logOffset) % LOG.length];
+      lines.push(cls ? `<span class="${cls}">${text}</span>` : text);
+    }
+    views.forEach(v => { v.log.innerHTML = lines.join("\n"); });
+  }
+
+  function tap(x, y) {
+    const t = document.createElement("div");
+    t.className = "tap";
+    t.style.left = x + "px"; t.style.top = y + "px";
+    scrB.appendChild(t);
+    setTimeout(() => t.remove(), 800);
+  }
+
+  const rig = {
+    target, below, deviceOrigin,
+    /** Show a device (or none); a new device replays the app's connect reveal. */
+    setDevice(next) {
+      const d = DEVICES[next || kind || "phone"];
+      Object.assign(target, { dw: d.w, dh: d.h, db: d.b, dr: d.r, dop: next ? 1 : 0, dx: next ? 0 : 60 });
+      if (next) device.dataset.kind = next;
+      if (next && next !== kind) { revealStart = performance.now(); tap(d.w / 2, d.h / 2); }
+      if (next) kind = next;
+    },
+    /** Put the terminal on the laptop, or fill the device with it. */
+    termOn(where) {
+      if (where === "laptop") return Object.assign(target, TERM_HOME);
+      const d = DEVICES[kind], pad = 8, o = deviceOrigin(d.w);
+      Object.assign(target, { wx: o.x + pad, wy: o.y + pad, ww: d.w - pad * 2, wh: d.h - pad * 2 });
+    },
+    tapRandom() {
+      const d = DEVICES[kind];
+      tap(28 + Math.random() * (d.w - 56), 28 + Math.random() * (d.h - 56));
+    },
+    tickLog() { logOffset++; renderLog(); },
+    snap() { Object.assign(cur, target); },
+    render(now) {
+      // Time-based easing (~110 ms time constant): same speed at any frame rate.
+      const dt = lastRender ? Math.min(now - lastRender, 250) : 16;
+      lastRender = now;
+      const k = 1 - Math.exp(-dt / 110);
+      for (const key in cur) cur[key] += (target[key] - cur[key]) * k;
+      const outerW = cur.dw + cur.db * 2 + 6;   // 3px metal frame each side
+      Object.assign(device.style, below ? {
+        left: 382 - outerW / 2 + "px",       // centred under the lid
+        top: "548px",
+      } : {
+        left: "752px",
+        top: 72 - cur.db - 3 + "px",         // screen tops level with the lid's
+
+      }, {
+        width: outerW + "px",
+        height: cur.dh + cur.db * 2 + 6 + "px",
+        padding: cur.db + "px",
+        borderRadius: cur.dr + "px",
+        opacity: cur.dop,
+        transform: below ? `translateY(${cur.dx}px)` : `translateX(${cur.dx}px)`,
+      });
+      const o = deviceOrigin(cur.dw);
+      views[1].world.style.transform = `translate(${-o.x}px, ${-o.y}px)`;
+      scrB.style.borderRadius = Math.max(0, cur.dr - cur.db) + "px";
+      // The app's connect reveal: the desktop opens from the centre after the tap.
+      const rp = clamp((now - revealStart - 200) / 700, 0, 1);
+      views[1].reveal.style.clipPath = rp >= 1 ? "none" : `circle(${(easeReveal(rp) * 75).toFixed(2)}% at 50% 50%)`;
+      for (const v of views) {
+        Object.assign(v.term.style, { left: cur.wx + "px", top: cur.wy + "px", width: cur.ww + "px", height: cur.wh + "px" });
+        v.cursor.style.transform = `translate(${cur.cx}px, ${cur.cy}px)`;
+      }
+    },
+  };
+  renderLog();
+  return rig;
+}
+
+/** Scale a stage of w × h units to sit centred inside its box. */
+function fitStage(box, stage, w, h) {
+  const r = box.getBoundingClientRect();
+  const k = Math.min(r.width / w, r.height / h);
+  stage.style.width = w + "px"; stage.style.height = h + "px";
+  stage.style.transform = `translate(${(r.width - w * k) / 2}px, ${(r.height - h * k) / 2}px) scale(${k})`;
+}
+
+/* Demo: scroll walks through tablet, phone, foldable and phone on its side. */
+const Demo = (() => {
+  const STEPS = [
+    { cap: "This is your Linux desktop. One screen.", dev: null, term: "laptop", label: "eDP-1  2880×1800" },
+    { cap: "Connect a tablet and the desktop grows onto it.", dev: "tablet", term: "laptop", label: "HEADLESS-2  tablet  2560×1600" },
+    { cap: "Drag a window across. A real monitor, not a mirror.", dev: "tablet", term: "device", label: "HEADLESS-2  tablet  2560×1600" },
+    { cap: "Or use a phone. Any Android 8 or newer.", dev: "phone", term: "device", label: "HEADLESS-2  phone  1080×2400" },
+    { cap: "A foldable, opened flat.", dev: "fold", term: "device", label: "HEADLESS-2  foldable  2208×1840" },
+    { cap: "Then touch it. Tap, drag and scroll while your mouse stays put.", dev: "land", term: "device", touch: true, label: "HEADLESS-2  phone, landscape  2400×1080" },
+  ];
+  const section = document.getElementById("demo");
+  const box = document.getElementById("stageBox");
+  const caption = document.getElementById("caption");
+  const label = document.getElementById("devLabel");
+  const stepsEl = document.getElementById("steps");
+  stepsEl.innerHTML = STEPS.map(() => "<i></i>").join("");
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  box.appendChild(stage);
+  let rig, step = -1, lastTap = 0, lastLog = 0, visible = false, running = false;
+
+  /** Side by side on wide boxes; device below the laptop on portrait ones. */
+  function layout() {
+    const r = box.getBoundingClientRect();
+    const below = r.width / Math.max(r.height, 1) < 1.15;
+    if (!rig || rig.below !== below) {
+      rig = createRig(stage, below);
+      const at = step;
+      step = -1;
+      setStep(Math.max(at, 0));
+      rig.snap();
+      rig.render(performance.now());
+    }
+    stage.classList.toggle("below", below);
+    if (below) fitStage(box, stage, 780, 980);
+    else fitStage(box, stage, 1220, 560);
+  }
+
+  function setStep(i) {
+    if (i === step) return;
+    step = i;
+    const s = STEPS[i];
+    caption.textContent = s.cap;
+    caption.classList.remove("swap"); caption.offsetWidth; caption.classList.add("swap");
+    label.textContent = s.label;
+    [...stepsEl.children].forEach((el, k) => el.classList.toggle("on", k <= i));
+    rig.setDevice(s.dev);
+    rig.termOn(s.term);
+    const d = DEVICES[s.dev || "tablet"];
+    if (s.term === "laptop") Object.assign(rig.target, i === 0 ? { cx: 420, cy: 300 } : { cx: 440, cy: 160 });
+    else {
+      const o = rig.deviceOrigin(d.w);
+      Object.assign(rig.target, i === 2 ? { cx: o.x + d.w / 2, cy: o.y + 18 } : { cx: 470, cy: 310 });
+    }
+    if (reduceMotion) rig.snap();
+  }
+
+  function frame(now) {
+    if (!visible) { running = false; return; }
+    const rect = section.getBoundingClientRect();
+    const p = clamp(-rect.top / (rect.height - innerHeight), 0, .9999);
+    setStep(Math.floor(p * STEPS.length));
+    if (STEPS[step].touch && now - lastTap > 900) { lastTap = now; rig.tapRandom(); }
+    if (now - lastLog > (STEPS[step].touch ? 450 : 1400)) { lastLog = now; rig.tickLog(); }
+    rig.render(now);
+    requestAnimationFrame(frame);
+  }
+  addEventListener("resize", layout);
+  return {
+    start() {
+      layout();
+      // Only animate while the demo is on screen.
+      new IntersectionObserver(([e]) => {
+        visible = e.isIntersecting;
+        if (visible && !running) { running = true; requestAnimationFrame(frame); }
+      }).observe(section);
+    },
+  };
+})();
+
+/* ===================================================================
+ * Pipeline: the latency budget from docs/ARCHITECTURE.md §5. An ASCII
+ * laptop sends field lines across to an ASCII phone; a packet rides them
+ * through the six stages (lined up under their stretch of the line) while
+ * the big number counts the milliseconds.
+ * =================================================================== */
+(() => {
+  const STAGES = [
+    ["Capture", "Zero-copy from the virtual monitor", "1–2 ms", 1.5],
+    ["Encode", "H.264 on the GPU, no B-frames", "3–8 ms", 5.5],
+    ["Send", "Split into frames, out over TLS", "< 1 ms", .5],
+    ["Travel", "Over the USB cable", "2–5 ms", 3.5],
+    ["Decode", "The phone's hardware decoder", "5–10 ms", 7.5],
+    ["Show", "Drawn at the next screen refresh", "8–16 ms", 12],
+  ];
+  const wrap = document.getElementById("stages");
+  wrap.innerHTML = STAGES.map(([h, p, t], i) =>
+    `<div class="stage-col"><span class="n">0${i + 1}</span><h3>${h}</h3><p>${p}</p><div class="t">${t}</div></div>`).join("");
+  const cols = [...wrap.children];
+  const num = document.getElementById("msNum");
+  const rail = document.getElementById("rail");
+  const canvas = document.getElementById("pipeArt");
+  const A = innerWidth < 700 ? createAscii(canvas, 5, 9) : createAscii(canvas, 6, 10);
+  const total = STAGES.reduce((a, s) => a + s[3], 0);
+  const STEP_MS = 650;
+  const section = document.getElementById("pipe");
+  const pinned = matchMedia("(max-width: 900px)");
+  let running = false, t0 = -1, x0 = 0, x1 = 0, edges = [];
+  const pipeGate = frameGate();
+
+  /** Slide the strip so the stage under the packet is in view, continuously. */
+  function slide(pos) {
+    const f = clamp(pos - .5, 0, cols.length - 1), i = Math.min(Math.floor(f), cols.length - 2);
+    const x = cols[i].offsetLeft + (cols[i + 1].offsetLeft - cols[i].offsetLeft) * (f - i) - cols[0].offsetLeft;
+    const last = cols[cols.length - 1], pad = parseFloat(getComputedStyle(wrap).paddingLeft) * 2;
+    const max = last.offsetLeft + last.offsetWidth - cols[0].offsetLeft + pad - rail.clientWidth;
+    wrap.style.transform = `translateX(${-Math.min(x, Math.max(0, max)).toFixed(1)}px)`;
+  }
+
+  /** Where the stages start and end, in canvas pixels (the line's ends). */
+  function measure() {
+    A.resize();
+    const r = canvas.getBoundingClientRect();
+    const w = wrap.getBoundingClientRect();
+    const stacked = matchMedia("(max-width: 900px)").matches;   // the swipe strip
+    // Stacked (small screens): the devices take the ends, the line spans between.
+    x0 = stacked ? A.W * .2 : w.left - r.left;
+    x1 = stacked ? A.W * .86 : w.right - r.left;
+    edges = stacked ? [] : cols.map(c => c.getBoundingClientRect().left - r.left).concat(x1);
+  }
+
+  /** Field line i at fraction u (0..1) from laptop to phone: bundled at the ends. */
+  const lineY = (i, u, t, mid, spread) =>
+    mid + Math.sin(Math.PI * u) * ((i - 2) * spread + Math.sin(u * 9 + t * 1.6 + i * 1.3) * spread * .55);
+
+  function draw(now, pos) {
+    const s = A.sg, W = A.W, H = A.H, mid = H * .5, t = (now - t0) / 1000;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.fillStyle = "#000"; s.fillRect(0, 0, A.cols, A.rows);
+    s.setTransform(1 / A.cellW, 0, 0, 1 / A.cellH, 0, 0);
+    s.lineCap = "round";
+
+    // stage boundaries, faint
+    s.strokeStyle = "#262626"; s.lineWidth = 2;
+    for (const x of edges) { s.beginPath(); s.moveTo(x, H * .12); s.lineTo(x, H); s.stroke(); }
+
+    // field lines: a dim track, bright dashes flowing to the phone, and the
+    // stretch of the current stage lit solid
+    const spread = H * .07;
+    const path = i => {
+      s.beginPath();
+      for (let k = 0; k <= 80; k++) {
+        const u = k / 80, x = x0 + (x1 - x0) * u, y = lineY(i, u, t, mid, spread);
+        k ? s.lineTo(x, y) : s.moveTo(x, y);
+      }
+    };
+    s.lineWidth = 3; s.strokeStyle = "#262626";
+    for (let i = 0; i < 5; i++) { path(i); s.stroke(); }
+    s.strokeStyle = "#9A9A9A"; s.setLineDash([16, 60]); s.lineDashOffset = -t * 120;
+    for (let i = 0; i < 5; i++) { path(i); s.stroke(); }
+    s.setLineDash([]);
+    if (pos < STAGES.length) {
+      const a = x0 + (x1 - x0) * Math.floor(pos) / STAGES.length, b = x0 + (x1 - x0) * pos / STAGES.length;
+      s.save(); s.beginPath(); s.rect(a, 0, b - a, H); s.clip();
+      s.strokeStyle = "#FFFFFF"; s.lineWidth = 4;
+      for (let i = 0; i < 5; i++) { path(i); s.stroke(); }
+      s.restore();
+      // the packet: a bright knot riding the middle line
+      const u = pos / STAGES.length, px = x0 + (x1 - x0) * u, py = lineY(2, u, t, mid, spread);
+      s.fillStyle = "#FFFFFF"; s.beginPath(); s.arc(px, py, H * .07, 0, Math.PI * 2); s.fill();
+    }
+
+    // laptop (left of the line): lid, screen with a window, base
+    const lw = Math.max(70, x0 - 18), lh = lw * .62, lx = Math.max(2, x0 - 12 - lw), ly = mid - lh * .6;
+    s.fillStyle = "#000"; s.fillRect(lx, ly, lw, lh);
+    s.strokeStyle = "#FFFFFF"; s.lineWidth = 5; s.strokeRect(lx, ly, lw, lh);
+    s.fillStyle = "#2E2E2E"; s.fillRect(lx + 8, ly + 8, lw - 16, lh - 16);
+    s.fillStyle = "#8A8A8A"; s.fillRect(lx + lw * .52, ly + lh * .22, lw * .36, lh * .5);
+    s.fillStyle = "#D0D0D0";
+    s.beginPath(); s.moveTo(lx - 10, ly + lh + 2); s.lineTo(lx + lw + 10, ly + lh + 2);
+    s.lineTo(lx + lw - 2, ly + lh + 14); s.lineTo(lx + 2, ly + lh + 14); s.closePath(); s.fill();
+
+    // phone (right of the line); its screen lights up as frames arrive
+    const pw = Math.min(H * .42, Math.max(34, A.W - x1 - 16)), ph = pw * 1.95, px = x1 + 10, py = mid - ph / 2;
+    s.fillStyle = "#000"; s.beginPath(); s.roundRect(px, py, pw, ph, pw * .16); s.fill();
+    s.strokeStyle = "#FFFFFF"; s.lineWidth = 5; s.stroke();
+    const glow = pos >= STAGES.length - 1 ? .35 + .45 * clamp(pos - (STAGES.length - 1), 0, 1) : .18;
+    const v = Math.round(255 * glow);
+    s.fillStyle = `rgb(${v},${v},${v})`; s.fillRect(px + 6, py + 10, pw - 12, ph - 20);
+
+    A.begin();
+    A.drawSource();
+  }
+
+  function frame(now) {
+    if (!running) return;
+    // Small screens: the pinned section's scroll drives it (the last 15% of
+    // the scroll holds on the total). Large screens: it plays once in time,
+    // then the total stays put.
+    let pos;
+    if (pinned.matches) {
+      const r = section.getBoundingClientRect();
+      const p = clamp(-r.top / Math.max(1, r.height - innerHeight), 0, 1);
+      pos = clamp(p / .85, 0, 1) * STAGES.length;
+      slide(pos);
+    } else {
+      pos = Math.min((now - t0) / STEP_MS, STAGES.length);
+      wrap.style.transform = "";
+    }
+    const idx = Math.min(Math.floor(pos), STAGES.length - 1);
+    let ms = 0;
+    for (let i = 0; i < STAGES.length; i++) ms += STAGES[i][3] * clamp(pos - i, 0, 1);
+    num.textContent = Math.round(ms);
+    cols.forEach((c, i) => {
+      c.classList.toggle("on", pos < STAGES.length && i === idx);
+      c.classList.toggle("past", i < idx || pos >= STAGES.length);
+    });
+    if (pipeGate(now)) draw(now, pos);
+    requestAnimationFrame(frame);
+  }
+
+  measure();
+  addEventListener("resize", () => { measure(); if (!running) draw(performance.now(), STAGES.length); });
+  document.fonts.addEventListener("loadingdone", measure);
+  if (reduceMotion) {
+    num.textContent = Math.round(total);
+    cols.forEach(c => c.classList.add("past"));
+    draw(performance.now(), STAGES.length);
+    return;
+  }
+  new IntersectionObserver(([e]) => {
+    if (e.isIntersecting && !running) {
+      running = true;
+      if (t0 < 0) t0 = performance.now();   // first time only; later visits keep the final 31 ms
+      requestAnimationFrame(frame);
+    } else if (!e.isIntersecting) running = false;
+  }, { threshold: .2 }).observe(rail);
+})();
+
+/* ===================================================================
+ * Install: copy button, a typed-out install, the pairing QR, and
+ * per-manufacturer phone steps.
+ * =================================================================== */
+(() => {
+  document.querySelectorAll("[data-copy]").forEach(btn => btn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(btn.dataset.copy);
+      btn.textContent = "Copied";
+    } catch { btn.textContent = "Select and copy"; }
+    setTimeout(() => { btn.textContent = "Copy"; }, 1600);
+  }));
+
+  // Typed terminal, started once it scrolls into view.
+  const typedEl = document.getElementById("typed");
+  const SCRIPT = [
+    ["$ ", "curl -fsSL …/install.sh | bash"],
+    ["", "Detected: Arch Linux, Hyprland"],
+    ["", "Installing wf-recorder, python, android-tools…"],
+    ["", "Added the tandem command and a Tandem menu entry."],
+    ["$ ", "tandem"],
+    ["", "Start extender"],
+    ["", "Waiting for a phone. Scan the QR code."],
+  ];
+  let typed = false;
+  async function type() {
+    typed = true;
+    const sleep = ms => new Promise(r => setTimeout(r, reduceMotion ? 0 : ms));
+    for (const [prompt, text] of SCRIPT) {
+      const line = document.createElement("div");
+      if (prompt) line.innerHTML = `<span class="p">${prompt}</span>`;
+      typedEl.appendChild(line);
+      const span = document.createElement("span");
+      line.appendChild(span);
+      if (prompt) for (const ch of text) { span.textContent += ch; await sleep(18); }
+      else span.textContent = text;
+      await sleep(prompt ? 250 : 160);
+    }
+  }
+  new IntersectionObserver(([e]) => { if (e.isIntersecting && !typed) type(); }, { threshold: .4 }).observe(typedEl);
+
+  // Illustrative QR: real finder patterns, random data modules.
+  const qr = document.getElementById("qr").getContext("2d");
+  const N = 29;
+  qr.fillStyle = "#F8FAFD"; qr.fillRect(0, 0, N, N);
+  qr.fillStyle = "#000";
+  const finder = (x, y) => {
+    qr.fillRect(x, y, 7, 7);
+    qr.fillStyle = "#F8FAFD"; qr.fillRect(x + 1, y + 1, 5, 5);
+    qr.fillStyle = "#000"; qr.fillRect(x + 2, y + 2, 3, 3);
+  };
+  const inFinder = (x, y) => (x < 8 && y < 8) || (x > N - 9 && y < 8) || (x < 8 && y > N - 9);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!inFinder(x, y) && rnd() > .52) qr.fillRect(x, y, 1, 1);
+  finder(0, 0); finder(N - 7, 0); finder(0, N - 7);
+
+  // Phone maker tabs.
+  const VENDORS = {
+    "Pixel / stock": {
+      apk: ["Open the downloaded APK from the notification or Files.", "Android asks to allow installs from your browser: tap Settings.", "Turn on Allow from this source, go back, tap Install."],
+      usb: ["Settings › About phone: tap Build number seven times.", "Settings › System › Developer options.", "Turn on USB debugging, plug in, tap Allow on the prompt."],
+    },
+    "Samsung": {
+      apk: ["Open the APK from My Files › Downloads.", "When asked, tap Settings and turn on Allow from this source for your browser.", "Go back and tap Install."],
+      usb: ["Settings › About phone › Software information: tap Build number seven times.", "Developer options now sits at the bottom of Settings.", "Turn on USB debugging, plug in, tap Allow."],
+    },
+    "Xiaomi / POCO": {
+      apk: ["Open the APK from the browser's downloads.", "Allow installs from this source when HyperOS asks.", "Tap Install. If a security scan runs, let it finish."],
+      usb: ["Settings › About phone: tap OS version seven times.", "Settings › Additional settings › Developer options.", "Turn on USB debugging, plug in, tap Allow."],
+    },
+    "OnePlus / Oppo": {
+      apk: ["Open the APK from File Manager › Downloads.", "Allow installs from your browser when asked.", "Tap Install."],
+      usb: ["Settings › About device › Version: tap Build number seven times.", "Settings › System settings › Developer options.", "Turn on USB debugging, plug in, tap Allow."],
+    },
+  };
+  const tabs = document.getElementById("tabs");
+  const panel = document.getElementById("vendor");
+  const names = Object.keys(VENDORS);
+  tabs.innerHTML = names.map((n, i) => `<button role="tab" type="button" id="tab${i}" aria-controls="vendor">${n}</button>`).join("");
+  function select(i) {
+    [...tabs.children].forEach((b, k) => { b.setAttribute("aria-selected", k === i); b.tabIndex = k === i ? 0 : -1; });
+    const v = VENDORS[names[i]];
+    panel.setAttribute("aria-labelledby", "tab" + i);
+    panel.innerHTML = `
+      <div><h4>Allow the install</h4><ol>${v.apk.map(s => `<li>${s}</li>`).join("")}</ol></div>
+      <div><h4>USB debugging, for the cable link</h4><ol>${v.usb.map(s => `<li>${s}</li>`).join("")}</ol></div>`;
+    panel.classList.remove("swap"); panel.offsetWidth; panel.classList.add("swap");
+  }
+  tabs.addEventListener("click", e => { const b = e.target.closest("button"); if (b) select([...tabs.children].indexOf(b)); });
+  tabs.addEventListener("keydown", e => {
+    const i = [...tabs.children].indexOf(document.activeElement);
+    if (i < 0 || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    const n = (i + (e.key === "ArrowRight" ? 1 : names.length - 1)) % names.length;
+    select(n); tabs.children[n].focus();
+  });
+  select(0);
+
+  document.getElementById("replay").addEventListener("click", () => Splash.run());
+})();
+
+/* Footer word: width follows the pointer across it. */
+const Footer = (() => {
+  const el = document.getElementById("footWord");
+  // One span per letter, so a ripple can run through the word.
+  const letters = [...el.textContent].map(ch => {
+    const span = document.createElement("span");
+    span.textContent = ch;
+    return span;
+  });
+  el.replaceChildren(...letters);
+  let w = 125, target = 125, shownW = -1, rippleAt = -1e9, rippleFrom = 0;
+  let visible = false, running = false, last = 0;
+  const dipping = new Set();   // letters with inline styles to clear when they settle
+  // Mouse only: a finger scrolling past would yank the width around.
+  el.parentElement.addEventListener("pointermove", e => {
+    if (e.pointerType !== "mouse") return;
+    target = 62 + 63 * (e.clientX / innerWidth);
+    wake();
+  });
+  // Like the app's connect ripple: tap a letter and a dip spreads out from it.
+  el.addEventListener("pointerdown", e => {
+    const i = letters.findIndex(l => { const r = l.getBoundingClientRect(); return e.clientX < r.right; });
+    ripple(i < 0 ? letters.length - 1 : i);
+  });
+  const RIPPLE_S = .85 + (letters.length - 1) * .1;   // until the farthest letter settles
+  const ripple = from => { rippleFrom = from; rippleAt = performance.now(); wake(); };
+  addEventListener("resize", () => fitWidest(el));
+
+  /*
+   * Runs only while the footer is on screen and something is moving, and
+   * only writes styles that changed: rewriting the giant word's axes every
+   * frame forces a relayout each time, which is what made it stutter.
+   */
+  function tick(now) {
+    const dt = last ? Math.min(now - last, 64) : 16;
+    last = now;
+    w += (target - w) * (1 - Math.exp(-dt / 90));   // same speed at any frame rate
+    if (Math.abs(target - w) < .05) w = target;
+    if (Math.abs(w - shownW) >= .05) { el.style.fontVariationSettings = `"wdth" ${w.toFixed(1)}`; shownW = w; }
+    // Each letter dips (narrower, lighter) as the ring passes it. Only ever
+    // narrower than the fitted width, so the word never overflows.
+    const t = (now - rippleAt) / 1000;
+    letters.forEach((l, i) => {
+      const p = (t - Math.abs(i - rippleFrom) * .1) / .85;
+      if (p <= 0 || p >= 1) {
+        if (dipping.delete(l)) l.style.fontVariationSettings = l.style.fontWeight = "";
+        return;
+      }
+      // sin² eases in and out: each letter settles back without a snap.
+      const dip = Math.sin(p * Math.PI) ** 2;
+      l.style.fontVariationSettings = `"wdth" ${Math.max(62, w - 60 * dip).toFixed(1)}`;
+      l.style.fontWeight = (900 - 650 * dip).toFixed(0);
+      dipping.add(l);
+    });
+    const moving = w !== target || t < RIPPLE_S || dipping.size;
+    if (visible && moving) requestAnimationFrame(tick);
+    else { running = false; last = 0; }
+  }
+  function wake() {
+    if (reduceMotion || !visible || running) return;
+    running = true;
+    requestAnimationFrame(tick);
+  }
+  if (!reduceMotion) {
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; wake(); }).observe(el);
+    new IntersectionObserver(([e]) => { if (e.isIntersecting) ripple((letters.length - 1) / 2); }, { threshold: .6 }).observe(el);
+  }
+  return { fit: () => fitWidest(el) };
+})();
+
+/* Scroll reveals for the sections after the demo (styles: "Scroll reveals"). */
+(() => {
+  if (reduceMotion || !("IntersectionObserver" in window)) return;
+  document.documentElement.classList.add("rv");
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add("seen"); io.unobserve(e.target); }
+  }, { threshold: .2, rootMargin: "0px 0px -8% 0px" });
+  document.querySelectorAll("[data-rv]").forEach(el => io.observe(el));
+  // The install step in the middle of the screen is the current one.
+  const current = new IntersectionObserver(entries => {
+    for (const e of entries) e.target.classList.toggle("cur", e.isIntersecting);
+  }, { rootMargin: "-45% 0px -45% 0px" });
+  document.querySelectorAll(".install-steps > li").forEach(li => current.observe(li));
+})();
+
+/* Live star count. */
+(async () => {
+  try {
+    const res = await fetch("https://api.github.com/repos/saharshbaiju/tandem");
+    if (!res.ok) return;
+    const n = (await res.json()).stargazers_count;
+    const text = n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
+    document.querySelectorAll("[data-stars]").forEach(el => { el.textContent = text; el.hidden = false; });
+    document.querySelectorAll("[data-stars-wrap]").forEach(el => { el.hidden = false; });
+  } catch { /* offline: the buttons work without a count */ }
+})();
+
+/* ===================================================================
+ * Magnet: on small screens the pinned sections get scroll-snap stops at
+ * each beat, so a flick settles on the next one instead of skipping it,
+ * and a scroll that ends near a beat is pulled onto it. A stop at
+ * progress p sits where that section's own script reads p.
+ * =================================================================== */
+(() => {
+  const stage = (k, n, hold) => (k + .5) / n * hold;     // middle of beat k
+  const STOPS = [
+    // Statement: each of the three lines lands at (i + 1) / 3.5, the last holds.
+    ["statement", [1 / 3.5 + .02, 2 / 3.5 + .02, .93], !reduceMotion],
+    // Demo: the first step at the top, then the middle of every other step.
+    ["demo", [0, 1, 2, 3, 4, 5].map(k => k ? stage(k, 6, 1) : 0), true],
+    // Pipeline: each stage centred (pos = k + .5), then the 31 ms total.
+    ["pipe", [0, 1, 2, 3, 4, 5].map(k => stage(k, 6, .85)).concat(.93), !reduceMotion],
+  ];
+  const placed = [];
+  for (const [id, ps, on] of STOPS) {
+    if (!on) continue;
+    const section = document.getElementById(id);
+    for (const p of ps) {
+      const el = document.createElement("i");
+      el.className = "snap-stop";
+      el.setAttribute("aria-hidden", "true");
+      section.appendChild(el);
+      placed.push({ section, el, p });
+    }
+  }
+  const place = () => placed.forEach(({ section, el, p }) => {
+    el.style.top = (p * Math.max(0, section.offsetHeight - innerHeight)).toFixed(1) + "px";
+  });
+  addEventListener("resize", place);
+  place();
+})();
+
+/*
+ * Boot. The display sizes depend on Archivo, so refit when fonts land;
+ * the splash waits (briefly) for them so the wordmark draws in Archivo.
+ */
+const refit = () => { Footer.fit(); Statement.fit(); Statement.update(); };
+Demo.start();
+refit();
+document.fonts.addEventListener("loadingdone", refit);
+const fontCss = document.getElementById("fontCss");
+const cssReady = fontCss.dataset.loaded ? Promise.resolve()
+  : new Promise(r => { fontCss.addEventListener("load", r); fontCss.addEventListener("error", r); });
+Promise.race([
+  cssReady.then(() => Promise.all([document.fonts.load("900 40px Archivo"), document.fonts.load('600 16px "Geist Mono"'), document.fonts.load("600 40px Geist")])),
+  new Promise(r => setTimeout(r, 1800)),
+]).then(() => Splash.run(() => {
+  document.getElementById("top").classList.add("in");
+  HeroArt.start();
+}));
+</script>
+</body>
+</html>
