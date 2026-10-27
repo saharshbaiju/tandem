@@ -18,8 +18,8 @@ Additional terms (GNU GPL version 3, section 7)
 
        Tandem by Saharsh Baiju · github.com/saharshbaiju/tandem
 
-   in the Android app's connect screen, in the terminal app's footer and in
-   the output of `tandemd.py --version`. Every copy and every modified
+   in the Android app's connect screen and in the output of
+   `tandem --version` and `tandemd.py --version`. Every copy and every modified
    version must keep this notice, or a notice of equal prominence that names
    Saharsh Baiju and links to https://github.com/saharshbaiju/tandem, in
    those places or in the equivalent places of the modified version. A

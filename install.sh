@@ -37,7 +37,8 @@ if [[ -n "$here" && -f "$here/linux/tandemd.py" ]]; then
 else
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   url="https://github.com/$REPO/releases/latest/download/tandem-linux.tar.gz"
-  if ! curl -fsSL "$url" -o "$tmp/tandem.tar.gz"; then
+  # A 404 here just means no release has the tarball yet: quietly fall back.
+  if ! curl -fsSL "$url" -o "$tmp/tandem.tar.gz" 2>/dev/null; then
     url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
     say "No release found; using the main branch"
     curl -fsSL "$url" -o "$tmp/tandem.tar.gz"

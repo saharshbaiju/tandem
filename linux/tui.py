@@ -32,7 +32,7 @@ import qr
 HERE = os.path.dirname(os.path.abspath(__file__))
 DAEMON = os.path.join(HERE, "tandemd.py")
 
-TITLE =  " Tandem - amFOSS "
+TITLE = " Tandem "
 
 
 # --------------------------------------------------------------------------- #
@@ -61,10 +61,6 @@ def header(win):
     win.erase()
     addstr(win, 0, 0, TITLE, curses.color_pair(1) | curses.A_BOLD)
     h, w = win.getmaxyx()
-    # The attribution the license asks forks to keep (see about.py),
-    # right-aligned when the terminal is wide enough to fit it.
-    if w - len(TITLE) - 2 > len(about.CREDIT):
-        addstr(win, 0, w - len(about.CREDIT) - 2, about.CREDIT, curses.color_pair(5))
     addstr(win, 1, 0, "─" * (w - 1), curses.color_pair(1))
 
 
@@ -840,6 +836,9 @@ def setup_terminal():
 
 
 def main():
+    if sys.argv[1:] in (["--version"], ["-V"]):
+        print(f"{about.CREDIT}\n{about.LICENSE}")   # the credit NOTICE asks forks to keep
+        return
     setup_terminal()
     try:
         curses.wrapper(app)

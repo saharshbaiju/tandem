@@ -209,6 +209,9 @@ main, footer, .nav { position: relative; z-index: 1; }
 .nav ul a { text-decoration: none; color: var(--gray-1); transition: color .15s; }
 .nav ul a:hover { color: var(--white); }
 .nav ul { align-items: center; }
+.nav-chai { display: flex; align-items: center; gap: 7px; }
+.nav-chai svg { width: 17px; height: 17px; flex: none; }
+.nav-chai:hover .steam { transform: translateY(-1.2px); opacity: .55; }
 .theme-btn { font: 500 14px var(--text); color: var(--white); background: transparent; border: 1px solid var(--gray-2); padding: 6px 10px; cursor: pointer; }
 .theme-btn:hover { border-color: var(--white); }
 
@@ -558,6 +561,29 @@ main, footer, .nav { position: relative; z-index: 1; }
 .oss-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px clamp(32px, 5vw, 96px); align-items: end; }
 .oss .lede { margin-top: 24px; }
 .btn svg { width: 15px; height: 15px; margin-right: 9px; flex: none; }
+/*
+ * The ask: "star" in the lede gets the hero's red wipe when the section
+ * scrolls in; then the Star button's star turns red and pops once. Without
+ * scroll reveals (reduced motion) both are simply shown, still.
+ */
+.star-mark { color: #fff; }
+.star-mark::before { transform: scaleX(1); }
+.btn-star svg { color: var(--red); }
+.rv .star-mark { color: inherit; }
+.rv .star-mark::before { transform: scaleX(0); }
+.rv .btn-star svg { color: currentColor; }
+.rv .seen .star-mark { color: #fff; transition: color .2s .55s; }
+.rv .seen .star-mark::before { transform: scaleX(1); transition: transform .6s cubic-bezier(.7, 0, .2, 1) .25s; }
+.rv .seen .btn-star svg { color: var(--red); transition: color .2s 1s; animation: star-pop .7s cubic-bezier(.3, 1.6, .5, 1) 1s both; }
+@keyframes star-pop {
+  0%   { transform: scale(1) rotate(0); }
+  45%  { transform: scale(1.7) rotate(72deg); }
+  100% { transform: scale(1) rotate(72deg); }
+}
+.btn-star:hover svg { color: var(--red); }
+/* Chai glass: the steam rises while the button is hovered. */
+.chai-glass .steam { transition: transform .4s var(--ease), opacity .4s; }
+.btn:hover .chai-glass .steam { transform: translateY(-1.2px); opacity: .55; }
 .btn .count { border-left: 1px solid currentColor; padding-left: 12px; margin-left: 12px; font-variant-numeric: tabular-nums; }
 .maker { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; text-decoration: none; border-top: 1px solid var(--white); padding-top: 24px; }
 .maker img { width: clamp(112px, 11vw, 160px); height: auto; aspect-ratio: 1; display: block; filter: grayscale(1); background: var(--gray-3); transition: filter .3s; }
@@ -635,6 +661,7 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   .desk-table th, .desk-table td { display: block; width: 100%; padding-right: 0; }
   .desk-table td { border-top: 0; padding-top: 0; }
   .nav ul li.opt { display: none; }
+  .nav-chai span { display: none; }   /* just the glass; the label is its aria-label */
   .demo-head { grid-template-columns: 1fr; }
   .dev-hint { display: none; }
 }
@@ -730,6 +757,7 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
 <nav class="nav" aria-label="Main">
   <a class="wordmark" href="#top">Tandem</a>
   <ul>
+    <li><a class="nav-chai" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai aria-label="Buy me a chai"><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg><span>Buy me a chai</span></a></li>
     <li class="opt"><a href="#demo">See it work</a></li>
     <li class="opt"><a href="#install">Install</a></li>
     <li><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a></li>
@@ -905,13 +933,13 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
 
 <section class="oss" id="oss" aria-labelledby="ossTitle">
   <div class="wrap oss-grid">
-    <div>
+    <div data-rv="ask">
       <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
-      <p class="lede">Every line of Tandem is on GitHub. <b>A star helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it. Share it with anyone who has a spare phone, open an issue when something breaks, or send a fix. If it saved you buying a monitor, buy me a chai.</p>
+      <p class="lede">Every line of Tandem is on GitHub. <b>A <em class="claim star-mark">star</em> helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it. Share it with anyone who has a spare phone, open an issue when something breaks, or send a fix. If it saved you buying a monitor, buy me a chai.</p>
       <div class="ctas">
-        <a class="btn solid" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Star<span class="count" data-stars hidden></span></a>
+        <a class="btn solid btn-star" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg>Star<span class="count" data-stars hidden></span></a>
         <button class="btn" type="button" data-share>Share Tandem</button>
-        <a class="btn" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai>Buy me a chai</a>
+        <a class="btn" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg>Buy me a chai</a>
       </div>
     </div>
     <div class="maker" data-rv="row">

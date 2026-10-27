@@ -34,7 +34,9 @@ Only a phone that scanned the computer's QR code may control it. Pair by
   foldable in CSS, showing a Hyprland desktop (Waybar, Firefox on the GitHub
   repo, kitty) over a generated wallpaper; no image files except
   `website/assets/saharsh.jpg` (the maker photo). The star count comes from the
-  GitHub API. *Buy me a chai* opens the UPI app on phones (a `upi://` link) and
+  GitHub API; the word "star" in the open-source section gets the red wipe and
+  the Star button's star pops red. *Buy me a chai* (first in the nav, and with
+  the Star and Share buttons) opens the UPI app on phones (a `upi://` link) and
   shows the UPI QR (`assets/upi-qr.svg`, made with `linux/qr.py`) on computers;
   *Share Tandem* uses the system share sheet, else copies the link. Published to
   <https://saharshbaiju.github.io/tandem/> by `.github/workflows/pages.yml` on
@@ -242,7 +244,7 @@ linux/
                         RemoteDesktop touch
   start-tandem.sh     no-TUI launcher (prints the QR)
   testsrc.py            test-pattern server for app development
-  about.py              the credit line and license notice (shown in the TUI, --version)
+  about.py              the credit line and license notice (printed by --version)
 android/app/src/main/java/io/github/saharshbaiju/tandem/
   MainActivity.kt       Material 3 UI, scanner, transitions, side sheet
   StreamSession.kt      parallel connect, framed reader, MediaCodec → Surface
@@ -271,7 +273,7 @@ install.sh              one-line installer (any distro), adds the `tandem` comma
 Tandem is free software under the [GNU GPL version 3](LICENSE), with three
 additional terms allowed by its section 7 (written out in [NOTICE](NOTICE)):
 
-- **Keep the credit.** The app's connect screen, the terminal UI's header and
+- **Keep the credit.** The app's connect screen and `tandem --version` /
   `tandemd.py --version` show *Tandem by Saharsh Baiju ·
   github.com/saharshbaiju/tandem*. Copies and modified versions must keep that
   notice (they can add their own names next to it).
