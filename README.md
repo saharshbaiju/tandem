@@ -34,7 +34,9 @@ Only a phone that scanned the computer's QR code may control it. Pair by
   foldable in CSS, showing a Hyprland desktop (Waybar, Firefox on the GitHub
   repo, kitty) over a generated wallpaper; no image files except
   `website/assets/saharsh.jpg` (the maker photo). The star count comes from the
-  GitHub API; the Donate links point at GitHub Sponsors. Published to
+  GitHub API. *Buy me a chai* opens the UPI app on phones (a `upi://` link) and
+  shows the UPI QR (`assets/upi-qr.svg`, made with `linux/qr.py`) on computers;
+  *Share Tandem* uses the system share sheet, else copies the link. Published to
   <https://saharshbaiju.github.io/tandem/> by `.github/workflows/pages.yml` on
   every push to `main` that touches `website/`. Search and sharing: the head has
   the description, canonical URL, Open Graph / Twitter card (`assets/og.png`)
@@ -76,7 +78,7 @@ phone, open it, and allow "install unknown apps" for your browser when asked.
 
 ### Connect
 
-1. Run `tandem` → **Start extender**. A QR code appears.
+1. Run `tandem` → **Start Tandem**. A QR code appears.
 2. Pick how the phone reaches the computer:
    - **USB cable** (lowest latency): enable *USB debugging* on the phone and plug
      it in — `tandem` sets up `adb reverse` by itself. Works even when the phone is
@@ -105,7 +107,7 @@ touches) is encrypted with TLS. Others on the same Wi-Fi can neither watch
 nor touch. To type an address instead of scanning, also enter the **pairing
 code** shown under the QR. Details: [`docs/SECURITY.md`](docs/SECURITY.md).
 
-Without the TUI: `~/.local/share/tandem/linux/start-extender.sh usb` prints the
+Without the TUI: `~/.local/share/tandem/linux/start-tandem.sh usb` prints the
 same QR and runs the daemon in the foreground.
 
 ## How it works
@@ -153,7 +155,7 @@ the app shows *Reconnecting…* over the last frame and resumes by itself.
 tandem
 ```
 
-- **Start extender** — launches the daemon and opens the live view: status, the
+- **Start Tandem** — launches the daemon and opens the live view: status, the
   pairing **QR code**, the plain addresses, touch status, and the daemon log. `q` returns to the
   menu *keeping the stream running*; `d` disconnects and removes the monitor.
 - **Configure** — desktop backend (auto / hyprland / gnome), screen **side**
@@ -173,7 +175,7 @@ tandem
 
 ```bash
 cd linux
-./start-extender.sh usb|wifi [flags]     # prints the QR, runs in the foreground
+./start-tandem.sh usb|wifi [flags]     # prints the QR, runs in the foreground
 python3 tandemd.py --help
 ```
 
@@ -226,7 +228,7 @@ PC at `10.0.2.2`). More in [`ANDROID.md` §7](docs/ANDROID.md#7-developer-instal
 linux/
   tandem                TUI launcher (installed as the `tandem` command)
   python.sh             picks the system /usr/bin/python3 (not conda/pyenv) for
-                        tandem, start-extender.sh and install.sh
+                        tandem, start-tandem.sh and install.sh
   tui.py                curses UI: deps, detection, config, live view + QR
   core.py               config, distro/dependency detection, addresses, QR URI
   qr.py                 dependency-free QR encoder (half-block terminal output)
@@ -238,7 +240,7 @@ linux/
   backends/xdph.py      NVIDIA: zero-copy capture via the Hyprland portal + GStreamer NVENC
   backends/gnome.py     Mutter ScreenCast virtual monitor, DisplayConfig, GStreamer,
                         RemoteDesktop touch
-  start-extender.sh     no-TUI launcher (prints the QR)
+  start-tandem.sh     no-TUI launcher (prints the QR)
   testsrc.py            test-pattern server for app development
   about.py              the credit line and license notice (shown in the TUI, --version)
 android/app/src/main/java/io/github/saharshbaiju/tandem/

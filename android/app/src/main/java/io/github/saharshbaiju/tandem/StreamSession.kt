@@ -239,7 +239,7 @@ class StreamSession(
                     }
                 } catch (e: Exception) {
                     // "refused" is the most useful diagnosis (computer reachable,
-                    // extender not running): never let a timeout overwrite it.
+                    // Tandem not running): never let a timeout overwrite it.
                     if (e is java.net.ConnectException && "refused" in (e.message ?: "")) {
                         refusedBy.compareAndSet(null, h)
                     }

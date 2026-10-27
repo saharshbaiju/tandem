@@ -511,7 +511,7 @@ tui.py ──spawns──▶ tandemd.py --keep-output --banner-file …   (same 
                                                    remove monitor (unless --keep-output on Hyprland)
 ```
 
-- **Always the system Python.** The launchers (`tandem`, `start-extender.sh`,
+- **Always the system Python.** The launchers (`tandem`, `start-tandem.sh`,
   `install.sh`) source `python.sh`, which picks `/usr/bin/python3` rather than
   the first `python3` on `PATH`. Distro packages (PyGObject) only exist for the
   system interpreter, and conda's bundled ncurses can't find the system

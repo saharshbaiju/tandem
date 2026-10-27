@@ -79,6 +79,14 @@ Light/dark follows the system.
 The QR lists *every* address the computer has (USB tether, Wi-Fi…); the app
 tries them all in parallel and keeps the first that answers.
 
+**The launch splash** (`AsciiSplashView`): the same as the website's. On a fresh
+launch the word "Tandem" appears in ASCII characters on black; drops spread from
+the centre (or wherever you tap) and bend it like water, then a hole with a
+bright rim opens onto the connect screen. About 1.5 s in all, and skipped when
+the system's animations are off. The launcher icon is an ASCII "T" on black
+(`drawable-nodpi/ic_launcher_foreground.png`, also the monochrome themed icon);
+the full wordmark is in `logo/` at the repo root.
+
 **The water transition** (`RippleRevealLayout`): on Android 13+ an AGSL shader
 displaces the connect screen's pixels along travelling waves (refraction) with
 soft highlights on the crests, three staggered "drops" repeating while it
@@ -113,7 +121,7 @@ tandem. A link opened from outside the app (camera, browser, another app) asks
 are final (no retry loop) and say why: *wrong pairing code*, *this isn't the
 computer you paired with*, *update tandem on the computer*.
 
-**Errors are specific:** *"titan-arch is reachable, but the extender isn't
+**Errors are specific:** *"titan-arch is reachable, but Tandem isn't
 running"* (connection refused) vs *"Couldn't reach titan-arch. Turn on USB
 tethering, or join the same Wi-Fi"* (timeout) vs *"Connected, but no video
 arrived"* (10 s watchdog).
@@ -134,11 +142,14 @@ app/src/main/java/io/github/saharshbaiju/tandem/
   TouchForwarder.kt        MotionEvent → TUCH (fractions of the video picture)
   ConnectTarget.kt         tandem:// QR / deep-link parsing, manual entry, persistence
   RippleRevealLayout.kt    water ripple + reveal (AGSL on 13+, canvas fallback)
+  AsciiSplashView.kt       launch splash: ASCII wordmark, ripples, reveal (port of the website's)
   AspectRatioSurfaceView.kt  letterboxes the video to the stream's aspect ratio
 app/src/main/res/
-  layout/activity_main.xml connect screen, status pill, edge handle, side sheet
+  layout/activity_main.xml connect screen, status pill, edge handle, side sheet, splash
   values/themes.xml        Material 3 DynamicColors theme + fallback palette overlay
-  drawable/ic_*.xml        Material icons; mipmap-anydpi-v26/ic_launcher.xml adaptive icon
+  drawable/ic_*.xml        Material icons
+  drawable-nodpi/ic_launcher_foreground.png  ASCII "T" (432 px layer, safe zone 264 px)
+  mipmap-anydpi-v26/ic_launcher.xml  adaptive icon: that "T" on @color/brand (black)
 ```
 
 ---
@@ -170,7 +181,7 @@ Runs on its own thread:
 
 1. **Connect** to every host in parallel (3 s timeout each); the first to accept
    wins, the others are closed. A *refused* connection is reported in preference
-   to a timeout (it means "computer reachable, extender not running").
+   to a timeout (it means "computer reachable, Tandem not running").
 2. **Secure it** (`SecureChannel`, 5 s timeout): TLS, refusing any certificate
    but the one pinned by the QR; then `HELO` → `CHAL` → `AUTH` → `OKAY`, checking
    the computer's proof before anything else. `DENY`, a wrong proof or a
@@ -232,6 +243,19 @@ uniforms (`origin, time, amp, reveal, edge, density`) and re-applies
 `RenderEffect.createRuntimeShaderEffect` every frame; transparent output pixels
 expose the video `SurfaceView` beneath. `startRipple(x, y)`, `reveal(onDone)`,
 `settle()` (waves calm down after a failure), `reset()`.
+
+### 4.5a `AsciiSplashView`
+
+The top layer of `activity_main.xml`, `gone` until `MainActivity.onCreate` calls
+`run {}` (only when `savedInstanceState == null`, so a light/dark re-theme
+doesn't replay it). At size change it lays out a monospace character grid
+(9 dp text on phones, 13 dp on tablets) and paints "Tandem" into a bitmap of
+one pixel per cell (`sans-serif-black`, widened 1.15×). Each frame, every cell
+samples that bitmap from a point pushed along the radius by three staggered
+wave trains (the same `wave()` as `RippleRevealLayout`, in dp), maps brightness
+onto the ramp ` .:-=+*#%@`, and draws one `drawText` per row. The black
+background is drawn as a rect minus the growing circle (even-odd path), so the
+connect screen shows through the hole. It eats touches until it hides itself.
 
 ### 4.6 Touch input (`TouchForwarder` + `MainActivity.forwardTouch`)
 
@@ -304,7 +328,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 # open with a computer pre-filled (what the QR does; the app asks to confirm).
-# The full link, with k= and f=, is printed by testsrc.py / start-extender.sh.
+# The full link, with k= and f=, is printed by testsrc.py / start-tandem.sh.
 adb shell am start -a android.intent.action.VIEW -d "'tandem://c?h=192.168.42.129&p=5000&n=archbox&k=<key>&f=<fp>&v=2'"
 
 # debug builds only: launch and connect to the saved computer immediately

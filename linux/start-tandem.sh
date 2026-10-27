@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Convenience launcher for the Tandem daemon (no TUI).
 #
-#   ./start-extender.sh [usb|wifi] [extra tandemd args...]
+#   ./start-tandem.sh [usb|wifi] [extra tandemd args...]
 #
 # Prints the pairing QR code (scan it with the phone app), then runs the daemon
 # in the foreground with its logs on stderr. The desktop backend (Hyprland /

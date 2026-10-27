@@ -4,9 +4,9 @@
     <!-- Attribution required by the GPL section 7 terms in NOTICE: keep it. -->
     <string name="credit" translatable="false">Tandem by Saharsh Baiju · github.com/saharshbaiju/tandem · GPL-3.0</string>
     <string name="card_title_new">Connect to your computer</string>
-    <string name="card_body_new">On your computer run tandem, choose Start extender, then scan the QR code shown in the terminal.</string>
+    <string name="card_body_new">On your computer run tandem, choose Start Tandem, then scan the QR code shown in the terminal.</string>
     <string name="card_title_ready">Ready to connect</string>
-    <string name="card_body_ready">Make sure the extender is running on your computer.</string>
+    <string name="card_body_ready">Make sure Tandem is running on your computer.</string>
     <string name="scan_qr">Scan QR code</string>
     <string name="scan_again">Scan again</string>
     <string name="enter_manually">Enter address manually</string>

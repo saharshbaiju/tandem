@@ -553,7 +553,7 @@ main, footer, .nav { position: relative; z-index: 1; }
 .desk-table td { font-size: 17px; color: var(--gray-1); }
 .desk-table tr:last-child th, .desk-table tr:last-child td { border-bottom: 1px solid var(--gray-2); }
 
-/* Open source: repo, stars, maker, donate ------------------------------------ */
+/* Open source: repo, stars, maker, chai -------------------------------------- */
 .oss { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
 .oss-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px clamp(32px, 5vw, 96px); align-items: end; }
 .oss .lede { margin-top: 24px; }
@@ -576,6 +576,18 @@ main, footer, .nav { position: relative; z-index: 1; }
 .gh-link > svg { width: 20px; height: 20px; }
 .gh-stars { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .gh-stars svg { width: 12px; height: 12px; }
+
+/* Buy me a chai: the UPI QR dialog (computers only) ----------------------------- */
+.chai { margin: auto; width: min(360px, calc(100vw - 32px)); padding: 32px; border: 1px solid var(--white); background: var(--black); color: var(--white); }
+.chai::backdrop { background: rgb(0 0 0 / .7); }
+.chai h2 { font-size: 30px; font-weight: 600; letter-spacing: -.03em; }
+.chai p { margin-top: 8px; color: var(--gray-1); font-size: 15px; }
+.chai img { display: block; width: 100%; height: auto; margin-top: 20px; background: #fff; }
+.chai-id { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-2); }
+.chai-id code { font: 500 16px var(--mono); }
+.chai-id .copy { border: 1px solid var(--white); background: var(--white); color: var(--black); padding: 8px 16px; font: 500 15px var(--text); cursor: pointer; }
+.chai-id .copy:hover { background: var(--black); color: var(--white); }
+.chai .btn { margin-top: 20px; width: 100%; justify-content: center; }
 
 /* Footer --------------------------------------------------------------------- */
 footer { border-top: 1px solid var(--gray-2); background: var(--black); }
@@ -829,8 +841,8 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
       </li>
       <li data-rv="row">
         <div>
-          <h3>Start the extender</h3>
-          <p>Open a new terminal, run <b>tandem</b> and pick Start extender. A QR code appears with the computer's addresses and a pairing code.</p>
+          <h3>Start Tandem</h3>
+          <p>Open a new terminal, run <b>tandem</b> and pick Start Tandem. A QR code appears with the computer's addresses and a pairing code.</p>
           <p>While it waits, the live view checks the cable, the firewall and Wi-Fi, and says why a phone can't connect yet.</p>
         </div>
         <div class="qr-box">
@@ -895,11 +907,11 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   <div class="wrap oss-grid">
     <div>
       <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
-      <p class="lede">Every line of Tandem is on GitHub. Star the repository to follow new releases, open an issue when something breaks, or send a fix. If it saved you buying a monitor, a donation keeps it going.</p>
+      <p class="lede">Every line of Tandem is on GitHub. <b>A star helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it. Share it with anyone who has a spare phone, open an issue when something breaks, or send a fix. If it saved you buying a monitor, buy me a chai.</p>
       <div class="ctas">
         <a class="btn solid" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Star<span class="count" data-stars hidden></span></a>
-        <a class="btn" href="https://github.com/saharshbaiju/tandem">View the source</a>
-        <a class="btn" href="https://github.com/sponsors/saharshbaiju" id="donate">Donate</a>
+        <button class="btn" type="button" data-share>Share Tandem</button>
+        <a class="btn" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai>Buy me a chai</a>
       </div>
     </div>
     <div class="maker" data-rv="row">
@@ -924,10 +936,20 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
       <li><a href="https://github.com/saharshbaiju/tandem/blob/main/docs/ARCHITECTURE.md">How it works</a></li>
       <li><a href="https://github.com/saharshbaiju/tandem/blob/main/docs/SECURITY.md">Security</a></li>
       <li><a href="https://github.com/saharshbaiju/tandem/blob/main/LICENSE">GPL-3.0</a></li>
-      <li><a href="https://github.com/sponsors/saharshbaiju">Donate</a></li>
+      <li><a href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai>Buy me a chai</a></li>
     </ul>
   </div>
 </footer>
+
+<!-- Buy me a chai, on a computer: the UPI QR to scan with a phone. On a phone
+     the links open the UPI app directly instead (see the script). -->
+<dialog class="chai" id="chai" aria-labelledby="chaiTitle">
+  <h2 id="chaiTitle">Buy me a chai</h2>
+  <p>Scan with any UPI app: Google Pay, PhonePe, Paytm or BHIM.</p>
+  <img src="assets/upi-qr.svg" alt="UPI QR code for 7012879159-2@ibl" width="240" height="240">
+  <div class="chai-id"><code>7012879159-2@ibl</code><button class="copy" type="button" data-copy="7012879159-2@ibl">Copy</button></div>
+  <button class="btn" type="button" data-close>Close</button>
+</dialog>
 
 <script>
 "use strict";
@@ -1919,7 +1941,7 @@ const Demo = (() => {
     ["", "Installing wf-recorder, python, android-tools…"],
     ["", "Added the tandem command and a Tandem menu entry."],
     ["$ ", "tandem"],
-    ["", "Start extender"],
+    ["", "Start Tandem"],
     ["", "Waiting for a phone. Scan the QR code."],
   ];
   let typed = false;
@@ -2082,6 +2104,40 @@ const Footer = (() => {
     for (const e of entries) e.target.classList.toggle("cur", e.isIntersecting);
   }, { rootMargin: "-45% 0px -45% 0px" });
   document.querySelectorAll(".install-steps > li").forEach(li => current.observe(li));
+})();
+
+/*
+ * Buy me a chai. Phones follow the upi:// link, which opens the UPI app with
+ * the ID filled in; computers can't open it, so they show the QR to scan.
+ */
+(() => {
+  const dialog = document.getElementById("chai");
+  const onPhone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  document.querySelectorAll("[data-chai]").forEach(a => a.addEventListener("click", e => {
+    if (onPhone || !dialog.showModal) return;
+    e.preventDefault();
+    dialog.showModal();
+  }));
+  dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });  // backdrop
+})();
+
+/* Share: the system share sheet where there is one, else copy the link. */
+(() => {
+  const url = "https://saharshbaiju.github.io/tandem/";
+  document.querySelectorAll("[data-share]").forEach(btn => btn.addEventListener("click", async () => {
+    const data = { title: "Tandem", text: "Use your Android phone as a real second monitor for Linux.", url };
+    if (navigator.share) {
+      try { await navigator.share(data); } catch { /* closed the sheet */ }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      const label = btn.textContent;
+      btn.textContent = "Link copied";
+      setTimeout(() => { btn.textContent = label; }, 1600);
+    } catch { /* no clipboard: nothing to do */ }
+  }));
 })();
 
 /* Live star count. */

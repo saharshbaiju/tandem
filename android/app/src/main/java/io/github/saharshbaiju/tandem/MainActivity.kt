@@ -34,6 +34,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 /**
  * Connect screen (Material 3) -> water-ripple transition -> full-bleed desktop.
+ * At launch an ASCII splash ([AsciiSplashView]) ripples open onto it.
  *
  *  IDLE        connect card: scan the TUI's QR (or type an address), Connect.
  *  CONNECTING  ripples spread from where you tapped while we connect.
@@ -141,6 +142,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         handleIntent(intent)
         render()
         showSystemBars()
+        // The website's splash, on a fresh launch (not after a re-theme).
+        if (savedInstanceState == null) b.splash.run {}
 
         // Testing over adb: am start -n io.github.saharshbaiju.tandem.debug/.MainActivity
         //   --ez autoconnect true
@@ -450,8 +453,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
                 "phones connected" in reason || "update the tandem app" in reason.lowercase() ->
                 "$name: ${reason.replaceFirstChar(Char::uppercase)}."
             "refused" in reason.lowercase() ->
-                "$name is reachable, but the extender isn't running. " +
-                    "Start it from the terminal (tandem → Start extender)."
+                "$name is reachable, but Tandem isn't running on it. " +
+                    "Start it from the terminal (tandem → Start Tandem)."
             "couldn't reach" in reason || "timed out" in reason || "unreachable" in reason ->
                 "Couldn't reach $name. Turn on USB tethering, or join the same Wi-Fi."
             else -> "Couldn't connect to $name: $reason"

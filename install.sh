@@ -56,7 +56,7 @@ find "$DEST/linux" -name __pycache__ -prune -exec rm -rf {} +
 for f in LICENSE NOTICE; do
   if [[ -f "$SRC/../$f" ]]; then cp "$SRC/../$f" "$DEST/$f"; fi
 done
-chmod +x "$DEST/linux/tandem" "$DEST/linux/start-extender.sh"
+chmod +x "$DEST/linux/tandem" "$DEST/linux/start-tandem.sh"
 ln -sf "$DEST/linux/tandem" "$BIN/tandem"
 
 # Before the rename to Tandem this was installed as `amvd`; remove that copy.
@@ -147,7 +147,7 @@ t = core.touch_setup_check(core.Config())
 sys.exit(subprocess.run(t["fix"]).returncode if t else 0)'; then
         say "Touch input ready"
       else
-        warn "Couldn't set up touch input; run 'tandem', start the extender and press t"
+        warn "Couldn't set up touch input; run 'tandem', choose Start Tandem and press t"
       fi
     fi
   fi

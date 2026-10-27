@@ -103,7 +103,7 @@ tandem://c?h=192.168.42.129,10.0.0.5&p=5000&n=titan-arch&k=2wrjsdt74szdswax4rq1&
   open source) doesn't help anyone reproduce a key. Each computer's key is
   independent; 1,000 generated keys in the tests were all distinct.
 - **Typable.** Shown as `2wrjs-dt74s-zdswa-x4rq1` under the QR (TUI live view,
-  `start-extender.sh`). Case, dashes and spaces don't matter, and the look-alike
+  `start-tandem.sh`). Case, dashes and spaces don't matter, and the look-alike
   letters `i`/`l` → `1` and `o` → `0` are corrected, on both ends.
 - **Stored privately.** `~/.config/tandem/pairing-key`, mode `0600`
   in a `0700` directory. It is never put on a command line (other local users
@@ -334,7 +334,7 @@ unit-tested).
 | `linux/phone_input.py` | touch only: admitted phones are told whether touch is on (`INPT`) |
 | `linux/core.py` | QR with `k` + `f` + `v=2`, pairing code, `openssl` dependency |
 | `linux/tui.py` | creates key + certificate before starting, shows the pairing code |
-| `linux/start-extender.sh`, `linux/testsrc.py` | pairing code / same gatekeeper |
+| `linux/start-tandem.sh`, `linux/testsrc.py` | pairing code / same gatekeeper |
 | `android/…/SecureChannel.kt` | TLS + pinning trust manager + handshake (new) |
 | `android/…/ConnectTarget.kt` | `f` fingerprint, `v` check, pairing code for typed addresses |
 | `android/…/StreamSession.kt` | TLS + proof before any frame; final vs. retryable failures |

@@ -46,7 +46,7 @@ sudo pacman -S --needed libva-utils android-tools   # optional: VA-API probe, ph
 - **Touch input** needs a one-time setup: the phone's touches are replayed
   through a virtual touchscreen in `/dev/uinput`, which is root-only on a stock
   Arch install. The installer offers to add a udev rule that gives it to the
-  user logged in at the seat; or start the extender in `tandem` and press **t**
+  user logged in at the seat; or choose Start Tandem in `tandem` and press **t**
   when the live view says *Touch: needs one-time setup*. What it runs (with
   sudo):
 
@@ -140,16 +140,16 @@ removes the monitor and moves its windows back — nothing to clean up.
 desktop is idle (Mutter only sends frames on damage), and the daemon's GOP
 replay gives a phone that connects to an idle desktop a picture immediately.
 
-**Display settings:** while the extender runs, the virtual monitor appears in
+**Display settings:** while Tandem runs, the virtual monitor appears in
 *Settings → Displays* like any other; you can drag it there too. Placement made
-by the extender is temporary — it never touches `~/.config/monitors.xml`.
+by Tandem is temporary — it never touches `~/.config/monitors.xml`.
 
 ---
 
 ## USB cable with USB debugging (all distros)
 
 If the phone has **USB debugging** on and `adb` is installed, plugging in the
-cable is enough: the TUI / `start-extender.sh` runs
+cable is enough: the TUI / `start-tandem.sh` runs
 `adb reverse tcp:5000 tcp:5000` for every connected phone and puts `127.0.0.1`
 first in the QR. The phone then reaches the PC over the cable even when it's on
 mobile data and not on your Wi-Fi.
@@ -173,10 +173,10 @@ includes that address.
 | Symptom | Check |
 | --- | --- |
 | Phone: two apps, *Screen Extender* and *Tandem* | Screen Extender (`com.archextender`) is amVD 0.4 or older; Tandem (`io.github.saharshbaiju.tandem`, 0.5+) is a separate package, so it can't replace it. Uninstall Screen Extender. See [RELEASING.md](RELEASING.md#renamed-from-amvd--screen-extender-05) |
-| Phone: *"reachable, but the extender isn't running"* | Start it in the TUI (`tandem` → Start extender); check the daemon log in the live view |
+| Phone: *"reachable, but Tandem isn't running"* | Start it in the TUI (`tandem` → Start Tandem); check the daemon log in the live view |
 | Phone: *"Couldn't reach …"* | The live view's **connection checks** say why. *Firewall … press f*: opens TCP 5000 (ufw / firewalld / nftables / iptables are detected without root — note Arch's stock `/etc/nftables.conf` drops everything but SSH once `nftables.service` is enabled; `f` adds a runtime rule, add `tcp dport 5000 accept` to the file to keep it). *USB cable*: either **USB tethering** (no developer options; the PC must get an IP from the phone — NetworkManager does it, minimal Hyprland setups with only iwd/systemd-networkd don't, so the check offers **u**: `nmcli device connect`, a persistent systemd-networkd `.network` file matching the tether drivers, or `dhcpcd`) or **USB debugging** (adb installed, "Allow USB debugging" accepted). Tethering goes through the firewall like Wi-Fi; adb doesn't. Rescan the QR after fixing. Same Wi-Fi but still unreachable: guest/campus/hotel Wi-Fi isolates clients — use the cable or the phone's hotspot |
 | Phone: *"Connected, but no video arrived"* | Encoder failed — the live view's daemon log shows `gst:` / wf-recorder errors; `python3 tandemd.py … </dev/null` prints everything |
-| TUI: *"python gi [missing]"* even after installing `python3-gobject` / `python-gobject` | Another `python3` (conda/miniconda, pyenv, a venv, Homebrew) comes first on `PATH`; distro packages only go into `/usr/bin/python3`. Fixed: `tandem`, `start-extender.sh` and `install.sh` always use `/usr/bin/python3` (override with `TANDEM_PYTHON=…`); the Dependencies screen says which interpreter it's running under. Re-run the installer to get the fix |
+| TUI: *"python gi [missing]"* even after installing `python3-gobject` / `python-gobject` | Another `python3` (conda/miniconda, pyenv, a venv, Homebrew) comes first on `PATH`; distro packages only go into `/usr/bin/python3`. Fixed: `tandem`, `start-tandem.sh` and `install.sh` always use `/usr/bin/python3` (override with `TANDEM_PYTHON=…`); the Dependencies screen says which interpreter it's running under. Re-run the installer to get the fix |
 | `tandem`: `_curses.error: setupterm: could not find terminfo database` | Same cause: conda's Python bundles its own ncurses, which doesn't look in `/usr/share/terminfo`. Fixed the same way; started directly (`python3 tui.py`), the TUI also retries with the system terminfo directories and then `TERM=xterm-256color` |
 | TUI: *"GNOME is running on X11"* | Log in to the Wayland session |
 | GNOME: `could not create the virtual monitor` | GNOME < 40, or Mutter's ScreenCast interface not available (`gdbus introspect --session -d org.gnome.Mutter.ScreenCast -o /org/gnome/Mutter/ScreenCast`) |

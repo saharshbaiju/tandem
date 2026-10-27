@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Launcher icon background (Google blue). -->
-    <color name="brand">#0B57D0</color>
+    <!-- Launcher icon background: black, like the website; the ASCII "T"
+         foreground is drawable-nodpi/ic_launcher_foreground.png. -->
+    <color name="brand">#000000</color>
 
     <!-- Status dot over the video. -->
     <color name="live">#34A853</color>

@@ -5,6 +5,8 @@
     connectScreen  Material 3 connect UI; dissolves like water into the video
     statusPill / edgeHandle   minimal chrome over the live video
     scrim + controlSheet      side sheet with stream details + Disconnect
+    splash         ASCII "Tandem" on black; ripples open onto the connect
+                   screen at launch, then it is gone
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -505,4 +507,11 @@
                 app:icon="@drawable/ic_power" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
+
+    <!-- ============================================================ splash -->
+    <io.github.saharshbaiju.tandem.AsciiSplashView
+        android:id="@+id/splash"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
 </FrameLayout>

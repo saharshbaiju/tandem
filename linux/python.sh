@@ -1,4 +1,4 @@
-# Sourced by tandem, start-extender.sh and install.sh: pick the Python to run with.
+# Sourced by tandem, start-tandem.sh and install.sh: pick the Python to run with.
 #
 # The distro's own interpreter (/usr/bin/python3) is the one the dependencies
 # are installed into (python-gobject / python3-gi / python3-gobject) and whose

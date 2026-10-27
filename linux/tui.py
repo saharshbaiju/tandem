@@ -237,7 +237,7 @@ def apply_config(stream, new_cfg):
 
 
 MENU = [
-    ("Start extender", "start"),
+    ("Start Tandem", "start"),
     ("Configure", "configure"),
     ("Dependencies", "deps"),
     ("Detected hardware", "hardware"),
@@ -263,14 +263,14 @@ def main_menu(win, cfg, stream):
             live = stream.state["live"]
             if live > 0:
                 addstr(win, row, 2,
-                       f"● extender running — {live} phone"
+                       f"● Tandem running — {live} phone"
                        f"{'s' if live > 1 else ''} connected",
                        curses.color_pair(3) | curses.A_BOLD)
             else:
-                addstr(win, row, 2, "● extender running — waiting for phone",
+                addstr(win, row, 2, "● Tandem running — waiting for phone",
                        curses.color_pair(3) | curses.A_BOLD)
         else:
-            addstr(win, row, 2, "○ extender stopped", curses.color_pair(5))
+            addstr(win, row, 2, "○ Tandem stopped", curses.color_pair(5))
 
         summ = (f"{backends.describe(cfg.resolved_backend())}   "
                 f"side={cfg.side}  {cfg.width}x{cfg.height}@{cfg.fps}  "
@@ -486,7 +486,7 @@ def configure_screen(win, cfg, live=False):
                "over USB.", curses.color_pair(5))
         if live:
             addstr(win, 7 + len(rows), 2,
-                   "Extender is running — saving applies changes immediately "
+                   "Tandem is running — saving applies changes immediately "
                    "(side/scale instantly; others restart the stream).",
                    curses.color_pair(3))
         footer(win, "↑/↓ move   ←/→ change   Enter edit   s save & back   Esc cancel")
