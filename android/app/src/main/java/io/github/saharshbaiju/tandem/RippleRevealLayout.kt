@@ -63,8 +63,6 @@ class RippleRevealLayout @JvmOverloads constructor(
         setWillNotDraw(false)
     }
 
-    val isRippling: Boolean get() = ticker != null
-
     fun startRipple(x: Float, y: Float) {
         stopAll()
         visibility = View.VISIBLE

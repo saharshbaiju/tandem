@@ -3,12 +3,10 @@ package io.github.saharshbaiju.tandem
 import android.animation.TimeAnimator
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Typeface
 import android.provider.Settings
 import android.util.AttributeSet
 import android.view.MotionEvent
@@ -41,10 +39,7 @@ class AsciiSplashView @JvmOverloads constructor(
 
     private val density = resources.displayMetrics.density
 
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-    }
+    private val textPaint = AsciiType.glyphPaint(Color.WHITE)
     private val bgPaint = Paint().apply { color = Color.BLACK }
     private val hole = Path().apply { fillType = Path.FillType.EVEN_ODD }
 
@@ -96,26 +91,13 @@ class AsciiSplashView @JvmOverloads constructor(
         rows = max(1, (h / cellH).toInt())
         line = CharArray(cols)
 
-        // The wordmark at one pixel per cell, aspect-corrected, like the
-        // website's offscreen canvas.
-        val bmp = Bitmap.createBitmap(cols, rows, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        c.drawColor(Color.BLACK)
-        c.scale(1f / cellW, 1f / cellH)
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
-            textScaleX = 1.15f                         // Archivo's wide stance
-            textAlign = Paint.Align.CENTER
-            textSize = min(w * 0.26f, h * 0.32f)
-        }
-        p.textSize *= min(1f, w * (if (phone) 0.88f else 0.78f) / p.measureText(WORD))
+        // The wordmark at one pixel per cell, like the website's offscreen canvas.
+        val p = AsciiType.wordPaint().apply { textSize = min(w * 0.26f, h * 0.32f) }
+        p.textSize *= min(1f, w * (if (phone) 0.88f else 0.78f) / p.measureText(AsciiType.WORD))
         val baseline = h / 2f - p.textSize * 0.1f - (p.ascent() + p.descent()) / 2f
-        c.drawText(WORD, w / 2f, baseline, p)
-        val px = IntArray(cols * rows)
-        bmp.getPixels(px, 0, cols, 0, 0, cols, rows)
-        bmp.recycle()
-        word = FloatArray(px.size) { Color.red(px[it]) / 255f }
+        word = AsciiType.rasterize(cols, rows, cellW, cellH) {
+            it.drawText(AsciiType.WORD, w / 2f, baseline, p)
+        }
     }
 
     private fun startRipple(x: Float, y: Float) {
@@ -160,7 +142,7 @@ class AsciiSplashView @JvmOverloads constructor(
 
         val baseline = -textPaint.ascent() + cellH * 0.06f
         for (r in 0 until rows) {
-            for (c in 0 until cols) line[c] = charFor(brightness(c, r, t, radius))
+            for (c in 0 until cols) line[c] = AsciiType.charFor(brightness(c, r, t, radius))
             canvas.drawText(line, 0, cols, 0f, r * cellH + baseline, textPaint)
         }
     }
@@ -214,9 +196,6 @@ class AsciiSplashView @JvmOverloads constructor(
         context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
     companion object {
-        private const val WORD = "Tandem"
-        private const val RAMP = " .:-=+*#%@"
-
         // Timings (shorter than the website's: an app should get out of the way).
         private const val AUTO_START_MS = 450L      // ripple by itself if not tapped
         private const val REVEAL_AT_S = 0.8f        // drops breathe, then the water opens
@@ -226,9 +205,6 @@ class AsciiSplashView @JvmOverloads constructor(
         private const val TRAIN_PERIOD_S = 1.6f
 
         private val EASE_REVEAL = PathInterpolator(0.3f, 0f, 0.1f, 1f)
-
-        private fun charFor(b: Float) =
-            RAMP[(b * RAMP.length).toInt().coerceIn(0, RAMP.length - 1)]
 
         /** One expanding wave train (RippleRevealLayout's wave()); front ~520 dp/s. */
         private fun wave(distDp: Float, t: Float): Float {

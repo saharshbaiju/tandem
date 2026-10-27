@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.res.ColorStateList
-import android.content.res.Configuration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -26,7 +25,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.saharshbaiju.tandem.databinding.ActivityMainBinding
-import com.google.android.material.color.DynamicColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -93,9 +91,6 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        if (!DynamicColors.isDynamicColorAvailable()) {
-            theme.applyStyle(R.style.ThemeOverlay_Tandem_Fallback, true)
-        }
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         b = ActivityMainBinding.inflate(layoutInflater)
@@ -155,13 +150,6 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             intent?.getBooleanExtra("autoconnect", false) == true) {
             b.root.post { startConnect(b.root.width * 0.7f, b.root.height * 0.6f) }
         }
-    }
-
-    // uiMode is in configChanges so a light/dark switch can't kill a live
-    // stream; re-theme only while nothing is streaming.
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        if (state == State.IDLE && !b.connectScreen.isRippling) recreate()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -637,11 +625,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     private fun showSystemBars() {
         WindowInsetsControllerCompat(window, window.decorView).apply {
             show(WindowInsetsCompat.Type.systemBars())
-            // dark icons on the light theme, light icons on the dark one
-            val night = (resources.configuration.uiMode and
-                Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-            isAppearanceLightStatusBars = !night
-            isAppearanceLightNavigationBars = !night
+            // always light icons: the app is always black
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
         }
     }
 

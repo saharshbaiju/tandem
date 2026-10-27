@@ -10,20 +10,16 @@
     <color name="pill_bg">#E61F1F1F</color>
     <color name="pill_text">#F1F3F4</color>
 
-    <!-- Fallback palette for Android < 12 (no wallpaper-based dynamic color):
-         Material 3 tonal palette from Google blue, light scheme. -->
-    <color name="fb_primary">#0B57D0</color>
-    <color name="fb_on_primary">#FFFFFF</color>
-    <color name="fb_primary_container">#D3E3FD</color>
-    <color name="fb_on_primary_container">#041E49</color>
-    <color name="fb_secondary_container">#C2E7FF</color>
-    <color name="fb_on_secondary_container">#001D35</color>
-    <color name="fb_surface">#F8FAFD</color>
-    <color name="fb_on_surface">#1F1F1F</color>
-    <color name="fb_on_surface_variant">#444746</color>
-    <color name="fb_surface_low">#F0F4F9</color>
-    <color name="fb_surface_container">#E9EEF6</color>
-    <color name="fb_surface_high">#E3E8EF</color>
-    <color name="fb_surface_highest">#DDE3EA</color>
-    <color name="fb_outline">#747775</color>
+    <!-- OLED palette (website/index.html's tokens). -->
+    <color name="black">#000000</color>
+    <color name="ink">#F8FAFD</color>          <!-- text, the solid button -->
+    <color name="ink_dim">#C4C7C5</color>
+    <color name="gray_1">#8E918F</color>       <!-- secondary text -->
+    <color name="gray_2">#5F6368</color>       <!-- outlines: text fields, chip -->
+    <color name="gray_3">#3C3F41</color>       <!-- hairlines -->
+    <color name="surface_1">#0B0C0C</color>    <!-- side sheet -->
+    <color name="surface_2">#121314</color>    <!-- connect card, dialogs -->
+    <color name="surface_3">#1C1D1F</color>    <!-- saved-computer row -->
+    <color name="surface_4">#2A2C2E</color>    <!-- its icon disc -->
+    <color name="red">#FF5449</color>          <!-- errors: the site's red, lifted to read on black -->
 </resources>

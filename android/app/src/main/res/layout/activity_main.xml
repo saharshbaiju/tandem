@@ -66,13 +66,13 @@
                         android:src="@drawable/ic_launcher_foreground" />
                 </com.google.android.material.card.MaterialCardView>
 
-                <TextView
+                <!-- "Tandem" in ASCII, like the splash and the website. -->
+                <io.github.saharshbaiju.tandem.AsciiWordmarkView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="24dp"
-                    android:text="@string/app_name"
-                    android:textAppearance="?attr/textAppearanceDisplaySmall"
-                    android:textColor="?attr/colorOnSurface" />
+                    android:layout_marginBottom="6dp"
+                    android:contentDescription="@string/app_name" />
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -113,6 +113,14 @@
                 android:layout_weight="1.15"
                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                 app:cardCornerRadius="28dp">
+
+                <!-- Scrolls only when it doesn't fit: manual entry on a short
+                     landscape phone is taller than the screen. -->
+                <androidx.core.widget.NestedScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fillViewport="true"
+                    android:scrollbars="none">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -320,6 +328,7 @@
                             android:text="@string/enter_manually" />
                     </LinearLayout>
                 </LinearLayout>
+                </androidx.core.widget.NestedScrollView>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </io.github.saharshbaiju.tandem.RippleRevealLayout>

@@ -210,7 +210,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 (Or open `android/` in Android Studio and press Run.) The CLI build needs JDK
 17–21; point `JAVA_HOME` at Android Studio's bundled JBR if your system JDK is
 newer. Requires Android 8.0+; the QR scanner uses Google Play services (no
-camera permission). Material You colors on Android 12+, the shader-based water
+camera permission). An OLED-black theme like the website's, the shader-based water
 transition on Android 13+ (a canvas version on older phones).
 
 ## Developing

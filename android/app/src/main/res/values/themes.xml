@@ -1,29 +1,44 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Material 3 with wallpaper-based dynamic color on Android 12+ (Material
-         You), like Google's own apps. Light/dark follows the system. -->
-    <style name="Theme.Tandem" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
+    <!-- OLED black, the website's palette: pure black surfaces, near-white
+         ink, greys for everything secondary. Always dark (no wallpaper colours,
+         no light mode), so blacks are true blacks and the pixels are off. -->
+    <style name="Theme.Tandem" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/black</item>
+        <item name="android:colorBackground">@color/black</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-    </style>
 
-    <!-- Applied in code only when dynamic color is unavailable (Android < 12). -->
-    <style name="ThemeOverlay.Tandem.Fallback" parent="">
-        <item name="colorPrimary">@color/fb_primary</item>
-        <item name="colorOnPrimary">@color/fb_on_primary</item>
-        <item name="colorPrimaryContainer">@color/fb_primary_container</item>
-        <item name="colorOnPrimaryContainer">@color/fb_on_primary_container</item>
-        <item name="colorSecondaryContainer">@color/fb_secondary_container</item>
-        <item name="colorOnSecondaryContainer">@color/fb_on_secondary_container</item>
-        <item name="colorSurface">@color/fb_surface</item>
-        <item name="colorOnSurface">@color/fb_on_surface</item>
-        <item name="colorOnSurfaceVariant">@color/fb_on_surface_variant</item>
-        <item name="colorSurfaceContainerLow">@color/fb_surface_low</item>
-        <item name="colorSurfaceContainer">@color/fb_surface_container</item>
-        <item name="colorSurfaceContainerHigh">@color/fb_surface_high</item>
-        <item name="colorSurfaceContainerHighest">@color/fb_surface_highest</item>
-        <item name="colorOutline">@color/fb_outline</item>
+        <!-- The white button on black, like the website's solid buttons. -->
+        <item name="colorPrimary">@color/ink</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorPrimaryContainer">@color/surface_4</item>
+        <item name="colorOnPrimaryContainer">@color/ink</item>
+        <item name="colorSecondary">@color/ink_dim</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="colorSecondaryContainer">@color/surface_4</item>
+        <item name="colorOnSecondaryContainer">@color/ink</item>
+        <item name="colorTertiary">@color/ink</item>
+        <item name="colorOnTertiary">@color/black</item>
+
+        <item name="colorSurface">@color/black</item>
+        <item name="colorOnSurface">@color/ink</item>
+        <item name="colorSurfaceVariant">@color/surface_3</item>
+        <item name="colorOnSurfaceVariant">@color/gray_1</item>
+        <item name="colorSurfaceDim">@color/black</item>
+        <item name="colorSurfaceBright">@color/surface_4</item>
+        <item name="colorSurfaceContainerLowest">@color/black</item>
+        <item name="colorSurfaceContainerLow">@color/surface_1</item>
+        <item name="colorSurfaceContainer">@color/surface_2</item>
+        <item name="colorSurfaceContainerHigh">@color/surface_2</item>
+        <item name="colorSurfaceContainerHighest">@color/surface_3</item>
+        <item name="colorSurfaceInverse">@color/ink</item>
+        <item name="colorOnSurfaceInverse">@color/black</item>
+
+        <item name="colorOutline">@color/gray_2</item>
+        <item name="colorOutlineVariant">@color/gray_3</item>
+        <item name="colorError">@color/red</item>
+        <item name="colorOnError">@color/ink</item>
     </style>
 
     <!-- A label/value tile in the live control sheet. -->

@@ -23,7 +23,7 @@ debug it. The Linux side is in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 | Library | Why |
 | --- | --- |
 | `androidx.core`, `appcompat`, `activity-ktx` | window insets, back handling, base activity |
-| `com.google.android.material:material:1.12.0` | **Material 3**: dynamic color, cards, buttons, outlined text fields, chips |
+| `com.google.android.material:material:1.12.0` | **Material 3**: cards, buttons, outlined text fields, chips (themed OLED black) |
 | `com.google.android.gms:play-services-code-scanner:16.1.0` | **Google code scanner**: Play-services-hosted QR scanner UI. The app needs **no camera permission** — the scanner runs in Play services |
 
 The manifest asks Play services to download the scanner module at install time
@@ -62,12 +62,20 @@ no location, no storage.
                                      link drops ──▶ "Reconnecting…" (auto, backoff)
 ```
 
-**Connect screen** (Material 3, landscape two-pane): app identity on the left; on
+**Connect screen** (Material 3, landscape two-pane): app identity on the left (the
+logo tile and "Tandem" in ASCII, `AsciiWordmarkView`); on
 the right a card that is either *Connect to your computer* (big **Scan QR code**
 button) or *Ready to connect* (the computer's name and addresses, **Connect**,
-*Scan again*, *Enter address manually*). Colors come from the wallpaper on
-Android 12+ (Material You); older phones get a Google-blue Material 3 palette.
-Light/dark follows the system.
+*Scan again*, *Enter address manually*); the card scrolls when manual entry
+doesn't fit a short landscape screen.
+
+**Theme:** OLED black, the website's palette, always (no wallpaper colours, no
+light mode): pure black surfaces, so those pixels are off; near-white text;
+greys for secondary text, outlines and the cards (`#121314` connect card,
+`#1C1D1F` saved-computer row, `#0B0C0C` side sheet); the primary button is
+white with black text, like the site's solid buttons; errors in the site's red.
+Every colour is a named token in `values/colors.xml`, mapped onto the Material
+roles in `values/themes.xml`.
 
 **Getting the address, three ways:**
 
@@ -146,10 +154,12 @@ app/src/main/java/io/github/saharshbaiju/tandem/
   ConnectTarget.kt         tandem:// QR / deep-link parsing, manual entry, persistence
   RippleRevealLayout.kt    water ripple + reveal (AGSL on 13+, canvas fallback)
   AsciiSplashView.kt       launch splash: ASCII wordmark, ripples, reveal (port of the website's)
+  AsciiWordmarkView.kt     the connect screen's "Tandem" in ASCII (static)
+  AsciiType.kt             shared by both: density ramp, letterforms, word → character cells
   AspectRatioSurfaceView.kt  letterboxes the video to the stream's aspect ratio
 app/src/main/res/
   layout/activity_main.xml connect screen, (re)connecting pill, edge handle, side sheet, splash
-  values/themes.xml        Material 3 DynamicColors theme + fallback palette overlay
+  values/themes.xml        Material 3 dark theme, OLED black (palette in values/colors.xml)
   drawable/ic_*.xml        Material icons
   drawable-nodpi/ic_launcher_foreground.png  ASCII "T" (432 px layer, safe zone 264 px)
   mipmap-anydpi-v26/ic_launcher.xml  adaptive icon: that "T" on @color/brand (black)
@@ -175,8 +185,8 @@ app/src/main/res/
   every 3 s) only after a stream has actually produced a frame. A first connection
   that fails settles the ripple and shows a specific error instead of looping.
 - **Watchdog.** TCP connected but no frame within 10 s → stop and explain.
-- `uiMode` is in `configChanges` so a light/dark switch can't kill a live stream;
-  the activity re-themes itself only while idle.
+- `uiMode` is in `configChanges` so a system light/dark switch can't restart the
+  activity (and kill a live stream); the app is always black anyway.
 
 ### 4.2 `StreamSession` — the decode engine
 
@@ -250,7 +260,7 @@ expose the video `SurfaceView` beneath. `startRipple(x, y)`, `reveal(onDone)`,
 ### 4.5a `AsciiSplashView`
 
 The top layer of `activity_main.xml`, `gone` until `MainActivity.onCreate` calls
-`run {}` (only when `savedInstanceState == null`, so a light/dark re-theme
+`run {}` (only when `savedInstanceState == null`, so a recreated activity
 doesn't replay it). At size change it lays out a monospace character grid
 (9 dp text on phones, 13 dp on tablets) and paints "Tandem" into a bitmap of
 one pixel per cell (`sans-serif-black`, widened 1.15×). Each frame, every cell
