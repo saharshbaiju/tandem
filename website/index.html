@@ -651,7 +651,7 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   .field { height: 110px; }
   /* Statement: each line breaks in two, so the type is half again as big
      and fills the pinned screen instead of floating in it. */
-  .statement { height: 150vh; }
+  .statement { height: 260vh; }   /* room for a thumb to scrub it slowly */
   .st-line span { display: block; }
   .st-line + .st-line { margin-top: .06em; }
   .st-note { margin-top: 20px; font-size: 17px; }
@@ -1426,14 +1426,33 @@ const Statement = (() => {
   // Each line's full size: the size at which, at full width, it fills the column.
   const full = new Map();
   const fit = () => lines.forEach(el => { fitWidest(el); full.set(el, parseFloat(el.style.fontSize)); });
-  /**
-   * Scrubbed by scroll, one line after another: each starts small, narrow and
-   * dim, and grows to full size and width as it brightens. Never wider than
-   * the fitted size, so nothing overflows.
-   */
-  function update() {
+  // Drawn progress eases toward the scroll position every frame, so coarse
+  // scroll steps (phones report momentum scrolling in jumps) still read as
+  // one continuous motion. Time constant ~90 ms: it follows, never lags.
+  let shown = -1, target = 0, last = 0, ticking = false;
+  const progress = () => {
     const r = section.getBoundingClientRect();
-    const p = clamp(-r.top / (r.height - innerHeight), 0, 1);
+    return clamp(-r.top / (r.height - innerHeight), 0, 1);
+  };
+  function tick(now) {
+    const dt = Math.min(64, now - last);
+    last = now;
+    shown += (target - shown) * (1 - Math.exp(-dt / 90));
+    if (Math.abs(target - shown) < .0005) shown = target;
+    draw(shown);
+    if (shown !== target) requestAnimationFrame(tick); else ticking = false;
+  }
+  function update() {
+    target = progress();
+    if (shown < 0 || reduceMotion) { shown = target; return draw(shown); }   // first paint: no ease-in
+    if (!ticking && shown !== target) { ticking = true; last = performance.now(); requestAnimationFrame(tick); }
+  }
+  /**
+   * One line after another: each starts small, narrow and dim, and grows to
+   * full size and width as it brightens. Never wider than the fitted size,
+   * so nothing overflows.
+   */
+  function draw(p) {
     lines.forEach((el, i) => {
       const k = reduceMotion ? 1 : clamp(p * (lines.length + .5) - i, 0, 1);
       const e = 1 - (1 - k) ** 3;
@@ -1444,8 +1463,10 @@ const Statement = (() => {
     });
   }
   addEventListener("scroll", update, { passive: true });
-  addEventListener("resize", () => { fit(); update(); });
-  return { fit, update };
+  /** Refit the lines and draw them where the scroll is (fit leaves them full size). */
+  const refit = () => { fit(); draw(shown = progress()); };
+  addEventListener("resize", refit);
+  return { refit, update };
 })();
 
 /* ===================================================================
@@ -2161,8 +2182,8 @@ const Footer = (() => {
 (() => {
   const stage = (k, n, hold) => (k + .5) / n * hold;     // middle of beat k
   const STOPS = [
-    // Statement: each of the three lines lands at (i + 1) / 3.5, the last holds.
-    ["statement", [1 / 3.5 + .02, 2 / 3.5 + .02, .93], !reduceMotion],
+    // (No stops in the statement: it is scrubbed continuously, and a stop
+    // there jerks a half-grown line to full size.)
     // Demo: the first step at the top, then the middle of every other step.
     ["demo", [0, 1, 2, 3, 4, 5].map(k => k ? stage(k, 6, 1) : 0), true],
     // Pipeline: each stage centred (pos = k + .5), then the 31 ms total.
@@ -2191,7 +2212,7 @@ const Footer = (() => {
  * Boot. The display sizes depend on Archivo, so refit when fonts land;
  * the splash waits (briefly) for them so the wordmark draws in Archivo.
  */
-const refit = () => { Footer.fit(); Statement.fit(); Statement.update(); };
+const refit = () => { Footer.fit(); Statement.refit(); };
 Demo.start();
 refit();
 document.fonts.addEventListener("loadingdone", refit);
