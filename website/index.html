@@ -2153,12 +2153,19 @@ const Footer = (() => {
 })();
 
 /*
- * Buy me a chai. Phones follow the upi:// link, which opens the UPI app with
- * the ID filled in; computers can't open it, so they show the QR to scan.
+ * Buy me a chai. Phones follow the upi:// link: Android offers every UPI app
+ * (GPay, PhonePe, Paytm, BHIM…) with the ID and note filled in. Computers
+ * can't open it, so they show the QR to scan.
  */
 (() => {
   const dialog = document.getElementById("chai");
-  const onPhone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  // A phone or tablet, however it introduces itself: "Desktop site" mode on
+  // Android and every iPad claim to be computers, but they are still
+  // touch-only screens, and that's where UPI apps live.
+  const onPhone = navigator.userAgentData?.mobile
+    || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))
+    || matchMedia("(pointer: coarse) and (hover: none)").matches;
   document.querySelectorAll("[data-chai]").forEach(a => a.addEventListener("click", e => {
     if (onPhone || !dialog.showModal) return;
     e.preventDefault();
