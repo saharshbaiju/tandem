@@ -48,7 +48,8 @@
       "applicationCategory": "UtilitiesApplication",
       "applicationSubCategory": "Second monitor / screen extender",
       "operatingSystem": "Linux (Hyprland, GNOME on Wayland), Android 8+",
-      "downloadUrl": "https://github.com/saharshbaiju/tandem/releases/latest",
+      "downloadUrl": "https://github.com/saharshbaiju/tandem/releases/latest/download/Tandem.apk",
+      "softwareVersion": "0.5.0",
       "installUrl": "https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh",
       "softwareHelp": "https://github.com/saharshbaiju/tandem#readme",
       "license": "https://www.gnu.org/licenses/gpl-3.0.html",
@@ -775,7 +776,7 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
       <p class="lede hero-sub intro" style="--i:3"><b>Your Android phone or tablet becomes a real second monitor.</b> Not a web page in a browser tab: your GPU encodes the screen and the phone's hardware decodes it, so a window you drag across keeps up with your hand.</p>
       <div class="ctas intro" style="--i:4">
         <a class="btn solid" href="#install">Install on Linux</a>
-        <a class="btn" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK</a>
+        <a class="btn" href="https://github.com/saharshbaiju/tandem/releases/latest/download/Tandem.apk">Download the APK<span class="count" data-version hidden></span></a>
       </div>
       <div class="hero-cmd intro" style="--i:5">
         <p>Install with one command on Ubuntu, Fedora or Arch:</p>
@@ -883,8 +884,8 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
       <li data-rv="row">
         <div>
           <h3>Install the app on the phone</h3>
-          <p>Download the APK from the latest release on the phone and open it. Android 8 or newer. Each phone maker words the permission a little differently:</p>
-          <a class="btn" style="margin-top:18px" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK</a>
+          <p>Download the APK on the phone and open it. Android 8 or newer. Each phone maker words the permission a little differently:</p>
+          <a class="btn" style="margin-top:18px" href="https://github.com/saharshbaiju/tandem/releases/latest/download/Tandem.apk">Download the APK<span class="count" data-version hidden></span></a>
           <p class="note">Had it before as Screen Extender? Tandem installs as a separate app, so uninstall the old one.</p>
         </div>
         <div>
@@ -2191,6 +2192,18 @@ const Footer = (() => {
       setTimeout(() => { btn.textContent = label; }, 1600);
     } catch { /* no clipboard: nothing to do */ }
   }));
+})();
+
+/* The latest release's version on the Download buttons (the link itself
+   always points at the latest release's Tandem.apk). */
+(async () => {
+  try {
+    const res = await fetch("https://api.github.com/repos/saharshbaiju/tandem/releases/latest");
+    if (!res.ok) return;
+    const tag = (await res.json()).tag_name;
+    if (!/^v\d/.test(tag)) return;
+    document.querySelectorAll("[data-version]").forEach(el => { el.textContent = tag; el.hidden = false; });
+  } catch { /* offline: the buttons work without it */ }
 })();
 
 /* Live star count. */

@@ -5,7 +5,7 @@
 | Piece | Channel | What the user does |
 | --- | --- | --- |
 | PC side (Python, no build step) | `install.sh` from the `main` branch; downloads the latest release's `tandem-linux.tar.gz` (falls back to the `main` tarball if there's no release yet) | `curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh \| bash`, then `tandem` |
-| Phone app | GitHub Releases: `Tandem-<version>.apk`, signed with the Tandem release key | Download on the phone, install |
+| Phone app | GitHub Releases: `Tandem-<version>.apk`, plus the same file as `Tandem.apk` so `releases/latest/download/Tandem.apk` (the website's Download button) is always the newest; signed with the Tandem release key | Download on the phone, install |
 | Debug app (testers) | GitHub Releases: `Tandem-<version>-debug.apk` — package `io.github.saharshbaiju.tandem.debug`, named *Tandem (debug)* | Installs *next to* the normal app; for logs and testing |
 
 The installer is distro-agnostic: it asks `linux/core.py` which packages are
@@ -53,9 +53,7 @@ Up to 0.4.x the project was *amVD*, the app *Screen Extender* (package
 | GitHub repo | `saharshbaiju/amVD` | `saharshbaiju/tandem` | Renamed on GitHub (releases, tags and stars kept); old URLs redirect |
 | Signing properties | `ASEXT_*` | `TANDEM_*` | The build still reads `ASEXT_*`; the keystore and its alias `amvd` are unchanged |
 
-Say so in the 0.5 release notes. Until 0.5 is released, `releases/latest`
-still only has `amvd-linux.tar.gz`, so `install.sh` falls back to the `main`
-tarball: that is expected.
+The 0.5.0 release notes say so.
 
 ## Cutting a release
 
@@ -63,20 +61,21 @@ tarball: that is expected.
 2. Build and package:
 
    ```bash
-   V=0.4.1
+   V=0.5.0
    (cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew assembleRelease assembleDebug)
    mkdir -p dist
    cp android/app/build/outputs/apk/release/app-release.apk dist/Tandem-$V.apk
+   cp dist/Tandem-$V.apk dist/Tandem.apk          # stable name for the website link
    cp android/app/build/outputs/apk/debug/app-debug.apk dist/Tandem-$V-debug.apk
    tar --exclude=__pycache__ -czf dist/tandem-linux.tar.gz linux LICENSE NOTICE
-   (cd dist && sha256sum Tandem-$V.apk Tandem-$V-debug.apk tandem-linux.tar.gz > SHA256SUMS)
+   (cd dist && sha256sum Tandem-$V.apk Tandem.apk Tandem-$V-debug.apk tandem-linux.tar.gz > SHA256SUMS)
    ```
 
 3. Commit, tag and publish:
 
    ```bash
    git tag -a v$V -m "Tandem $V" && git push origin main v$V
-   gh release create v$V dist/Tandem-$V.apk dist/Tandem-$V-debug.apk \
+   gh release create v$V dist/Tandem-$V.apk dist/Tandem.apk dist/Tandem-$V-debug.apk \
        dist/tandem-linux.tar.gz dist/SHA256SUMS \
        --title "Tandem $V" --notes-file <notes>
    ```
