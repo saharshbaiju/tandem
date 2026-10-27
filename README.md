@@ -32,8 +32,10 @@ Only a phone that scanned the computer's QR code may control it. Pair by
   connect ripple (`RippleRevealLayout`'s wave maths) rendered in ASCII.
   The scroll demo draws front views of a gunmetal laptop, phone, tablet and
   foldable in CSS, showing a Hyprland desktop (Waybar, Firefox on the GitHub
-  repo, kitty) over a generated wallpaper; no image files except
-  `website/assets/saharsh.jpg` (the maker photo). The star count comes from the
+  repo, kitty) over a generated wallpaper; the only image files are
+  the maker photo (`assets/saharsh.jpg`), the share card (`assets/og.png`), the
+  UPI QR, and the icons (`favicon.png`, `assets/apple-touch-icon.png`), which
+  are the app's ASCII "T". The star count comes from the
   GitHub API; the word "star" in the open-source section gets the red wipe and
   the Star button's star pops red. *Buy me a chai* (first in the nav, and with
   the Star and Share buttons) opens the UPI app on phones (a `upi://` link) and
