@@ -47,20 +47,22 @@
                 android:orientation="vertical"
                 android:paddingEnd="36dp">
 
+                <!-- The app's logo: the launcher icon's ASCII "T" on black. -->
                 <com.google.android.material.card.MaterialCardView
                     style="?attr/materialCardViewFilledStyle"
                     android:layout_width="56dp"
                     android:layout_height="56dp"
-                    app:cardBackgroundColor="?attr/colorPrimaryContainer"
-                    app:cardCornerRadius="18dp">
+                    app:cardBackgroundColor="@color/brand"
+                    app:cardCornerRadius="18dp"
+                    app:strokeColor="?attr/colorOutlineVariant"
+                    app:strokeWidth="1dp">
 
                     <ImageView
-                        android:layout_width="28dp"
-                        android:layout_height="28dp"
-                        android:layout_gravity="center"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
                         android:importantForAccessibility="no"
-                        android:src="@drawable/ic_desktop"
-                        app:tint="?attr/colorOnPrimaryContainer" />
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_launcher_foreground" />
                 </com.google.android.material.card.MaterialCardView>
 
                 <TextView

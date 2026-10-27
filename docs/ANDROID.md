@@ -84,7 +84,8 @@ launch the word "Tandem" appears in ASCII characters on black; drops spread from
 the centre (or wherever you tap) and bend it like water, then a hole with a
 bright rim opens onto the connect screen. About 1.5 s in all, and skipped when
 the system's animations are off. The launcher icon is an ASCII "T" on black
-(`drawable-nodpi/ic_launcher_foreground.png`, also the monochrome themed icon);
+(`drawable-nodpi/ic_launcher_foreground.png`, also the monochrome themed icon,
+and the logo tile at the top of the connect screen);
 the full wordmark is in `logo/` at the repo root.
 
 **The water transition** (`RippleRevealLayout`): on Android 13+ an AGSL shader
