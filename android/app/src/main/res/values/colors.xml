@@ -4,8 +4,7 @@
          foreground is drawable-nodpi/ic_launcher_foreground.png. -->
     <color name="brand">#000000</color>
 
-    <!-- Status dot over the video. -->
-    <color name="live">#34A853</color>
+    <!-- Status dot of the "Connecting…" / "Reconnecting…" pill. -->
     <color name="pending">#FBBC04</color>
     <color name="lost">#EA4335</color>
     <color name="pill_bg">#E61F1F1F</color>

@@ -3,7 +3,8 @@
   Layers, back to front:
     surface        the decoded desktop (letterboxed SurfaceView)
     connectScreen  Material 3 connect UI; dissolves like water into the video
-    statusPill / edgeHandle   minimal chrome over the live video
+    statusPill / edgeHandle   "Connecting…" / "Reconnecting…" pill, and the
+                              edge handle to the side sheet
     scrim + controlSheet      side sheet with stream details + Disconnect
     splash         ASCII "Tandem" on black; ripples open onto the connect
                    screen at launch, then it is gone

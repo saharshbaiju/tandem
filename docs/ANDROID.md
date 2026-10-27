@@ -97,21 +97,23 @@ revealing the desktop underneath (the video `SurfaceView` is *behind* the
 connect screen the whole time). Android 8–12 get the same choreography with
 canvas-drawn rings and a clipped circular reveal.
 
-**Live:** full-bleed, immersive. Chrome is a Google-style status pill
-(*Live · 2400 × 1080*) that fades after ~3 s, and a slim handle on the right edge
-that opens a **side sheet** with the stream's details — computer name, link
+**Live:** full-bleed, immersive, with no live indicator over the desktop. The
+only chrome is a slim handle on the right edge (it dims after ~3 s; a tap on
+the video brings it back) that opens a **side sheet** with the stream's details — computer name, link
 (USB tethering / Wi-Fi / adb) and address, resolution, refresh rate, scale,
 position, quality, desktop (Hyprland / GNOME), **touch** (on / off and why) —
 and **Disconnect**. Back closes the sheet; while live it *opens* the sheet instead of
 disconnecting (an accidental edge swipe never drops the stream — Disconnect is a
-deliberate tap in the sheet). Back while connecting cancels.
+deliberate tap in the sheet). Back while connecting cancels. A status pill
+appears only while the picture may be frozen: *Connecting…* and
+*Reconnecting…* (when a working link drops).
 
 **Touch:** when the computer has touch input on, every touch
 on the video goes to the computer (§4.6): tap, drag, scroll, long-press, pinch —
 handled by the desktop apps like a real touchscreen, while the computer's mouse
 pointer stays where it is. Touches on the black letterbox bars, the edge handle
 and the open sheet stay on the phone. With touch off or unavailable on the
-computer, a tap on the video peeks the status pill instead, and the sheet's
+computer, a tap on the video brings back the edge handle instead, and the sheet's
 *Touch* row says why.
 
 **Security:** the app connects only with the computer's pairing key, and from
@@ -146,7 +148,7 @@ app/src/main/java/io/github/saharshbaiju/tandem/
   AsciiSplashView.kt       launch splash: ASCII wordmark, ripples, reveal (port of the website's)
   AspectRatioSurfaceView.kt  letterboxes the video to the stream's aspect ratio
 app/src/main/res/
-  layout/activity_main.xml connect screen, status pill, edge handle, side sheet, splash
+  layout/activity_main.xml connect screen, (re)connecting pill, edge handle, side sheet, splash
   values/themes.xml        Material 3 DynamicColors theme + fallback palette overlay
   drawable/ic_*.xml        Material icons
   drawable-nodpi/ic_launcher_foreground.png  ASCII "T" (432 px layer, safe zone 264 px)

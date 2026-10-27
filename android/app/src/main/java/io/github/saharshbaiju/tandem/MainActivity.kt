@@ -39,13 +39,14 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
  *  IDLE        connect card: scan the TUI's QR (or type an address), Connect.
  *  CONNECTING  ripples spread from where you tapped while we connect.
  *  LIVE        first frame decoded -> the connect screen dissolves like water
- *              into the video. Chrome is just a fading status pill and a slim
+ *              into the video. No live indicator: chrome is just a slim
  *              edge handle that opens a side sheet (details + Disconnect).
- *  RECONNECTING  the link dropped after working; retries with backoff.
+ *  RECONNECTING  the link dropped after working; retries with backoff. A
+ *              "Reconnecting…" pill says so (the picture is frozen meanwhile).
  *
  * Touch: while LIVE, and when the computer has touch input on, every touch
  * on the video goes to the computer (see [TouchForwarder]). Without touch, a
- * tap on the video just peeks the status pill.
+ * tap on the video just peeks the edge handle.
  *
  * Security: a computer is only ever connected to with its pairing key (and,
  * from a QR, its certificate fingerprint); see [SecureChannel]. A link from
@@ -383,14 +384,14 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
                 if (state == State.LIVE) b.connectScreen.reveal { onRevealed() }
             }, wait)
         } else {
-            showPill()
+            showChrome()
         }
     }
 
     private fun onRevealed() {
         b.primaryBtn.isEnabled = true
         enterImmersive()
-        showPill()
+        showChrome()
     }
 
     override fun onStreamInfo(session: StreamSession, width: Int, height: Int) = runOnUiThread {
@@ -467,7 +468,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         state = s
         render()
         fillSheet()
-        if (s == State.RECONNECTING) showPill()
+        if (s == State.RECONNECTING) showChrome()
         if (s == State.IDLE) {
             // no live chrome on the connect screen (a tap while connecting
             // could leave a stale "Connecting…" pill over the error)
@@ -490,22 +491,32 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
 
     // ------------------------------------------------------------- live chrome
 
-    private fun showPill() {
-        val (text, color) = when (state) {
-            State.LIVE -> "Live" + (if (streamSize.isNotEmpty()) "  ·  $streamSize" else "") to R.color.live
-            State.RECONNECTING -> "Reconnecting…" to R.color.pending
-            State.CONNECTING -> "Connecting…" to R.color.pending
+    /**
+     * Show the edge handle (the way to the side sheet) and, only while the
+     * picture may be frozen, a "Connecting…" / "Reconnecting…" pill. A live
+     * stream gets no indicator: the moving desktop says it already.
+     */
+    private fun showChrome() {
+        val text = when (state) {
+            State.RECONNECTING -> "Reconnecting…"
+            State.CONNECTING -> "Connecting…"
+            State.LIVE -> null
             State.IDLE -> return
         }
-        b.statusText.text = text
-        b.dot.backgroundTintList = ColorStateList.valueOf(getColor(color))
-        appear(b.statusPill)
+        if (text != null) {
+            b.statusText.text = text
+            b.dot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.pending))
+            appear(b.statusPill)
+        } else if (b.statusPill.visibility == View.VISIBLE) {
+            b.statusPill.animate().alpha(0f).translationY(-dp(12f)).setDuration(250)
+                .withEndAction { b.statusPill.visibility = View.GONE }.start()
+        }
         appear(b.edgeHandle, 0.9f)
         ui.removeCallbacks(autoHide)
         if (state == State.LIVE && !sheetOpen) ui.postDelayed(autoHide, 2800)
     }
 
-    private fun peekChrome() = showPill()
+    private fun peekChrome() = showChrome()
 
     private fun appear(v: View, target: Float = 1f) {
         if (v.visibility != View.VISIBLE) {
@@ -517,7 +528,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             .setInterpolator(EMPHASIZED).start()
     }
 
-    /** Fade the pill out and dim the handle so the desktop is unobstructed. */
+    /** Fade any pill out and dim the handle so the desktop is unobstructed. */
     private fun fadeChrome() {
         b.statusPill.animate().alpha(0f).translationY(-dp(12f)).setDuration(400)
             .withEndAction { b.statusPill.visibility = View.GONE }.start()
@@ -546,7 +557,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             .withEndAction { b.scrim.visibility = View.GONE }.start()
         b.controlSheet.animate().translationX(b.controlSheet.width + dp(24f))
             .setDuration(300).setInterpolator(EMPHASIZED).start()
-        if (state != State.IDLE) showPill()
+        if (state != State.IDLE) showChrome()
     }
 
     private fun fillSheet() {
