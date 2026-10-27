@@ -169,4 +169,4 @@ if (( ! on_path )); then
 fi
 say "Done. Open a new terminal and run:  tandem"
 (( on_path )) || say "(or right now:  $BIN/tandem)"
-say "Phone app: https://github.com/$REPO/releases/latest/download/Tandem.apk"
+say "Phone app: https://github.com/$REPO/releases/latest  (tap Tandem.apk)"

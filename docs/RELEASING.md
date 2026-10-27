@@ -5,7 +5,7 @@
 | Piece | Channel | What the user does |
 | --- | --- | --- |
 | PC side (Python, no build step) | `install.sh` from the `main` branch; downloads the latest release's `tandem-linux.tar.gz` (falls back to the `main` tarball if there's no release yet) | `curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh \| bash`, then `tandem` |
-| Phone app | GitHub Releases: `Tandem-<version>.apk`, plus the same file as `Tandem.apk` so `releases/latest/download/Tandem.apk` (the website's Download button) is always the newest; signed with the Tandem release key | Download on the phone, install |
+| Phone app | GitHub Releases: `Tandem-<version>.apk`, plus the same file as `Tandem.apk`, a name that never changes (the website's Download buttons open the release page, where people tap it: Chrome on Android can leave an APK fetched straight through GitHub's redirects stuck at 100%); signed with the Tandem release key | Download on the phone, install |
 | Debug app (testers) | GitHub Releases: `Tandem-<version>-debug.apk` — package `io.github.saharshbaiju.tandem.debug`, named *Tandem (debug)* | Installs *next to* the normal app; for logs and testing |
 
 The installer is distro-agnostic: it asks `linux/core.py` which packages are
@@ -65,7 +65,7 @@ The 0.5.0 release notes say so.
    (cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew assembleRelease assembleDebug)
    mkdir -p dist
    cp android/app/build/outputs/apk/release/app-release.apk dist/Tandem-$V.apk
-   cp dist/Tandem-$V.apk dist/Tandem.apk          # stable name for the website link
+   cp dist/Tandem-$V.apk dist/Tandem.apk          # the same app under a name that never changes
    cp android/app/build/outputs/apk/debug/app-debug.apk dist/Tandem-$V-debug.apk
    tar --exclude=__pycache__ -czf dist/tandem-linux.tar.gz linux LICENSE NOTICE
    (cd dist && sha256sum Tandem-$V.apk Tandem.apk Tandem-$V-debug.apk tandem-linux.tar.gz > SHA256SUMS)

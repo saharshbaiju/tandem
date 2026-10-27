@@ -31,7 +31,7 @@ On the computer (Ubuntu, Fedora or Arch), one command installs Tandem and the pa
 curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 ```
 
-Then run `tandem` in a new terminal and choose Start Tandem; a QR code appears. On the phone, install the app from https://github.com/saharshbaiju/tandem/releases/latest/download/Tandem.apk (always the latest version), tap Scan QR code, then Connect.
+Then run `tandem` in a new terminal and choose Start Tandem; a QR code appears. On the phone, install Tandem.apk from the latest release, https://github.com/saharshbaiju/tandem/releases/latest, tap Scan QR code, then Connect.
 
 ## Frequently asked
 
