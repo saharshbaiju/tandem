@@ -1,4 +1,4 @@
-# Screen Extender — Platforms: Arch, Ubuntu, Fedora
+# Tandem — Platforms: Arch, Ubuntu, Fedora
 
 The daemon picks a **backend** from the running session:
 
@@ -29,7 +29,11 @@ sudo pacman -S --needed libva-utils android-tools   # optional: VA-API probe, ph
   monitor and workspace changes go through `hyprctl eval` with a legacy fallback.
 - The encoder runs on the GPU Hyprland renders on (first entry of
   `AQ_DRM_DEVICES`): **NVENC** if that's an NVIDIA card (needs the proprietary
-  driver; NVIDIA's VA-API driver can't encode), otherwise **VA-API** on that
+  driver; NVIDIA's VA-API driver can't encode), captured zero-copy through
+  xdg-desktop-portal-hyprland and GStreamer (`xdg-desktop-portal-hyprland
+  gst-plugin-pipewire gst-plugins-base gst-plugins-bad python-gobject`; the
+  installer adds them, and without them it falls back to wf-recorder, which
+  makes the main screen stutter), otherwise **VA-API** on that
   GPU's render node with the matching `LIBVA_DRIVER_NAME`. Force one with
   `--encoder h264_nvenc|h264_vaapi|libx264`. If the hardware encoder can't
   start (exits, or produces nothing for 4 s), the daemon falls back to x264
@@ -42,22 +46,22 @@ sudo pacman -S --needed libva-utils android-tools   # optional: VA-API probe, ph
 - **Touch input** needs a one-time setup: the phone's touches are replayed
   through a virtual touchscreen in `/dev/uinput`, which is root-only on a stock
   Arch install. The installer offers to add a udev rule that gives it to the
-  user logged in at the seat; or start the extender in `amvd` and press **t**
+  user logged in at the seat; or start the extender in `tandem` and press **t**
   when the live view says *Touch: needs one-time setup*. What it runs (with
   sudo):
 
   ```bash
   echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' \
-      > /etc/udev/rules.d/70-amvd-uinput.rules
-  echo uinput > /etc/modules-load.d/amvd-uinput.conf
+      > /etc/udev/rules.d/70-tandem-uinput.rules
+  echo uinput > /etc/modules-load.d/tandem-uinput.conf
   modprobe uinput && udevadm control --reload \
       && udevadm trigger --name-match=/dev/uinput && udevadm settle
   ```
 
   (If you're already in the `input` group and `/dev/uinput` is group-writable —
   ydotool's package does this — nothing is needed.) The device is called
-  `amvd-touch` (`hyprctl devices` lists it under *touch* while streaming) and is
-  mapped onto `EXT-1` with `hl.device({ name = "amvd-touch", output = "EXT-1" })`.
+  `tandem-touch` (`hyprctl devices` lists it under *touch* while streaming) and is
+  mapped onto `EXT-1` with `hl.device({ name = "tandem-touch", output = "EXT-1" })`.
 
 ## Ubuntu (22.04 and newer, GNOME)
 
@@ -168,12 +172,12 @@ includes that address.
 
 | Symptom | Check |
 | --- | --- |
-| Phone: *"App not installed"* / *"package conflicts with an existing package"* (the `-debug.apk` installs fine) | An older `com.archextender` signed with a different key is installed: before 0.4.0, debug and Android Studio builds used the release package id with the debug key. Uninstall *Screen Extender* once, then install the release APK (`adb install` reports it as `INSTALL_FAILED_UPDATE_INCOMPATIBLE: … signatures do not match`). Debug builds are `com.archextender.debug` since 0.4.0, so this can't recur |
-| Phone: *"reachable, but the extender isn't running"* | Start it in the TUI (`amvd` → Start extender); check the daemon log in the live view |
+| Phone: two apps, *Screen Extender* and *Tandem* | Screen Extender (`com.archextender`) is amVD 0.4 or older; Tandem (`io.github.saharshbaiju.tandem`, 0.5+) is a separate package, so it can't replace it. Uninstall Screen Extender. See [RELEASING.md](RELEASING.md#renamed-from-amvd--screen-extender-05) |
+| Phone: *"reachable, but the extender isn't running"* | Start it in the TUI (`tandem` → Start extender); check the daemon log in the live view |
 | Phone: *"Couldn't reach …"* | The live view's **connection checks** say why. *Firewall … press f*: opens TCP 5000 (ufw / firewalld / nftables / iptables are detected without root — note Arch's stock `/etc/nftables.conf` drops everything but SSH once `nftables.service` is enabled; `f` adds a runtime rule, add `tcp dport 5000 accept` to the file to keep it). *USB cable*: either **USB tethering** (no developer options; the PC must get an IP from the phone — NetworkManager does it, minimal Hyprland setups with only iwd/systemd-networkd don't, so the check offers **u**: `nmcli device connect`, a persistent systemd-networkd `.network` file matching the tether drivers, or `dhcpcd`) or **USB debugging** (adb installed, "Allow USB debugging" accepted). Tethering goes through the firewall like Wi-Fi; adb doesn't. Rescan the QR after fixing. Same Wi-Fi but still unreachable: guest/campus/hotel Wi-Fi isolates clients — use the cable or the phone's hotspot |
-| Phone: *"Connected, but no video arrived"* | Encoder failed — the live view's daemon log shows `gst:` / wf-recorder errors; `python3 extenderd.py … </dev/null` prints everything |
-| TUI: *"python gi [missing]"* even after installing `python3-gobject` / `python-gobject` | Another `python3` (conda/miniconda, pyenv, a venv, Homebrew) comes first on `PATH`; distro packages only go into `/usr/bin/python3`. Fixed: `amvd`, `start-extender.sh` and `install.sh` always use `/usr/bin/python3` (override with `AMVD_PYTHON=…`); the Dependencies screen says which interpreter it's running under. Re-run the installer to get the fix |
-| `amvd`: `_curses.error: setupterm: could not find terminfo database` | Same cause: conda's Python bundles its own ncurses, which doesn't look in `/usr/share/terminfo`. Fixed the same way; started directly (`python3 tui.py`), the TUI also retries with the system terminfo directories and then `TERM=xterm-256color` |
+| Phone: *"Connected, but no video arrived"* | Encoder failed — the live view's daemon log shows `gst:` / wf-recorder errors; `python3 tandemd.py … </dev/null` prints everything |
+| TUI: *"python gi [missing]"* even after installing `python3-gobject` / `python-gobject` | Another `python3` (conda/miniconda, pyenv, a venv, Homebrew) comes first on `PATH`; distro packages only go into `/usr/bin/python3`. Fixed: `tandem`, `start-extender.sh` and `install.sh` always use `/usr/bin/python3` (override with `TANDEM_PYTHON=…`); the Dependencies screen says which interpreter it's running under. Re-run the installer to get the fix |
+| `tandem`: `_curses.error: setupterm: could not find terminfo database` | Same cause: conda's Python bundles its own ncurses, which doesn't look in `/usr/share/terminfo`. Fixed the same way; started directly (`python3 tui.py`), the TUI also retries with the system terminfo directories and then `TERM=xterm-256color` |
 | TUI: *"GNOME is running on X11"* | Log in to the Wayland session |
 | GNOME: `could not create the virtual monitor` | GNOME < 40, or Mutter's ScreenCast interface not available (`gdbus introspect --session -d org.gnome.Mutter.ScreenCast -o /org/gnome/Mutter/ScreenCast`) |
 | GNOME: monitor appears but on the wrong side | The log shows `could not place virtual monitor (…)`; drag it in *Settings → Displays* — the stream keeps working |
@@ -183,8 +187,12 @@ includes that address.
 | Hyprland on Intel: connects, black screen | Install `intel-media-driver` (`vainfo` should list `VAProfileH264… VAEntrypointEncSlice*`); without it the daemon now falls back to x264 after 4 s — the log shows `encoder: …` lines for each attempt |
 | Stutter on Wi-Fi | Use 5 GHz, lower *Quality*, or use USB tethering |
 | Phone sheet: *Touch Off — Scan the QR code…* | The phone connected with a typed address or a QR from before touch existed: scan the current QR |
-| Phone sheet: *Touch Off — pairing key changed* | *Paired phones → forget all* was used (or the key file deleted): scan the current QR |
+| Phone: *"Wrong pairing code - scan the QR code on the computer again"* | *Paired phones → forget all* was used (or the key file deleted), or a typed code is wrong: scan the current QR / check the code under it |
+| Phone: *"This isn't the computer you paired with…"* | The computer's certificate differs from the one in the scanned QR: another machine answered on that address, or `~/.config/tandem/tls/` was recreated. Scan the computer's current QR |
+| Phone: *"Couldn't set up an encrypted connection. Update Tandem…"* / *"This QR code is from an older version…"* | Computer runs a version before 0.5 (no encryption): re-run the install command, then scan the new QR |
+| Daemon log: `client … rejected: … (locked out for a minute)` | 5 failed pairings from that address in a minute: it is refused for 60 s ([SECURITY.md](./SECURITY.md) §4.5) |
+| TUI: *"Couldn't set up the encrypted connection"* | `openssl` missing (Dependencies screen installs it) or `~/.config/tandem/` not writable |
 | Hyprland: *Touch: needs one-time setup* | `/dev/uinput` isn't writable — press **t** in the live view (see *Arch Linux + Hyprland*); after a kernel update without the modules-load file, `sudo modprobe uinput` |
-| Hyprland: touches land on the laptop screen | The device mapping was dropped (e.g. a Hyprland config reload) — change side/scale or restart the stream to re-apply it; check `hyprctl devices` shows `amvd-touch` |
+| Hyprland: touches land on the laptop screen | The device mapping was dropped (e.g. a Hyprland config reload) — change side/scale or restart the stream to re-apply it; check `hyprctl devices` shows `tandem-touch` |
 | Touch does nothing in one app | That app doesn't handle Wayland touch events (some terminals and older toolkits); GTK, Qt, Chromium/Electron and Firefox do |
 | Fedora: `openh264` download fails | Cisco mirror hiccup — retry, or use RPM Fusion's x264 (`gstreamer1-plugins-ugly`) |

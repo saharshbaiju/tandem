@@ -13,14 +13,14 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <com.archextender.AspectRatioSurfaceView
+    <io.github.saharshbaiju.tandem.AspectRatioSurfaceView
         android:id="@+id/surface"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="center" />
 
     <!-- ============================================================ connect -->
-    <com.archextender.RippleRevealLayout
+    <io.github.saharshbaiju.tandem.RippleRevealLayout
         android:id="@+id/connectScreen"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -87,6 +87,16 @@
                     android:text="@string/status_idle"
                     app:chipIcon="@drawable/ic_link"
                     app:chipIconTint="?attr/colorOnSurfaceVariant" />
+
+                <!-- Attribution required by the GPL section 7 terms in NOTICE. -->
+                <TextView
+                    android:id="@+id/credit"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/credit"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
 
             <!-- right: the connect card -->
@@ -189,46 +199,74 @@
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
-                    <!-- manual address entry -->
+                    <!-- manual entry: address, port and the pairing code shown in tandem -->
                     <LinearLayout
                         android:id="@+id/manualGroup"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
-                        android:orientation="horizontal"
+                        android:orientation="vertical"
                         android:visibility="gone">
 
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="?attr/textInputOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:hint="@string/address">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/hostInput"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:imeOptions="actionNext|flagNoExtractUi"
+                                    android:inputType="textUri"
+                                    android:maxLines="1" />
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="?attr/textInputOutlinedStyle"
+                                android:layout_width="104dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:hint="@string/port">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/portInput"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:imeOptions="actionNext|flagNoExtractUi"
+                                    android:inputType="number"
+                                    android:maxLines="1"
+                                    android:text="5000" />
+                            </com.google.android.material.textfield.TextInputLayout>
+                        </LinearLayout>
+
                         <com.google.android.material.textfield.TextInputLayout
                             style="?attr/textInputOutlinedStyle"
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:hint="@string/address">
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/pairing_code"
+                            app:helperText="@string/pairing_code_help">
 
+                            <!-- visible password: no autocorrect, no suggestions,
+                                 not learned by the keyboard -->
                             <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/hostInput"
+                                android:id="@+id/codeInput"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:imeOptions="actionNext|flagNoExtractUi"
-                                android:inputType="textUri"
+                                android:fontFamily="monospace"
+                                android:imeOptions="actionGo|flagNoExtractUi|flagNoPersonalizedLearning"
+                                android:importantForAutofill="no"
+                                android:inputType="textVisiblePassword|textNoSuggestions"
+                                android:maxLength="32"
                                 android:maxLines="1" />
-                        </com.google.android.material.textfield.TextInputLayout>
-
-                        <com.google.android.material.textfield.TextInputLayout
-                            style="?attr/textInputOutlinedStyle"
-                            android:layout_width="104dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="8dp"
-                            android:hint="@string/port">
-
-                            <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/portInput"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:imeOptions="actionGo|flagNoExtractUi"
-                                android:inputType="number"
-                                android:maxLines="1"
-                                android:text="5000" />
                         </com.google.android.material.textfield.TextInputLayout>
                     </LinearLayout>
 
@@ -279,7 +317,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
-    </com.archextender.RippleRevealLayout>
+    </io.github.saharshbaiju.tandem.RippleRevealLayout>
 
     <!-- ========================================================= live chrome -->
     <com.google.android.material.card.MaterialCardView

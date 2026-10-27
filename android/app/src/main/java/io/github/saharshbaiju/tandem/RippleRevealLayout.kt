@@ -1,4 +1,4 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter

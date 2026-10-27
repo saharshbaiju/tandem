@@ -8,12 +8,14 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ArchExtender"
-        android:usesCleartextTraffic="true">
+        android:theme="@style/Theme.Tandem"
+        android:usesCleartextTraffic="false">
 
         <!-- Download Google's QR scanner module at install time, not on first scan. -->
         <meta-data
@@ -31,13 +33,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- The TUI's pairing QR is an asext:// link, so scanning it with the
+            <!-- The TUI's pairing QR is a tandem:// link, so scanning it with the
                  stock camera app opens us with the computer pre-filled. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="asext" />
+                <data android:scheme="tandem" />
             </intent-filter>
         </activity>
     </application>

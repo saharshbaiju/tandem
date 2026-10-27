@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Screen Extender — PC installer (Ubuntu / Fedora / Arch).
+# Tandem — PC installer (Ubuntu / Fedora / Arch).
 #
-#   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/amVD/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 #   # or, from a checkout:  ./install.sh
 #
-# Installs the Linux side into ~/.local/share/amvd, puts an `amvd` command in
-# ~/.local/bin (so `amvd` works in any terminal), adds an app-menu entry, and installs the system packages your
+# Installs the Linux side into ~/.local/share/tandem, puts a `tandem` command in
+# ~/.local/bin (so `tandem` works in any terminal), adds an app-menu entry, and installs the system packages your
 # desktop needs (asks for sudo once). Re-run any time to update.
 # Uninstall: ./install.sh --uninstall
 set -euo pipefail
 
-REPO="saharshbaiju/amVD"
-DEST="${XDG_DATA_HOME:-$HOME/.local/share}/amvd"
+REPO="saharshbaiju/tandem"
+DEST="${XDG_DATA_HOME:-$HOME/.local/share}/tandem"
 BIN="$HOME/.local/bin"
 APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
@@ -19,11 +19,11 @@ say()  { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  rm -rf "$DEST" "$BIN/amvd" "$APPS/amvd.desktop"
-  say "Removed Screen Extender (settings kept in ~/.config/archscreenextender)."
-  if [[ -e /etc/udev/rules.d/70-amvd-uinput.rules ]]; then
+  rm -rf "$DEST" "$BIN/tandem" "$APPS/tandem.desktop"
+  say "Removed Tandem (settings kept in ~/.config/tandem)."
+  if [[ -e /etc/udev/rules.d/70-tandem-uinput.rules ]]; then
     say "Touch-input access rule left in place; remove it with:"
-    say "  sudo rm /etc/udev/rules.d/70-amvd-uinput.rules /etc/modules-load.d/amvd-uinput.conf"
+    say "  sudo rm /etc/udev/rules.d/70-tandem-uinput.rules /etc/modules-load.d/tandem-uinput.conf"
   fi
   exit 0
 fi
@@ -31,19 +31,19 @@ fi
 # ---- 1. get the files: a local checkout, else the latest release, else main
 SRC=""
 here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-if [[ -n "$here" && -f "$here/linux/extenderd.py" ]]; then
+if [[ -n "$here" && -f "$here/linux/tandemd.py" ]]; then
   SRC="$here/linux"
   say "Installing from this checkout ($here)"
 else
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-  url="https://github.com/$REPO/releases/latest/download/amvd-linux.tar.gz"
-  if ! curl -fsSL "$url" -o "$tmp/amvd.tar.gz"; then
+  url="https://github.com/$REPO/releases/latest/download/tandem-linux.tar.gz"
+  if ! curl -fsSL "$url" -o "$tmp/tandem.tar.gz"; then
     url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
     say "No release found; using the main branch"
-    curl -fsSL "$url" -o "$tmp/amvd.tar.gz"
+    curl -fsSL "$url" -o "$tmp/tandem.tar.gz"
   fi
-  tar -xzf "$tmp/amvd.tar.gz" -C "$tmp"
-  SRC="$(dirname "$(find "$tmp" -name extenderd.py -path '*linux*' | head -1)")"
+  tar -xzf "$tmp/tandem.tar.gz" -C "$tmp"
+  SRC="$(dirname "$(find "$tmp" -name tandemd.py -path '*linux*' | head -1)")"
   say "Downloaded $(basename "$url")"
 fi
 
@@ -52,15 +52,26 @@ mkdir -p "$DEST" "$BIN" "$APPS"
 rm -rf "$DEST/linux"
 cp -r "$SRC" "$DEST/linux"
 find "$DEST/linux" -name __pycache__ -prune -exec rm -rf {} +
-chmod +x "$DEST/linux/amvd" "$DEST/linux/start-extender.sh"
-ln -sf "$DEST/linux/amvd" "$BIN/amvd"
+# The license travels with the program (GPL-3.0; NOTICE has the extra terms).
+for f in LICENSE NOTICE; do
+  if [[ -f "$SRC/../$f" ]]; then cp "$SRC/../$f" "$DEST/$f"; fi
+done
+chmod +x "$DEST/linux/tandem" "$DEST/linux/start-extender.sh"
+ln -sf "$DEST/linux/tandem" "$BIN/tandem"
 
-cat > "$APPS/amvd.desktop" <<EOF
+# Before the rename to Tandem this was installed as `amvd`; remove that copy.
+old="${XDG_DATA_HOME:-$HOME/.local/share}/amvd"
+if [[ -d "$old" || -L "$BIN/amvd" ]]; then
+  rm -rf "$old" "$BIN/amvd" "$APPS/amvd.desktop" "$HOME/.config/fish/conf.d/amvd.fish"
+  say "Removed the old amvd install (the command is now: tandem)"
+fi
+
+cat > "$APPS/tandem.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Screen Extender
+Name=Tandem
 Comment=Use an Android phone as a second monitor
-Exec=$BIN/amvd
+Exec=$BIN/tandem
 Icon=video-display
 Terminal=true
 Categories=Utility;
@@ -68,18 +79,18 @@ EOF
 
 # ---- 3. system packages for this distro + desktop (same list the TUI checks)
 cd "$DEST/linux"
-# Every check below must run under the interpreter `amvd` runs under (the
+# Every check below must run under the interpreter `tandem` runs under (the
 # system one): asking a conda/pyenv python3 whether PyGObject is installed
 # gives the wrong answer for the program that will actually use it.
 source ./python.sh
-PY="$(amvd_python)" || { warn "python3 is required"; exit 1; }
+PY="$(tandem_python)" || { warn "python3 is required"; exit 1; }
 read -r -a PKGS <<<"$("$PY" -c 'import core; print(" ".join(core.missing_packages(core.Config().resolved_backend())))')"
 if (( ${#PKGS[@]} )); then
   say "Installing packages: ${PKGS[*]}"
   if command -v apt-get >/dev/null; then sudo apt-get update -qq || true; fi
   CMD="$("$PY" -c 'import core,sys; c=core.install_command(sys.argv[1:]); print(" ".join(c) if c else "")' "${PKGS[@]}")"
   if [[ -n "$CMD" ]]; then
-    $CMD || warn "Package install failed — open 'amvd' → Dependencies to retry."
+    $CMD || warn "Package install failed — open 'tandem' → Dependencies to retry."
   else
     warn "Unknown distro: install these yourself: ${PKGS[*]}"
   fi
@@ -136,25 +147,25 @@ t = core.touch_setup_check(core.Config())
 sys.exit(subprocess.run(t["fix"]).returncode if t else 0)'; then
         say "Touch input ready"
       else
-        warn "Couldn't set up touch input; run 'amvd', start the extender and press t"
+        warn "Couldn't set up touch input; run 'tandem', start the extender and press t"
       fi
     fi
   fi
 fi
 
-# ---- 6. make `amvd` callable from any new terminal
+# ---- 6. make `tandem` callable from any new terminal
 on_path=1; case ":$PATH:" in *":$BIN:"*) ;; *) on_path=0;; esac
 if (( ! on_path )); then
-  line='export PATH="$HOME/.local/bin:$PATH"   # added by amvd installer'
+  line='export PATH="$HOME/.local/bin:$PATH"   # added by tandem installer'
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     [[ -f "$rc" || "$rc" == "$HOME/.bashrc" ]] || continue
     grep -qs '.local/bin' "$rc" || { echo "$line" >> "$rc"; say "Added ~/.local/bin to PATH in $(basename "$rc")"; }
   done
   if [[ -d "$HOME/.config/fish" ]]; then
     mkdir -p "$HOME/.config/fish/conf.d"
-    echo 'fish_add_path -g $HOME/.local/bin' > "$HOME/.config/fish/conf.d/amvd.fish"
+    echo 'fish_add_path -g $HOME/.local/bin' > "$HOME/.config/fish/conf.d/tandem.fish"
   fi
 fi
-say "Done. Open a new terminal and run:  amvd"
-(( on_path )) || say "(or right now:  $BIN/amvd)"
-say "Phone app: https://github.com/$REPO/releases/latest  (amVD-*.apk)"
+say "Done. Open a new terminal and run:  tandem"
+(( on_path )) || say "(or right now:  $BIN/tandem)"
+say "Phone app: https://github.com/$REPO/releases/latest  (Tandem-*.apk)"

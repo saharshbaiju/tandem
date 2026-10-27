@@ -1,11 +1,11 @@
-# Screen Extender
+# Tandem
 
 Turn an Android phone into a **real, low-latency second monitor** for Linux —
 like spacedesk on Windows, but native and GPU-accelerated end to end.
 
 | Desktop | Distros | How the virtual monitor is made |
 | --- | --- | --- |
-| **Hyprland** | Arch (and anything running Hyprland) | `hyprctl output create headless` + wf-recorder / VA-API |
+| **Hyprland** | Arch (and anything running Hyprland) | `hyprctl output create headless` + wf-recorder / VA-API (NVIDIA: xdg-desktop-portal-hyprland + GStreamer NVENC, zero-copy) |
 | **GNOME on Wayland** | **Ubuntu 22.04+**, **Fedora 36+**, any GNOME 40+ | Mutter's virtual-monitor API + PipeWire + GStreamer |
 
 **Touch works too:** tap, drag, scroll and pinch on the phone to control what's
@@ -22,22 +22,39 @@ Only a phone that scanned the computer's QR code may control it. Pair by
   protocol, the reliability rules, the latency budget, and the bugs fixed.
 - [`docs/ANDROID.md`](docs/ANDROID.md) — the phone app: UI, components, decode
   path, developer workflow.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — who can connect, encryption (TLS with
+  a pinned certificate), the pairing-key handshake, limits, and how it was tested.
 - [`docs/RELEASING.md`](docs/RELEASING.md) — how releases are built, signed and
   published (APK + Linux tarball on GitHub Releases).
+- [`website/index.html`](website/index.html) — the landing page: one static
+  file, no build step. Black and white with ASCII art; dark by default with a
+  light theme (follows the system, switch in the nav). The splash is the app's
+  connect ripple (`RippleRevealLayout`'s wave maths) rendered in ASCII.
+  The scroll demo draws front views of a gunmetal laptop, phone, tablet and
+  foldable in CSS, showing a Hyprland desktop (Waybar, Firefox on the GitHub
+  repo, kitty) over a generated wallpaper; no image files except
+  `website/assets/saharsh.jpg` (the maker photo). The star count comes from the
+  GitHub API; the Donate links point at GitHub Sponsors. Published to
+  <https://saharshbaiju.github.io/tandem/> by `.github/workflows/pages.yml` on
+  every push to `main` that touches `website/`. Search and sharing: the head has
+  the description, canonical URL, Open Graph / Twitter card (`assets/og.png`)
+  and schema.org JSON-LD; `llms.txt` is a plain summary for AI assistants and
+  `sitemap.xml` is for Search Console. Preview with `python3 -m http.server -d website 8765`; add `?nosplash` (or
+  any `#section` link) to skip the splash.
 
 ## Install
 
 ### On the computer (Ubuntu, Fedora, Arch)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/saharshbaiju/amVD/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 ```
 
-Then open a new terminal and run **`amvd`**.
+Then open a new terminal and run **`tandem`**.
 
-The installer puts the program in `~/.local/share/amvd`, adds the `amvd` command
-(and adds `~/.local/bin` to your shell's PATH if needed), creates a *Screen
-Extender* app-menu entry, and installs the packages your distro and desktop need
+The installer puts the program in `~/.local/share/tandem`, adds the `tandem` command
+(and adds `~/.local/bin` to your shell's PATH if needed), creates a *Tandem*
+app-menu entry, and installs the packages your distro and desktop need
 with `apt` / `dnf` / `pacman` (it asks for your password once). Re-run the same
 line to update; `./install.sh --uninstall` removes it. From a git checkout,
 `./install.sh` installs that checkout instead.
@@ -48,23 +65,21 @@ line to update; `./install.sh --uninstall` removes it. From a git checkout,
 
 ### On the phone (Android 8+)
 
-Download **`amVD-<version>.apk`** from the
-[latest release](https://github.com/saharshbaiju/amVD/releases/latest) on the
+Download **`Tandem-<version>.apk`** from the
+[latest release](https://github.com/saharshbaiju/tandem/releases/latest) on the
 phone, open it, and allow "install unknown apps" for your browser when asked.
 
-> **"App not installed" / "package conflicts with an existing package"?** The
-> phone still has an old *Screen Extender* that was signed with a different key
-> (a test build from before 0.4.0). Android never lets one key's app replace
-> another's, so uninstall *Screen Extender* once, then install the APK again.
-> Later updates install over it normally. (The `-debug.apk` is a separate app,
-> *Screen Extender (debug)*, which is why it installed when the normal one didn't.)
+> **Used it before as *Screen Extender* (amVD 0.4 or older)?** Tandem is a new
+> app with its own package id, so it installs next to the old one instead of
+> replacing it. Uninstall *Screen Extender*, then scan the new QR code.
+> (The `-debug.apk` is a separate app again, *Tandem (debug)*, for testing.)
 
 ### Connect
 
-1. Run `amvd` → **Start extender**. A QR code appears.
+1. Run `tandem` → **Start extender**. A QR code appears.
 2. Pick how the phone reaches the computer:
    - **USB cable** (lowest latency): enable *USB debugging* on the phone and plug
-     it in — `amvd` sets up `adb reverse` by itself. Works even when the phone is
+     it in — `tandem` sets up `adb reverse` by itself. Works even when the phone is
      on mobile data.
    - **USB tethering**: *Settings → Hotspot & tethering → USB tethering* (no
      developer options needed).
@@ -80,10 +95,17 @@ phone, open it, and allow "install unknown apps" for your browser when asked.
    permission for `/dev/uinput` — the installer offers it, or press **t** in the
    live view. On **GNOME** there's nothing to set up.
 
-Pointing the phone's **stock camera** at the QR works too — it's an `asext://`
-link that opens the app with your computer filled in.
+Pointing the phone's **stock camera** at the QR works too — it's a `tandem://`
+link that opens the app and asks you to confirm the computer.
 
-Without the TUI: `~/.local/share/amvd/linux/start-extender.sh usb` prints the
+**Only your phone can connect.** The QR carries a random pairing key and the
+fingerprint of the computer's encryption certificate. Nothing reaches a phone
+until both sides have proved they know that key, and everything (video,
+touches) is encrypted with TLS. Others on the same Wi-Fi can neither watch
+nor touch. To type an address instead of scanning, also enter the **pairing
+code** shown under the QR. Details: [`docs/SECURITY.md`](docs/SECURITY.md).
+
+Without the TUI: `~/.local/share/tandem/linux/start-extender.sh usb` prints the
 same QR and runs the daemon in the foreground.
 
 ## How it works
@@ -94,9 +116,10 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor)
    H.264 encode on the compositor's GPU (NVENC / VA-API, x264 fallback;
                 GStreamer VA / x264 / openh264 on GNOME)
         │  no B-frames, one slice per frame, CBR
-   extenderd.py   splits NAL units, caches the current GOP, one sender
+   tandemd.py   splits NAL units, caches the current GOP, one I/O
         │         thread per phone, 1 s heartbeats, resync on keyframes
-   TCP  — USB tethering, Wi-Fi, or adb reverse (every QR address tried in parallel)
+   TLS over TCP — USB tethering, Wi-Fi, or adb reverse (every QR address tried
+        │         in parallel); pairing-key proof before anything is sent
         │                                        ▲
    Android app → MediaCodec → Surface            │ touches (paired phones only)
                 hardware decode, rendered on arrival
@@ -127,7 +150,7 @@ the app shows *Reconnecting…* over the last frame and resumes by itself.
 ## The terminal UI
 
 ```bash
-amvd
+tandem
 ```
 
 - **Start extender** — launches the daemon and opens the live view: status, the
@@ -137,10 +160,10 @@ amvd
   (left / right / up / down), **resolution** (presets or *Match connected phone*
   via adb), **FPS**, desktop **scale**, **quality** (bitrate), keyframe interval,
   **preferred link** (which address goes first in the QR), **port**, **touch
-  input** (on / off), and **paired phones → forget all** (new pairing key; every
-  phone must rescan the QR to touch again). Saving while
+  input** (on / off), and **paired phones → forget all** (new pairing key;
+  connected phones are dropped and every phone must rescan the QR). Saving while
   streaming applies side/scale instantly; other changes restart the stream.
-  Stored in `~/.config/archscreenextender/config.json`.
+  Stored in `~/.config/tandem/config.json`.
 - **Dependencies** — per distro (pacman / apt / dnf) and per backend; `i`
   installs what's missing.
 - **Detected hardware** — desktop, primary monitor, VA-API node, USB tether
@@ -151,7 +174,7 @@ amvd
 ```bash
 cd linux
 ./start-extender.sh usb|wifi [flags]     # prints the QR, runs in the foreground
-python3 extenderd.py --help
+python3 tandemd.py --help
 ```
 
 ```
@@ -163,7 +186,8 @@ python3 extenderd.py --help
 --encoder auto|h264_nvenc|h264_vaapi|libx264  # Hyprland: compositor GPU, x264 fallback
 --device /dev/dri/renderD128             # Hyprland: VA-API node (h264_vaapi)
 --port 5000
---pairing-key-file ~/.config/archscreenextender/pairing-key   # enables touch for phones with this key
+--pairing-key-file ~/.config/tandem/pairing-key   # phones must prove this key (default)
+--tls-dir ~/.config/tandem/tls                    # TLS certificate (default; created if missing)
 --no-touch                               # view only
 ```
 
@@ -188,7 +212,7 @@ transition on Android 13+ (a canvas version on older phones).
 ```bash
 python3 linux/testsrc.py --width 2400 --height 1080   # fake desktop, real daemon code
 python3 linux/testsrc.py --log-touch                  # …and print the touches it receives
-adb shell am start -a android.intent.action.VIEW -d "'asext://c?h=10.0.2.2&p=5000'"   # emulator
+adb shell am start -a android.intent.action.VIEW -d "'tandem://c?h=10.0.2.2&p=5000'"   # emulator
 adb logcat -s StreamSession
 ```
 
@@ -200,31 +224,36 @@ PC at `10.0.2.2`). More in [`ANDROID.md` §7](docs/ANDROID.md#7-developer-instal
 
 ```
 linux/
-  amvd                  TUI launcher (installed as the `amvd` command)
+  tandem                TUI launcher (installed as the `tandem` command)
   python.sh             picks the system /usr/bin/python3 (not conda/pyenv) for
-                        amvd, start-extender.sh and install.sh
+                        tandem, start-extender.sh and install.sh
   tui.py                curses UI: deps, detection, config, live view + QR
   core.py               config, distro/dependency detection, addresses, QR URI
   qr.py                 dependency-free QR encoder (half-block terminal output)
-  extenderd.py          daemon: backend → NAL parse → GOP cache → TCP broadcast
-  phone_input.py        what phones send back: pairing hello, touches → slots
+  tandemd.py            daemon: backend → NAL parse → GOP cache → TCP broadcast
+  secure_link.py        TLS certificate, pairing key, handshake, lock-out
+  phone_input.py        what admitted phones send back: touches → slots
   uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland)
   backends/hyprland.py  headless output, hyprctl Lua API, wf-recorder, touch mapping
+  backends/xdph.py      NVIDIA: zero-copy capture via the Hyprland portal + GStreamer NVENC
   backends/gnome.py     Mutter ScreenCast virtual monitor, DisplayConfig, GStreamer,
                         RemoteDesktop touch
   start-extender.sh     no-TUI launcher (prints the QR)
   testsrc.py            test-pattern server for app development
-android/app/src/main/java/com/archextender/
+  about.py              the credit line and license notice (shown in the TUI, --version)
+android/app/src/main/java/io/github/saharshbaiju/tandem/
   MainActivity.kt       Material 3 UI, scanner, transitions, side sheet
   StreamSession.kt      parallel connect, framed reader, MediaCodec → Surface
   RippleRevealLayout.kt water ripple + reveal (AGSL)
-  ConnectTarget.kt      asext:// QR / deep link parsing (incl. pairing key)
+  ConnectTarget.kt      tandem:// QR / deep link parsing (pairing key, cert fingerprint)
+  SecureChannel.kt      TLS + certificate pinning + pairing proof
   FrameReader.kt        NALU / ASX1 / PING / INPT framing
-  FrameWriter.kt        HELO / TUCH (phone → computer)
+  FrameWriter.kt        HELO / AUTH / TUCH (phone → computer)
   TouchForwarder.kt     MotionEvent → touch frames
   AspectRatioSurfaceView.kt  letterboxing
-docs/                   PLATFORMS, ARCHITECTURE, ANDROID, RELEASING
-install.sh              one-line installer (any distro), adds the `amvd` command
+LICENSE, NOTICE          GPL-3.0 and its additional terms (see License below)
+docs/                   PLATFORMS, ARCHITECTURE, ANDROID, SECURITY, RELEASING
+install.sh              one-line installer (any distro), adds the `tandem` command
 ```
 
 ## Roadmap
@@ -233,5 +262,21 @@ install.sh              one-line installer (any distro), adds the `amvd` command
 - HEVC decode in the app
 - KDE Plasma backend
 - Pen input (pressure, hover) and typing from the phone
-- TLS with the certificate pinned in the QR
 - Latency HUD
+
+## License
+
+Tandem is free software under the [GNU GPL version 3](LICENSE), with three
+additional terms allowed by its section 7 (written out in [NOTICE](NOTICE)):
+
+- **Keep the credit.** The app's connect screen, the terminal UI's header and
+  `tandemd.py --version` show *Tandem by Saharsh Baiju ·
+  github.com/saharshbaiju/tandem*. Copies and modified versions must keep that
+  notice (they can add their own names next to it).
+- **Use your own name.** A distributed fork must not call itself Tandem or
+  suggest it is the original.
+- **Google Play services is allowed.** The Android app's QR scanner comes from
+  Google Play services, which isn't free software; linking with it is
+  permitted.
+
+Copyright (C) 2026 Saharsh Baiju.

@@ -1,4 +1,4 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import android.content.Context
 import android.util.AttributeSet

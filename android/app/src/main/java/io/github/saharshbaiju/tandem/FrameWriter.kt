@@ -1,4 +1,4 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import java.io.OutputStream
 
@@ -8,9 +8,9 @@ import java.io.OutputStream
  *
  *     4-byte type + 4-byte big-endian length + body
  *
- * Phone -> computer types (see linux/phone_input.py):
- *   "HELO"  JSON {"key": pairing key, "app": version}, once after connecting
- *   "TUCH"  one touch event, see [StreamSession.sendTouch]
+ * Phone -> computer types:
+ *   "HELO" / "AUTH"  the pairing handshake, see [SecureChannel]
+ *   "TUCH"  one touch event, see [StreamSession.sendTouch] (linux/phone_input.py)
  *
  * Each frame goes out in a single write so the bytes of two frames can never
  * interleave; [send] is synchronized for the same reason.
@@ -32,7 +32,6 @@ class FrameWriter(private val out: OutputStream) {
     }
 
     companion object {
-        const val TYPE_HELLO = "HELO"
         const val TYPE_TOUCH = "TUCH"
     }
 }

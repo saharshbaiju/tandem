@@ -1,7 +1,7 @@
 """
-core.py - shared config, detection and dependency logic for Screen Extender.
+core.py - shared config, detection and dependency logic for Tandem.
 
-Used by the TUI (tui.py). The streaming engine (extenderd.py) stays a standalone
+Used by the TUI (tui.py). The streaming engine (tandemd.py) stays a standalone
 CLI that the TUI launches with explicit flags built from a Config here.
 
 Supported desktops (see backends/):
@@ -25,15 +25,16 @@ from dataclasses import asdict, dataclass
 from urllib.parse import quote
 
 import backends
-import phone_input
+import secure_link
 import uinput_touch
 from backends import gnome as gnome_backend
 from backends import hyprland as hypr_backend
 
-CONFIG_DIR = os.path.expanduser("~/.config/archscreenextender")
+CONFIG_DIR = secure_link.CONFIG_DIR
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
-# Shared secret that lets a phone send touches; travels only inside the QR.
-PAIRING_KEY_PATH = os.path.join(CONFIG_DIR, "pairing-key")
+# Shared secret a phone must prove it knows to connect at all (see
+# secure_link.py); it travels only inside the QR code.
+PAIRING_KEY_PATH = secure_link.PAIRING_KEY_PATH
 
 # Quality preset -> CBR bitrate handed to the encoder.
 QUALITY = {"low": "4M", "medium": "8M", "high": "12M", "ultra": "20M"}
@@ -75,8 +76,8 @@ class Config:
     def resolved_backend(self):
         return backends.detect() if self.backend == "auto" else self.backend
 
-    def extenderd_args(self) -> list:
-        """Build the explicit CLI for extenderd.py from this config."""
+    def tandemd_args(self) -> list:
+        """Build the explicit CLI for tandemd.py from this config."""
         return [
             "--backend", self.resolved_backend() or "auto",
             "--output", self.output,
@@ -118,7 +119,7 @@ def save_config(cfg: Config) -> None:
 
 
 # Settings advertised to the phone. Keys must match build_banner_payload() in
-# extenderd.py; the daemon also reads side/scale from here on SIGHUP and moves
+# tandemd.py; the daemon also reads side/scale from here on SIGHUP and moves
 # the monitor live.
 BANNER_PATH = os.path.join(CONFIG_DIR, "daemon-banner.json")
 
@@ -203,6 +204,41 @@ def _va_encode_driver():
     return (va, pkgs) if pkgs else None
 
 
+def _hyprland_on_nvidia():
+    card = hypr_backend.compositor_card()
+    return bool(card) and hypr_backend.gpu_driver(card) == "nvidia"
+
+
+def _xdph_installed():
+    return any(os.path.exists(f"{d}/xdg-desktop-portal-hyprland")
+               for d in ("/usr/lib", "/usr/libexec", "/usr/lib64"))
+
+
+# Zero-copy capture when Hyprland renders on NVIDIA (backends/xdph.py). Without
+# these it still works through wf-recorder, but Hyprland pays a copy per frame.
+_NVIDIA_ZERO_COPY = [
+    ("xdg-desktop-portal-hyprland", _xdph_installed,
+     {"arch": "xdg-desktop-portal-hyprland",
+      "debian": "xdg-desktop-portal-hyprland",
+      "fedora": "xdg-desktop-portal-hyprland"}, False,
+     "NVIDIA: hands frames over on the GPU (no main-screen stutter)"),
+    ("python gi", lambda: importlib.util.find_spec("gi") is not None,
+     {"arch": "python-gobject", "debian": "python3-gi",
+      "fedora": "python3-gobject"}, False, "NVIDIA: talks to the portal"),
+    ("pipewiresrc", _gst("pipewiresrc"),
+     {"arch": "gst-plugin-pipewire", "debian": "gstreamer1.0-pipewire",
+      "fedora": "pipewire-gstreamer"}, False, "NVIDIA: reads the portal stream"),
+    ("glupload", _gst("glupload"),
+     {"arch": "gst-plugins-base", "debian": "gstreamer1.0-gl",
+      "fedora": "gstreamer1-plugins-base"}, False,
+     "NVIDIA: imports frames into the GPU colour converter"),
+    ("nvh264enc", _gst("nvh264enc"),
+     {"arch": "gst-plugins-bad", "debian": "gstreamer1.0-plugins-bad",
+      "fedora": "gstreamer1-plugins-bad-free"}, False,
+     "NVIDIA: NVENC encoder for GPU frames"),
+]
+
+
 def _va_driver_present(name):
     return lambda: hypr_backend.va_installed(name)
 
@@ -224,7 +260,8 @@ DEPS = {
          False, "VA-API capability detection"),
     ] + ([("VA-API driver", _va_driver_present(_VA[0]), _VA[1], False,
            "hardware H.264 encode on Intel/AMD (else x264 on the CPU)")]
-         if (_VA := _va_encode_driver()) else []),
+         if (_VA := _va_encode_driver()) else [])
+      + (_NVIDIA_ZERO_COPY if _hyprland_on_nvidia() else []),
     "gnome": [
         ("gst-launch-1.0", _bin("gst-launch-1.0"),
          {"arch": "gstreamer", "debian": "gstreamer1.0-tools",
@@ -248,6 +285,9 @@ DEPS = {
          "x264 / openh264 (VA-API used automatically if present)"),
     ],
     "common": [
+        ("openssl", _bin("openssl"),
+         {"arch": "openssl", "debian": "openssl", "fedora": "openssl"}, True,
+         "creates the certificate that encrypts the stream"),
         ("adb", _bin("adb"),
          {"arch": "android-tools", "debian": "adb", "fedora": "android-tools"},
          False, "phone size auto-match (needs USB debugging)"),
@@ -259,7 +299,7 @@ def system_python() -> bool:
     """True when running under the distro's /usr/bin/python3 — the interpreter
     the Python packages above (PyGObject) are installed into. False under
     conda / pyenv / a venv, where they stay "missing" however often they're
-    installed; the `amvd` launcher (python.sh) always picks the system one."""
+    installed; the `tandem` launcher (python.sh) always picks the system one."""
     try:
         return (os.path.samefile(sys.executable, "/usr/bin/python3")
                 and sys.prefix == sys.base_prefix)   # not a venv
@@ -587,7 +627,7 @@ def usb_tether_ip():
     return None
 
 
-TETHER_NETWORK = "/etc/systemd/network/90-amvd-usb-tether.network"
+TETHER_NETWORK = "/etc/systemd/network/90-tandem-usb-tether.network"
 
 
 def tether_fix(ifname):
@@ -652,37 +692,51 @@ def connect_uri(cfg: Config) -> str:
     """What the pairing QR encodes. The app tries every host in parallel and
     keeps the first that answers, so USB and Wi-Fi both just work:
 
-        asext://c?h=192.168.42.129,10.0.0.5&p=5000&n=archbox&k=<key>&v=1
+        tandem://c?h=192.168.42.129,10.0.0.5&p=5000&n=archbox&k=<key>&f=<fp>&v=2
 
-    `k` is the pairing key (only with touch on): a phone that scanned the QR
-    proves it by sending the key, and only then may it send touches.
+    `k` is the pairing key: the phone proves it knows it before the computer
+    sends anything (see secure_link.py). `f` is the SHA-256 fingerprint of this
+    computer's TLS certificate, so the phone can tell it's talking to *this*
+    computer. Creates the key and the certificate on first use.
     """
     hosts = ",".join(candidate_ips(cfg)) or "0.0.0.0"
     name = quote(socket.gethostname()[:24], safe="")
-    key = f"&k={pairing_key()}" if cfg.touch else ""
-    return f"asext://c?h={hosts}&p={cfg.port}&n={name}{key}&v=1"
+    return (f"tandem://c?h={hosts}&p={cfg.port}&n={name}"
+            f"&k={pairing_key()}&f={certificate_fingerprint()}"
+            f"&v={secure_link.PROTOCOL_VERSION}")
+
+
+# --------------------------------------------------------------------------- #
+# Pairing
+# --------------------------------------------------------------------------- #
+
+def pairing_key() -> str:
+    """This computer's pairing key, created on first use (mode 0600)."""
+    return secure_link.ensure_pairing_key(PAIRING_KEY_PATH)
+
+
+def pairing_code() -> str:
+    """The pairing key as shown for typing it in: 'xxxxx-xxxxx-xxxxx-xxxxx'."""
+    return secure_link.display_key(pairing_key())
+
+
+def certificate_fingerprint() -> str:
+    """base64url SHA-256 of the TLS certificate (created on first use)."""
+    cert, _key = secure_link.ensure_certificate()
+    return secure_link.b64url(secure_link.certificate_fingerprint(cert))
+
+
+def reset_pairing_key() -> str:
+    """Forget every paired phone: each must scan the new QR code to connect."""
+    return secure_link.reset_pairing_key(PAIRING_KEY_PATH)
 
 
 # --------------------------------------------------------------------------- #
 # Touch input
 # --------------------------------------------------------------------------- #
 
-def pairing_key() -> str:
-    """This computer's pairing key, created on first use (mode 0600)."""
-    return phone_input.ensure_pairing_key(PAIRING_KEY_PATH)
-
-
-def reset_pairing_key() -> str:
-    """Forget every paired phone: they must scan the new QR to touch again."""
-    try:
-        os.remove(PAIRING_KEY_PATH)
-    except FileNotFoundError:
-        pass
-    return pairing_key()
-
-
-UINPUT_RULE_PATH = "/etc/udev/rules.d/70-amvd-uinput.rules"
-UINPUT_MODULE_PATH = "/etc/modules-load.d/amvd-uinput.conf"
+UINPUT_RULE_PATH = "/etc/udev/rules.d/70-tandem-uinput.rules"
+UINPUT_MODULE_PATH = "/etc/modules-load.d/tandem-uinput.conf"
 # uaccess: logind grants the user at the seat (you, not other accounts or
 # remote logins) access to /dev/uinput. Numbered before 73-seat-late.rules,
 # which is where the tag takes effect.

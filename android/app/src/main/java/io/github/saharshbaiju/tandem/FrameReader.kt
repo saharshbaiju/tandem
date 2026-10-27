@@ -1,14 +1,15 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import java.io.InputStream
 
 /**
- * Reads the daemon's framed wire protocol (see extenderd.py):
+ * Reads the daemon's framed wire protocol (see tandemd.py):
  *
  *     4-byte type + 4-byte big-endian length + body
  *
  * Type "NALU" carries one Annex-B NAL (with start code); "ASX1" carries the
- * Linux-side settings as JSON; "INPT" says whether touch input is allowed.
+ * Linux-side settings as JSON; "INPT" says whether touch input is allowed;
+ * "CHAL" / "OKAY" / "DENY" belong to the pairing handshake ([SecureChannel]).
  * Framing (rather than scanning Annex-B start codes) lets the daemon
  * interleave config updates with video at any time.
  */

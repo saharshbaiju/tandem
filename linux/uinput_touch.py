@@ -9,7 +9,7 @@ monitor. A touchscreen (not a mouse) is deliberate:
     someone taps on the phone.
   * The compositor maps an absolute touch device onto one output, so the
     device's coordinate range covers exactly the phone's monitor
-    (Hyprland: `hl.device({ name = "amvd-touch", output = "EXT-1" })`).
+    (Hyprland: `hl.device({ name = "tandem-touch", output = "EXT-1" })`).
 
 Pure Python (ioctl + struct), no python-evdev dependency. Speaks the kernel's
 multi-touch protocol "type B" (slots), the same one real touchscreens use:
@@ -57,7 +57,7 @@ UI_SET_PROPBIT = 0x4004556E
 INPUT_EVENT = struct.Struct("llHHi")   # timeval, type, code, value
 
 UINPUT_PATH = "/dev/uinput"
-DEVICE_NAME = "amvd-touch"        # Hyprland lowercases names; keep it simple
+DEVICE_NAME = "tandem-touch"        # Hyprland lowercases names; keep it simple
 MAX_SLOTS = 10                    # simultaneous fingers
 
 

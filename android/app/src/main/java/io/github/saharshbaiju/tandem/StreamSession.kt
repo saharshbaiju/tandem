@@ -1,4 +1,4 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import android.media.MediaCodec
 import android.media.MediaFormat
@@ -16,9 +16,11 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
 import org.json.JSONObject
 
-/** Linux-side settings advertised by the daemon's banner (see extenderd.py). */
+/** Linux-side settings advertised by the daemon's banner (see tandemd.py). */
 data class ServerConfig(
     val side: String,
     val width: Int,
@@ -51,16 +53,19 @@ data class ServerConfig(
  *     so big keyframes at native phone resolution aren't silently dropped.
  *   * A new SPS (resolution change) reconfigures the decoder.
  *
- * Touch input travels the other way on the same socket: right after
- * connecting we send HELO with the pairing key from the QR code; the computer
- * answers INPT saying whether this phone may send touches, and [sendTouch]
+ * Security: the TCP connection is wrapped in TLS and both sides prove they
+ * know the pairing key before anything else is exchanged ([SecureChannel]).
+ * No video is decoded and no touch is sent until the computer has proved it
+ * is the one we paired with.
+ *
+ * Touch input travels the other way on the same connection: the computer
+ * sends INPT saying whether this phone may send touches, and [sendTouch]
  * then queues TUCH frames. Writes happen on a dedicated sender thread, so the
- * UI thread never touches the network.
+ * UI thread never touches the network (Conscrypt allows one reader and one
+ * writer thread on a TLS socket).
  */
 class StreamSession(
-    private val hosts: List<String>,
-    private val port: Int,
-    private val pairingKey: String,
+    private val target: ConnectTarget,
     private val appVersion: String,
     private val surface: Surface,
     private val listener: Listener,
@@ -73,11 +78,17 @@ class StreamSession(
         fun onServerConfig(session: StreamSession, config: ServerConfig)
         /** The computer's answer to our HELO: may we send touches, and if not, why. */
         fun onInputState(session: StreamSession, touchAllowed: Boolean, reason: String)
-        fun onStopped(session: StreamSession, reason: String?)
+        /**
+         * The session ended. [final] means retrying can't help (wrong pairing
+         * code, a different computer, an outdated version): don't reconnect.
+         */
+        fun onStopped(session: StreamSession, reason: String?, final: Boolean)
     }
 
     @Volatile private var running = true
     @Volatile private var socket: Socket? = null
+    private val hosts = target.hosts
+    private val port = target.port
     private var codec: MediaCodec? = null
     private var configuredSps: ByteArray? = null
     private var sps: ByteArray? = null
@@ -141,19 +152,24 @@ class StreamSession(
 
     override fun run() {
         var reason: String? = null
+        var final = false
         try {
-            val s = connectAny()
+            val raw = connectAny()
+            socket = raw
+            if (!running) return
+            raw.soTimeout = HANDSHAKE_TIMEOUT_MS
+            val (s, certFingerprint) = SecureChannel.wrap(raw, connectedHost ?: "", port,
+                target.pinnedFingerprint)
             socket = s
+            val reader = FrameReader(s.getInputStream().buffered(1 shl 16))
+            val frameWriter = FrameWriter(s.getOutputStream())
+            SecureChannel.authenticate(reader, frameWriter, target.pairingKey,
+                certFingerprint, appVersion)
             if (!running) return
             s.soTimeout = READ_TIMEOUT_MS
-            writer = FrameWriter(s.getOutputStream())
-            sendInBackground(FrameWriter.TYPE_HELLO, JSONObject()
-                .put("key", pairingKey)
-                .put("app", appVersion)
-                .toString().toByteArray(Charsets.UTF_8))
+            writer = frameWriter
             listener.onConnected(this, connectedHost ?: "")
 
-            val reader = FrameReader(s.getInputStream().buffered(1 shl 16))
             while (running) {
                 val f = reader.next() ?: throw IOException("the computer closed the connection")
                 when (f.type) {
@@ -167,6 +183,21 @@ class StreamSession(
                     // unknown frame types are ignored for forward compatibility
                 }
             }
+        } catch (e: SecureChannel.PairingException) {
+            reason = e.message
+            final = true
+        } catch (e: SSLHandshakeException) {
+            // A pinned certificate that doesn't match lands here too.
+            reason = if (SecureChannel.CERT_MISMATCH in (e.cause?.message ?: e.message ?: ""))
+                CERT_CHANGED else OUTDATED_COMPUTER
+            final = true
+            Log.w(TAG, "TLS handshake failed", e)
+        } catch (e: SSLException) {
+            // Before the handshake finished: almost always a version before 0.5 answering
+            // in plain text. Afterwards: the link broke, worth retrying.
+            if (writer == null) { reason = OUTDATED_COMPUTER; final = true }
+            else reason = "connection lost (${e.message})"
+            Log.w(TAG, "TLS error", e)
         } catch (e: SocketTimeoutException) {
             reason = "connection lost (no data for ${READ_TIMEOUT_MS / 1000}s)"
         } catch (e: MediaCodec.CodecException) {
@@ -179,7 +210,7 @@ class StreamSession(
             }
         } finally {
             release()
-            listener.onStopped(this, if (running) reason else null)
+            listener.onStopped(this, if (running) reason else null, final && running)
         }
     }
 
@@ -394,6 +425,12 @@ class StreamSession(
         const val NAL_PPS = 8
         private const val CONNECT_TIMEOUT_MS = 3000
         private const val READ_TIMEOUT_MS = 4000
+        private const val HANDSHAKE_TIMEOUT_MS = 5000
+
+        const val CERT_CHANGED = "This isn't the computer you paired with: its security " +
+            "certificate is different. If you reinstalled Tandem there, scan its QR code again."
+        const val OUTDATED_COMPUTER = "Couldn't set up an encrypted connection. Update Tandem " +
+            "on the computer (re-run the install command), then scan its QR code again."
 
         // TUCH actions (mirrored in linux/phone_input.py)
         const val TOUCH_DOWN = 0

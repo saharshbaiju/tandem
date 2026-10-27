@@ -3,14 +3,16 @@
 testsrc.py - stream a synthetic test pattern with the real daemon code.
 
 Exercises the exact wire protocol, broadcaster, heartbeats and GOP replay of
-extenderd.py, but the video comes from GStreamer's videotestsrc instead of a
+tandemd.py, but the video comes from GStreamer's videotestsrc instead of a
 virtual monitor — so you can test the phone app (or the emulator, which
 reaches this PC at 10.0.2.2) without touching your desktop layout.
 
     python3 testsrc.py [--width 2400 --height 1080 --fps 60 --port 5000]
     python3 testsrc.py --static      # one frame then silence: tests GOP replay
-    python3 testsrc.py --log-touch   # print the phone's touches (pairing key
-                                     # from ~/.config/archscreenextender)
+    python3 testsrc.py --log-touch   # print the phone's touches
+
+Phones connect exactly as to the real daemon: TLS + this computer's pairing
+key (scan the QR / type the code printed at start-up).
 
 Needs gst-launch-1.0 with x264enc or openh264enc (see backends/gnome.py).
 """
@@ -26,8 +28,9 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core  # noqa: E402
-import extenderd  # noqa: E402
+import tandemd  # noqa: E402
 from backends import gnome  # noqa: E402
+import secure_link  # noqa: E402
 from phone_input import PhoneInput  # noqa: E402
 
 
@@ -38,13 +41,13 @@ class LoggingTouchscreen:
     description = "touches are printed, not injected"
 
     def down(self, slot, x, y):
-        extenderd.log(f"touch down  slot {slot}  x={x:.3f} y={y:.3f}")
+        tandemd.log(f"touch down  slot {slot}  x={x:.3f} y={y:.3f}")
 
     def move(self, slot, x, y):
-        extenderd.log(f"touch move  slot {slot}  x={x:.3f} y={y:.3f}")
+        tandemd.log(f"touch move  slot {slot}  x={x:.3f} y={y:.3f}")
 
     def up(self, slot):
-        extenderd.log(f"touch up    slot {slot}")
+        tandemd.log(f"touch up    slot {slot}")
 
     def close(self):
         pass
@@ -92,15 +95,21 @@ def main():
         "fps": args.fps, "scale": 1.0, "quality": "test", "bitrate": "8M",
         "codec": "h264", "gop": 30, "host": socket.gethostname(),
         "backend": "testsrc"}).encode()
-    phone_input = None
-    if args.log_touch:
-        phone_input = PhoneInput(core.pairing_key(), LoggingTouchscreen())
-        extenderd.log(f"pairing QR: {core.connect_uri(core.load_config())}")
-    b = extenderd.Broadcaster(banner, phone_input)
+    phone_input = PhoneInput(
+        touch_surface=LoggingTouchscreen() if args.log_touch else None,
+        unavailable_reason="this is the test pattern (start it with "
+                           "--log-touch to print touches)")
+    cfg = core.load_config()
+    cfg.port = args.port
+    tandemd.log(f"pairing QR: {core.connect_uri(cfg)}")
+    tandemd.log(f"pairing code: {core.pairing_code()}")
+    gatekeeper = secure_link.Gatekeeper.from_files()
+    b = tandemd.Broadcaster(banner, phone_input)
     stop = threading.Event()
-    threading.Thread(target=extenderd.accept_loop,
-                     args=("0.0.0.0", args.port, b, stop), daemon=True).start()
-    extenderd.log(f"test pattern {args.width}x{args.height}@{args.fps} via {enc}"
+    threading.Thread(target=tandemd.accept_loop,
+                     args=("0.0.0.0", args.port, b, gatekeeper, stop),
+                     daemon=True).start()
+    tandemd.log(f"test pattern {args.width}x{args.height}@{args.fps} via {enc}"
                   f"{' (static)' if args.static else ''}; Ctrl+C to stop")
     def shutdown(*_):
         stop.set()
@@ -109,7 +118,7 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
     try:
-        extenderd.parse_annexb(os.fdopen(r, "rb", buffering=0), b, stop)
+        tandemd.parse_annexb(os.fdopen(r, "rb", buffering=0), b, stop)
     finally:
         stop.set()
         proc.terminate()

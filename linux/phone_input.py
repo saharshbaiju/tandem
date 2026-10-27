@@ -2,37 +2,31 @@
 phone_input.py - everything a phone sends *back* to the computer.
 
 The video stream flows PC -> phone. This module handles the reverse direction
-on the same TCP connection, using the same framing
+on the same (TLS) connection, using the same framing
 (4-byte type + 4-byte big-endian length + body):
 
-    HELO  phone -> PC   JSON {"key": "<pairing key>", "app": "<version>"}
-                        Sent once, right after connecting.
     INPT  PC -> phone   JSON {"touch": true|false, "reason": "<why not>"}
-                        The answer to HELO: may this phone send touches?
+                        Sent once the phone is admitted: may it send touches?
     TUCH  phone -> PC   6 bytes: action u8, finger u8, x u16, y u16 (big-endian)
                         x/y are fractions of the video picture scaled to
                         0..65535, so they don't depend on either screen's size.
 
-Why a pairing key: the daemon listens on every interface, so anyone on the same
-Wi-Fi could connect. Watching the screen is one thing; *controlling* the desktop
-is another. Only a phone that scanned the QR code (which carries the key) may
-inject touches. The key never appears on the daemon's command line (other local
-users can read that); it lives in a 0600 file.
+Who may connect at all is decided before a phone gets here: secure_link.py
+runs the TLS + pairing-key handshake, and only phones that pass it are handed
+to the broadcaster. So every client this module sees has proved it scanned
+the QR code; touch only additionally depends on touch being on and a virtual
+touchscreen being available.
 
 Touches from every phone go through one TouchRouter, which gives each finger
 its own slot on the shared virtual touchscreen and lifts any fingers a phone
 still had down when it disconnects (no stuck touches).
 """
 
-import hmac
 import json
-import os
-import secrets
 import struct
 import sys
 import threading
 
-FRAME_HELLO = b"HELO"
 FRAME_INPUT_STATE = b"INPT"
 FRAME_TOUCH = b"TUCH"
 
@@ -49,19 +43,7 @@ MAX_INCOMING_FRAME = 4096     # nothing a phone sends is bigger than this
 
 
 def log(*a):
-    print("[extenderd]", *a, file=sys.stderr, flush=True)
-
-
-def load_pairing_key(path):
-    """The pairing key from `path`, or None if there isn't a usable one."""
-    if not path:
-        return None
-    try:
-        with open(path) as f:
-            key = f.read().strip()
-    except OSError:
-        return None
-    return key or None
+    print("[tandemd]", *a, file=sys.stderr, flush=True)
 
 
 class TouchRouter:
@@ -113,41 +95,24 @@ class TouchRouter:
 
 
 class PhoneInput:
-    """Handles the frames phones send: the pairing hello and touch events.
+    """Handles what admitted phones send: touch events.
 
     touch_surface: the backend's virtual touchscreen, or None when touch isn't
     available (then `unavailable_reason` says why, and phones are told so).
     """
 
-    def __init__(self, pairing_key, touch_surface=None, unavailable_reason=""):
-        self.pairing_key = pairing_key
+    def __init__(self, touch_surface=None, unavailable_reason=""):
         self.unavailable_reason = unavailable_reason
         self.router = (TouchRouter(touch_surface, touch_surface.slot_count)
                        if touch_surface else None)
         self._authorized = set()      # clients allowed to send touches
         self._lock = threading.Lock()
 
-    def on_message(self, client, frame_type, body):
-        """Called by a client's reader thread for every frame it receives."""
-        if frame_type == FRAME_HELLO:
-            self._on_hello(client, body)
-        elif frame_type == FRAME_TOUCH:
-            self._on_touch(client, body)
-        # unknown types are ignored, so newer apps keep working
-
-    def on_disconnect(self, client):
-        with self._lock:
-            self._authorized.discard(client)
-        if self.router:
-            self.router.client_gone(client)
-
-    def _on_hello(self, client, body):
-        try:
-            hello = json.loads(body or b"{}")
-        except ValueError:
-            hello = {}
-        offered_key = str(hello.get("key", ""))
-        allowed, reason = self._touch_permission(offered_key)
+    def on_admitted(self, client):
+        """A phone passed the pairing handshake: tell it whether it may touch."""
+        allowed = self.router is not None
+        reason = "" if allowed else (self.unavailable_reason
+                                     or "touch is off on the computer")
         if allowed:
             with self._lock:
                 self._authorized.add(client)
@@ -156,18 +121,17 @@ class PhoneInput:
         client.send_message(FRAME_INPUT_STATE, json.dumps(
             {"touch": allowed, "reason": reason}).encode())
 
-    def _touch_permission(self, offered_key):
-        """(allowed, reason shown on the phone when not allowed)."""
-        if not self.router:
-            return False, self.unavailable_reason or "touch is off on the computer"
-        if not self.pairing_key:
-            return False, "the computer has no pairing key"
-        if not offered_key:
-            return False, "scan the QR code on the computer to enable touch"
-        # constant-time compare: don't leak how much of a guess was right
-        if not hmac.compare_digest(offered_key.encode(), self.pairing_key.encode()):
-            return False, "pairing key changed - scan the QR code again"
-        return True, ""
+    def on_message(self, client, frame_type, body):
+        """Called by a client's I/O thread for every frame it receives."""
+        if frame_type == FRAME_TOUCH:
+            self._on_touch(client, body)
+        # unknown types are ignored, so newer apps keep working
+
+    def on_disconnect(self, client):
+        with self._lock:
+            self._authorized.discard(client)
+        if self.router:
+            self.router.client_gone(client)
 
     def _on_touch(self, client, body):
         if self.router is None or len(body) != TOUCH_BODY.size:
@@ -178,21 +142,3 @@ class PhoneInput:
         action, finger, raw_x, raw_y = TOUCH_BODY.unpack(body)
         self.router.handle(client, action, finger,
                            raw_x / COORD_SCALE, raw_y / COORD_SCALE)
-
-
-def new_pairing_key():
-    """A fresh random key (URL-safe: it travels inside the QR code's URI)."""
-    return secrets.token_urlsafe(18)
-
-
-def ensure_pairing_key(path):
-    """Read the key at `path`, creating it (mode 0600) on first use."""
-    key = load_pairing_key(path)
-    if key:
-        return key
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    key = new_pairing_key()
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(key + "\n")
-    return key

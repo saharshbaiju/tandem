@@ -1,8 +1,10 @@
 <resources>
-    <string name="app_name">Screen Extender</string>
+    <string name="app_name">Tandem</string>
     <string name="tagline">Use this phone as a second monitor for your Linux desktop.</string>
+    <!-- Attribution required by the GPL section 7 terms in NOTICE: keep it. -->
+    <string name="credit" translatable="false">Tandem by Saharsh Baiju · github.com/saharshbaiju/tandem · GPL-3.0</string>
     <string name="card_title_new">Connect to your computer</string>
-    <string name="card_body_new">On your computer run ./asext, choose Start extender, then scan the QR code shown in the terminal.</string>
+    <string name="card_body_new">On your computer run tandem, choose Start extender, then scan the QR code shown in the terminal.</string>
     <string name="card_title_ready">Ready to connect</string>
     <string name="card_body_ready">Make sure the extender is running on your computer.</string>
     <string name="scan_qr">Scan QR code</string>
@@ -25,5 +27,12 @@
     <string name="touch_on">On</string>
     <string name="touch_off">Off</string>
     <string name="touch_on_hint">Tap, drag, scroll and pinch on the screen. Your computer\'s mouse pointer stays put.</string>
-    <string name="touch_needs_qr">Scan the QR code on your computer to use touch.</string>
+    <string name="pairing_code">Pairing code</string>
+    <string name="pairing_code_help">Shown under the QR code in tandem</string>
+    <string name="manual_invalid">Enter the computer\'s IP address (e.g. 192.168.42.129) and the pairing code shown in tandem.</string>
+    <string name="qr_outdated">This QR code is from an older version without encryption. Update Tandem on the computer (re-run the install command) and scan the new QR code.</string>
+    <string name="repair_needed">This computer was paired with an older version. Scan its QR code again (or enter its pairing code).</string>
+    <string name="link_confirm_title">Pair with %1$s?</string>
+    <string name="link_confirm_body">A link wants this phone to connect to %1$s. Only continue if this is your computer: it will see your touches.</string>
+    <string name="link_confirm_yes">Pair</string>
 </resources>

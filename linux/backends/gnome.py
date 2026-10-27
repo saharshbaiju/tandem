@@ -15,7 +15,7 @@ our GStreamer caps literally decide the virtual monitor's resolution:
 
     gst-launch-1.0 pipewiresrc path=<node> ! video/x-raw,width=W,height=H
         ! <H.264 encoder> ! h264parse ! byte-stream AU ! fdsink fd=3
-        -> raw Annex-B on a pipe -> extenderd's parser (same as Hyprland)
+        -> raw Annex-B on a pipe -> tandemd's parser (same as Hyprland)
 
 The virtual monitor lives exactly as long as our D-Bus connection: when the
 daemon exits, Mutter removes it and moves its windows back automatically.
@@ -66,7 +66,7 @@ ENCODERS = ("vah264enc", "vah264lpenc", "vaapih264enc", "x264enc", "openh264enc"
 
 
 def log(*a):
-    print("[extenderd]", *a, file=sys.stderr, flush=True)
+    print("[tandemd]", *a, file=sys.stderr, flush=True)
 
 
 def is_gnome_wayland():

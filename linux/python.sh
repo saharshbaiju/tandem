@@ -1,4 +1,4 @@
-# Sourced by amvd, start-extender.sh and install.sh: pick the Python to run with.
+# Sourced by tandem, start-extender.sh and install.sh: pick the Python to run with.
 #
 # The distro's own interpreter (/usr/bin/python3) is the one the dependencies
 # are installed into (python-gobject / python3-gi / python3-gobject) and whose
@@ -7,10 +7,10 @@
 # reports "python gi missing" no matter how often the package is installed, and
 # conda's curses dies with "setupterm: could not find terminfo database".
 #
-# Override with AMVD_PYTHON=/path/to/python3 (it then needs PyGObject itself).
-amvd_python() {
-  if [[ -n "${AMVD_PYTHON:-}" ]]; then
-    printf '%s\n' "$AMVD_PYTHON"
+# Override with TANDEM_PYTHON=/path/to/python3 (it then needs PyGObject itself).
+tandem_python() {
+  if [[ -n "${TANDEM_PYTHON:-}" ]]; then
+    printf '%s\n' "$TANDEM_PYTHON"
   elif [[ -x /usr/bin/python3 ]]; then
     printf '%s\n' /usr/bin/python3
   else

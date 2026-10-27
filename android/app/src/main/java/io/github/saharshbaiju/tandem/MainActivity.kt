@@ -1,8 +1,9 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.net.wifi.WifiManager
@@ -24,8 +25,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.archextender.databinding.ActivityMainBinding
+import io.github.saharshbaiju.tandem.databinding.ActivityMainBinding
 import com.google.android.material.color.DynamicColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -40,15 +42,20 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
  *              edge handle that opens a side sheet (details + Disconnect).
  *  RECONNECTING  the link dropped after working; retries with backoff.
  *
- * Touch: while LIVE, and once the computer has accepted our pairing key, every
- * touch on the video goes to the computer (see [TouchForwarder]). Without
- * touch, a tap on the video just peeks the status pill.
+ * Touch: while LIVE, and when the computer has touch input on, every touch
+ * on the video goes to the computer (see [TouchForwarder]). Without touch, a
+ * tap on the video just peeks the status pill.
+ *
+ * Security: a computer is only ever connected to with its pairing key (and,
+ * from a QR, its certificate fingerprint); see [SecureChannel]. A link from
+ * outside the app (camera, browser, another app) only proposes a computer:
+ * the user confirms it before it replaces the saved one.
  */
 class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.Listener {
 
     private lateinit var b: ActivityMainBinding
     private val ui = Handler(Looper.getMainLooper())
-    private val prefs by lazy { getSharedPreferences("asext", Context.MODE_PRIVATE) }
+    private val prefs by lazy { getSharedPreferences("tandem", Context.MODE_PRIVATE) }
 
     private enum class State { IDLE, CONNECTING, LIVE, RECONNECTING }
 
@@ -85,7 +92,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
 
     override fun onCreate(savedInstanceState: Bundle?) {
         if (!DynamicColors.isDynamicColorAvailable()) {
-            theme.applyStyle(R.style.ThemeOverlay_ArchExtender_Fallback, true)
+            theme.applyStyle(R.style.ThemeOverlay_Tandem_Fallback, true)
         }
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -98,7 +105,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         b.scanBtn.setOnClickListener { scan() }
         b.manualBtn.setOnClickListener { toggleManual() }
         b.editBtn.setOnClickListener { toggleManual(true) }
-        b.portInput.setOnEditorActionListener { _, id, _ ->
+        b.codeInput.setOnEditorActionListener { _, id, _ ->
             if (id == EditorInfo.IME_ACTION_GO) { onPrimary(); true } else false
         }
         b.disconnectBtn.setOnClickListener { closeSheet(); userDisconnect("disconnect button") }
@@ -135,8 +142,13 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         render()
         showSystemBars()
 
-        // debug / adb: am start -n com.archextender/.MainActivity --ez autoconnect true
-        if (intent?.getBooleanExtra("autoconnect", false) == true && target != null) {
+        // Testing over adb: am start -n io.github.saharshbaiju.tandem.debug/.MainActivity
+        //   --ez autoconnect true
+        // Debug builds only, and never together with a link: otherwise any app
+        // could make us connect to (and send touches to) a computer it chose.
+        val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (debuggable && intent?.data == null && target != null &&
+            intent?.getBooleanExtra("autoconnect", false) == true) {
             b.root.post { startConnect(b.root.width * 0.7f, b.root.height * 0.6f) }
         }
     }
@@ -153,10 +165,27 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         if (state == State.IDLE) handleIntent(intent)
     }
 
-    /** asext://… opened from the camera app or a link: pre-fill the target. */
+    /**
+     * tandem://… opened from the camera app, a browser or another app. Anything
+     * on the phone can send such a link, so it never replaces the saved
+     * computer silently: the user sees which computer it is and confirms.
+     */
     private fun handleIntent(intent: Intent?) {
-        val t = ConnectTarget.parse(intent?.dataString) ?: return
-        setTarget(t)
+        val raw = intent?.dataString ?: return
+        when (val parsed = ConnectTarget.parse(raw)) {
+            is ConnectTarget.Companion.Parsed.Ok -> {
+                val t = parsed.target
+                if (t.sameComputerAs(target)) { setTarget(t); return }   // new addresses only
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(getString(R.string.link_confirm_title, t.title))
+                    .setMessage(getString(R.string.link_confirm_body, t.addressLine))
+                    .setPositiveButton(R.string.link_confirm_yes) { _, _ -> setTarget(t) }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+            ConnectTarget.Companion.Parsed.Outdated -> showError(getString(R.string.qr_outdated))
+            ConnectTarget.Companion.Parsed.Invalid -> {}
+        }
     }
 
     // remember where the user touched, so the ripple starts under their finger
@@ -181,16 +210,23 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
 
     private fun onPrimary() {
         if (b.manualGroup.visibility == View.VISIBLE) {
-            val t = ConnectTarget.manual(b.hostInput.text.toString(), b.portInput.text.toString(), target)
+            val t = ConnectTarget.manual(b.hostInput.text.toString(), b.portInput.text.toString(),
+                b.codeInput.text.toString(), target)
             if (t == null) {
-                showError("Enter the computer's IP address, e.g. 192.168.42.129")
+                showError(getString(R.string.manual_invalid))
                 return
             }
             setTarget(t)
             hideKeyboard()
             b.manualGroup.visibility = View.GONE
         }
-        if (target == null) { scan(); return }
+        val t = target
+        if (t == null) { scan(); return }
+        if (!t.isPaired) {
+            // saved by a version before 0.5: no pairing code / certificate yet
+            showError(getString(R.string.repair_needed))
+            return
+        }
         val (x, y) = if (lastTouchX >= 0) lastTouchX to lastTouchY else centerOf(b.primaryBtn)
         startConnect(x, y)
     }
@@ -203,9 +239,12 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             .build()
         GmsBarcodeScanning.getClient(this, options).startScan()
             .addOnSuccessListener { code ->
-                val t = ConnectTarget.parse(code.rawValue)
-                if (t == null) showError("That QR code isn't from Screen Extender.")
-                else setTarget(t)
+                when (val parsed = ConnectTarget.parse(code.rawValue)) {
+                    is ConnectTarget.Companion.Parsed.Ok -> setTarget(parsed.target)
+                    ConnectTarget.Companion.Parsed.Outdated -> showError(getString(R.string.qr_outdated))
+                    ConnectTarget.Companion.Parsed.Invalid ->
+                        showError("That QR code isn't from Tandem.")
+                }
             }
             .addOnFailureListener {
                 showError("The QR scanner isn't available on this phone " +
@@ -220,6 +259,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             target?.let {
                 b.hostInput.setText(it.hosts.first())
                 b.portInput.setText(it.port.toString())
+                if (it.isPaired) b.codeInput.setText(SecureChannel.displayKey(it.pairingKey))
             }
             b.hostInput.requestFocus()
         } else {
@@ -284,8 +324,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         val t = target ?: return
         if (!surfaceReady || !wantConnected || session != null) return
         setTouchState(false, "")       // until the new session's INPT arrives
-        session = StreamSession(t.hosts, t.port, t.pairingKey, appVersion(),
-            b.surface.holder.surface, this)
+        session = StreamSession(t, appVersion(), b.surface.holder.surface, this)
     }
 
     private fun userDisconnect(why: String) {
@@ -377,11 +416,18 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         fillSheet()
     }
 
-    override fun onStopped(session: StreamSession, reason: String?) = runOnUiThread {
+    override fun onStopped(session: StreamSession, reason: String?, final: Boolean) = runOnUiThread {
         if (session !== this.session) return@runOnUiThread
         this.session = null
         setTouchState(false, "")
         if (!wantConnected) return@runOnUiThread
+        if (final) {
+            // Wrong pairing code, a different computer, an outdated version:
+            // retrying can't fix it. Back to the connect screen, say why.
+            failConnect(friendlyError(reason))
+            if (everStreamed) showConnectScreen()
+            return@runOnUiThread
+        }
         if (!everStreamed) {
             failConnect(friendlyError(reason))
             return@runOnUiThread
@@ -399,9 +445,13 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         val name = target?.title ?: "your computer"
         return when {
             reason == null -> "Couldn't connect to $name."
+            reason == StreamSession.CERT_CHANGED || reason == StreamSession.OUTDATED_COMPUTER -> reason
+            "pairing code" in reason || "paired with" in reason || "refused the connection" in reason ||
+                "phones connected" in reason || "update the tandem app" in reason.lowercase() ->
+                "$name: ${reason.replaceFirstChar(Char::uppercase)}."
             "refused" in reason.lowercase() ->
                 "$name is reachable, but the extender isn't running. " +
-                    "Start it from the terminal (./asext → Start extender)."
+                    "Start it from the terminal (tandem → Start extender)."
             "couldn't reach" in reason || "timed out" in reason || "unreachable" in reason ->
                 "Couldn't reach $name. Turn on USB tethering, or join the same Wi-Fi."
             else -> "Couldn't connect to $name: $reason"
@@ -525,11 +575,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             state == State.LIVE && session != null -> getString(R.string.touch_off)
             else -> "—"
         }
-        val touchNote = when {
-            touchAllowed -> getString(R.string.touch_on_hint)
-            target?.pairingKey.isNullOrEmpty() -> getString(R.string.touch_needs_qr)
-            else -> touchRefusedReason
-        }
+        val touchNote = if (touchAllowed) getString(R.string.touch_on_hint) else touchRefusedReason
         b.sheetTouchNote.text = touchNote
         b.sheetTouchNote.visibility = if (touchNote.isEmpty() || state == State.IDLE) View.GONE else View.VISIBLE
         b.sheetBackend.text = when (sc?.backend) {
@@ -592,7 +638,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         @Suppress("DEPRECATION")
         val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF
-        wifiLock = wm.createWifiLock(mode, "asext:stream").apply {
+        wifiLock = wm.createWifiLock(mode, "tandem:stream").apply {
             setReferenceCounted(false)
             try { acquire() } catch (_: Exception) {}
         }

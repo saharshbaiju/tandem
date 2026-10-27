@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-extenderd - Screen Extender streaming daemon (Hyprland / GNOME).
+tandemd - Tandem streaming daemon (Hyprland / GNOME).
 
 Pipeline:
     compositor backend (see backends/)
@@ -23,12 +23,14 @@ Reliability rules (each one fixed a real "connects then drops" bug):
   * The tail NAL is flushed as soon as the encoder pipe goes quiet, so the last
     frame of a burst isn't held hostage until the next frame arrives.
 
-Transport is plain TCP on 0.0.0.0 (USB tethering, Wi-Fi, adb reverse all work).
+Transport is TCP on 0.0.0.0 (USB tethering, Wi-Fi, adb reverse all work),
+wrapped in TLS. A connection receives nothing until it passes the pairing
+handshake in secure_link.py (certificate fingerprint + mutual proof of the
+pairing key from the QR code); see that module for the threat model.
 
-Touch input flows the other way on the same connection: each client also has a
-reader thread that hands the phone's frames (pairing hello, touches) to
-phone_input.PhoneInput, which replays touches on the backend's virtual
-touchscreen. See phone_input.py.
+Touch input flows the other way on the same connection: each client's I/O
+thread hands the phone's frames (touches) to phone_input.PhoneInput, which
+replays them on the backend's virtual touchscreen. See phone_input.py.
 """
 
 import argparse
@@ -38,15 +40,17 @@ import os
 import select
 import signal
 import socket
+import ssl
 import sys
 import threading
 import time
 from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import about  # noqa: E402
 import backends  # noqa: E402
-from phone_input import (MAX_INCOMING_FRAME, PhoneInput,  # noqa: E402
-                         load_pairing_key)
+import secure_link  # noqa: E402
+from phone_input import MAX_INCOMING_FRAME, PhoneInput  # noqa: E402
 
 # H.264 NAL unit types (nal_unit_header & 0x1F)
 NAL_NON_IDR = 1
@@ -59,7 +63,7 @@ NAL_DROP = (6, 9, 12)
 
 
 def log(*a):
-    print("[extenderd]", *a, file=sys.stderr, flush=True)
+    print("[tandemd]", *a, file=sys.stderr, flush=True)
 
 
 def kill_stale():
@@ -79,7 +83,7 @@ def kill_stale():
                         for a in f.read().split(b"\x00") if a]
         except OSError:
             continue
-        if (any(a.endswith("extenderd.py") for a in args)
+        if (any(a.endswith("tandemd.py") for a in args)
                 and any("python" in a for a in args)):
             try:
                 os.kill(int(entry), signal.SIGTERM)
@@ -103,8 +107,9 @@ def kill_stale():
 #   NALU -> one Annex-B NAL (with start code), straight to the decoder
 #   ASX1 -> JSON of the active settings, shown on the phone (any time)
 #   PING -> empty keepalive, sent after HEARTBEAT seconds of silence
-#   INPT -> JSON answer to the phone's HELO: is touch allowed? (phone_input.py)
-# Phone -> PC frames (HELO, TUCH) are handled in phone_input.py.
+#   INPT -> JSON: is touch allowed for this phone? (phone_input.py)
+# Before any of these, the handshake frames HELO / CHAL / AUTH / OKAY / DENY
+# (secure_link.py). Phone -> PC touches (TUCH) are handled in phone_input.py.
 # Unknown types are ignored on both ends, so new ones stay compatible.
 
 FRAME_NAL = b"NALU"
@@ -163,11 +168,18 @@ HEARTBEAT = 1.0                    # seconds of silence before a PING
 SEND_TIMEOUT = 5.0                 # a send blocked this long = dead peer
 MAX_PENDING = 4 * 1024 * 1024      # queued bytes before a slow client resyncs
 MAX_GOP_CACHE = 16 * 1024 * 1024   # stop caching a GOP that grows past this
+MAX_CLIENTS = 4                    # phones streaming at once
 
 
 class Client:
-    """One phone: a queue of whole frames drained by a dedicated sender thread,
-    and a reader thread for what the phone sends back (hello, touches)."""
+    """One admitted phone: a queue of whole frames to send, and the frames it
+    sends back (touches), both driven by a single I/O thread.
+
+    One thread, not a sender + a reader: an SSL connection must not be used
+    by two threads at the same time (OpenSSL's rule; CPython releases the GIL
+    inside SSL_read/SSL_write). The socket is non-blocking and the thread
+    select()s on it plus a wake-up pipe that push() pokes.
+    """
 
     def __init__(self, sock, addr, on_dead, on_message=None):
         self.sock = sock
@@ -176,20 +188,22 @@ class Client:
         self.alive = True
         self._q = deque()
         self._qbytes = 0
-        self._cv = threading.Condition()
+        self._lock = threading.Lock()
         self._on_dead = on_dead
         self._on_message = on_message
-        threading.Thread(target=self._run, daemon=True,
+        self._wake_r, self._wake_w = os.pipe()
+        os.set_blocking(self._wake_r, False)
+        os.set_blocking(self._wake_w, False)
+        sock.setblocking(False)
+        threading.Thread(target=self._io_loop, daemon=True,
                          name=f"client-{addr[0]}").start()
-        threading.Thread(target=self._read_loop, daemon=True,
-                         name=f"client-{addr[0]}-reader").start()
 
     def send_message(self, frame_type, body=b""):
         """Queue a control frame (not video) for this phone."""
         self.push(frame(frame_type, body))
 
     def push(self, data):
-        with self._cv:
+        with self._lock:
             if not self.alive:
                 return
             self._q.append(data)
@@ -202,84 +216,103 @@ class Client:
                 self._qbytes = 0
                 self.started = False
                 log(f"client {self.addr[0]} fell behind; resync at next keyframe")
-            self._cv.notify()
+        self._wake()
 
     def close(self):
-        with self._cv:
+        with self._lock:
             self.alive = False
-            self._cv.notify()
-        try:
-            self.sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
+        self._wake()
 
-    def _run(self):
-        self.sock.settimeout(SEND_TIMEOUT)
+    def _wake(self):
         try:
-            while True:
-                with self._cv:
-                    if self.alive and not self._q:
-                        self._cv.wait(HEARTBEAT)
-                    if not self.alive:
-                        break
-                    if self._q:
-                        data = self._q.popleft()
-                        self._qbytes -= len(data)
-                    else:
-                        data = PING
-                self.sock.sendall(data)
+            os.write(self._wake_w, b"x")
+        except (BlockingIOError, OSError):
+            pass                     # already poked / closing
+
+    def _next_frame(self):
+        with self._lock:
+            if not self._q:
+                return None
+            data = self._q.popleft()
+            self._qbytes -= len(data)
+            return data
+
+    def _io_loop(self):
+        out, sent = b"", 0           # frame being sent, bytes of it already out
+        last_send = time.monotonic()
+        inbuf = bytearray()
+        try:
+            while self.alive:
+                if sent == len(out):
+                    out, sent = self._next_frame() or b"", 0
+                    if not out and time.monotonic() - last_send >= HEARTBEAT:
+                        out = PING
+                now = time.monotonic()
+                if out:
+                    if now - last_send > SEND_TIMEOUT:
+                        raise OSError("send stalled")   # dead or stuck peer
+                    wait = 0.5
+                else:
+                    wait = max(0.0, HEARTBEAT - (now - last_send))
+                readable, writable, _ = select.select(
+                    [self.sock, self._wake_r], [self.sock] if out else [], [], wait)
+                if self._wake_r in readable:
+                    try:
+                        while os.read(self._wake_r, 4096):
+                            pass
+                    except BlockingIOError:
+                        pass
+                if self.sock in readable and not self._receive(inbuf):
+                    break
+                if out and self.sock in writable:
+                    try:
+                        sent += self.sock.send(memoryview(out)[sent:])
+                        last_send = time.monotonic()
+                    except (ssl.SSLWantWriteError, ssl.SSLWantReadError):
+                        pass         # buffer full / TLS wants a read first
         except OSError:
             pass
         finally:
-            with self._cv:
+            with self._lock:
                 self.alive = False
                 self._q.clear()
+            for fd in (self._wake_r, self._wake_w):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             try:
                 self.sock.close()
             except OSError:
                 pass
             self._on_dead(self)
 
-    def _read_loop(self):
-        """Read frames the phone sends and hand them to `on_message`.
+    def _receive(self, inbuf):
+        """Read everything available and dispatch whole frames.
 
-        Runs until the socket closes. Socket timeouts only mean "the phone had
-        nothing to say" (the timeout is set for the sender's benefit).
+        False when the phone closed the connection or broke the protocol.
         """
-        try:
-            while self.alive:
-                header = self._recv_exact(8)
-                if header is None:
-                    break
-                frame_type = header[:4]
-                length = int.from_bytes(header[4:], "big")
-                if length > MAX_INCOMING_FRAME:
-                    log(f"client {self.addr[0]} sent an oversized frame; "
-                        "disconnecting it")
-                    break
-                body = self._recv_exact(length) if length else b""
-                if body is None:
-                    break
-                if self._on_message:
-                    self._on_message(self, frame_type, body)
-        except OSError:
-            pass
-        self.close()
-
-    def _recv_exact(self, length):
-        """Exactly `length` bytes, or None when the connection ends."""
-        data = bytearray()
-        while len(data) < length:
+        while True:
             try:
-                chunk = self.sock.recv(length - len(data))
-            except socket.timeout:
-                if not self.alive:
-                    return None
-                continue
+                chunk = self.sock.recv(65536)
+            except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                break
             if not chunk:
-                return None
-            data += chunk
-        return bytes(data)
+                return False
+            inbuf += chunk
+        while len(inbuf) >= 8:
+            length = int.from_bytes(inbuf[4:8], "big")
+            if length > MAX_INCOMING_FRAME:
+                log(f"client {self.addr[0]} sent an oversized frame; "
+                    "disconnecting it")
+                return False
+            if len(inbuf) < 8 + length:
+                break
+            frame_type, body = bytes(inbuf[:4]), bytes(inbuf[8:8 + length])
+            del inbuf[:8 + length]
+            if self._on_message:
+                self._on_message(self, frame_type, body)
+        return True
 
 
 def _tune_socket(sock):
@@ -315,8 +348,14 @@ class Broadcaster:
             c.push(frame(FRAME_BANNER, payload))
 
     def add(self, sock, addr):
-        _tune_socket(sock)
+        """Start streaming to a phone that passed the pairing handshake."""
         with self._lock:
+            if len(self._clients) >= MAX_CLIENTS:
+                secure_link.deny(sock, f"already {MAX_CLIENTS} phones connected")
+                sock.close()
+                log(f"client {addr[0]} refused: {MAX_CLIENTS} phones already "
+                    "connected")
+                return
             c = Client(sock, addr, self._remove,
                        self.phone_input.on_message if self.phone_input else None)
             c.push(frame(FRAME_BANNER, self.banner_payload))
@@ -328,6 +367,8 @@ class Broadcaster:
                 c.started = True
             self._clients.append(c)
             n = len(self._clients)
+        if self.phone_input:
+            self.phone_input.on_admitted(c)       # tells the phone about touch
         log(f"client connected: {addr[0]}:{addr[1]} (total {n})"
             + ("  [gop replay]" if c.started else ""))
 
@@ -456,7 +497,7 @@ def parse_annexb(stream, broadcaster, stop_evt):
 # TCP accept loop
 # --------------------------------------------------------------------------- #
 
-def accept_loop(host, port, broadcaster, stop_evt):
+def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     for attempt in range(15):
@@ -473,7 +514,7 @@ def accept_loop(host, port, broadcaster, stop_evt):
             time.sleep(0.3)
     srv.listen(8)
     srv.settimeout(0.5)
-    log(f"listening on {host}:{port}")
+    log(f"listening on {host}:{port} (TLS, pairing required)")
     while not stop_evt.is_set():
         try:
             sock, addr = srv.accept()
@@ -481,11 +522,43 @@ def accept_loop(host, port, broadcaster, stop_evt):
             continue
         except OSError:
             break
-        try:
-            broadcaster.add(sock, addr)
-        except OSError as e:
-            log(f"client {addr[0]} failed during handshake ({e})")
+        if gatekeeper.throttle.blocked(addr[0]):
+            sock.close()              # locked out after repeated failures
+            continue
+        if not gatekeeper.pending.acquire(blocking=False):
+            sock.close()              # too many handshakes in flight
+            continue
+        # The handshake waits on the phone; never let it stall accept().
+        threading.Thread(target=admit, daemon=True, name=f"admit-{addr[0]}",
+                         args=(sock, addr, broadcaster, gatekeeper)).start()
     srv.close()
+
+
+def admit(sock, addr, broadcaster, gatekeeper):
+    """TLS + pairing proof, then hand the phone to the broadcaster."""
+    try:
+        _tune_socket(sock)
+        tls, app = gatekeeper.handshake(sock)
+    except secure_link.Abandoned:
+        sock.close()              # the app's parallel connect: another address won
+        return
+    except (secure_link.AuthError, OSError) as e:
+        try:
+            sock.close()
+        except OSError:
+            pass
+        locked = gatekeeper.throttle.failed(addr[0])
+        log(f"client {addr[0]} rejected: {e}"
+            + (" (locked out for a minute)" if locked else ""))
+        return
+    finally:
+        gatekeeper.pending.release()
+    gatekeeper.throttle.succeeded(addr[0])
+    log(f"client {addr[0]} paired" + (f" (app {app})" if app else ""))
+    try:
+        broadcaster.add(tls, addr)
+    except OSError as e:
+        log(f"client {addr[0]} failed after pairing ({e})")
 
 
 # --------------------------------------------------------------------------- #
@@ -500,9 +573,6 @@ def start_touch(args, backend):
     """
     if not args.touch:
         return None, "touch input is turned off on the computer"
-    if not load_pairing_key(args.pairing_key_file):
-        log("touch input: off (no pairing key; start from the amvd TUI)")
-        return None, "the computer has no pairing key"
     try:
         surface = backend.create_touch_surface()
     except Exception as e:
@@ -517,7 +587,11 @@ def start_touch(args, backend):
 # --------------------------------------------------------------------------- #
 
 def main():
-    ap = argparse.ArgumentParser(description="Screen Extender daemon")
+    # Raw text so --version prints the credit on its own line, unwrapped.
+    ap = argparse.ArgumentParser(description="Tandem daemon",
+                                 formatter_class=argparse.RawTextHelpFormatter)
+    ap.add_argument("--version", action="version",
+                    version=f"{about.CREDIT}\n{about.LICENSE}")
     ap.add_argument("--backend", default="auto",
                     choices=("auto",) + backends.NAMES,
                     help="compositor backend (auto-detected by default)")
@@ -552,12 +626,23 @@ def main():
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--keep-output", action="store_true",
                     help="don't remove the Hyprland headless output on exit")
-    ap.add_argument("--pairing-key-file", default=None,
-                    help="file holding the pairing key; only phones that send "
-                         "it (from the QR code) may use touch input")
+    ap.add_argument("--pairing-key-file", default=secure_link.PAIRING_KEY_PATH,
+                    help="file holding the pairing key (created if missing); "
+                         "only phones that prove they know it (from the QR "
+                         "code) may connect")
+    ap.add_argument("--tls-dir", default=secure_link.TLS_DIR,
+                    help="directory with this computer's TLS certificate "
+                         "(created if missing)")
     ap.add_argument("--no-touch", dest="touch", action="store_false",
                     help="don't accept touch input from phones")
     args = ap.parse_args()
+
+    try:
+        gatekeeper = secure_link.Gatekeeper.from_files(args.pairing_key_file,
+                                                       args.tls_dir)
+    except (RuntimeError, OSError, ssl.SSLError) as e:
+        log(f"error: {e}")
+        sys.exit(1)
 
     backend = backends.create(args.backend, args)
     missing = backend.missing()
@@ -584,19 +669,26 @@ def main():
         sys.exit(1)
 
     touch_surface, touch_problem = start_touch(args, backend)
-    phone_input = PhoneInput(load_pairing_key(args.pairing_key_file),
-                             touch_surface=touch_surface,
+    phone_input = PhoneInput(touch_surface=touch_surface,
                              unavailable_reason=touch_problem)
     broadcaster = Broadcaster(load_banner_payload(args, backend.name),
                               phone_input)
 
     threading.Thread(target=accept_loop,
-                     args=(args.host, args.port, broadcaster, stop_evt),
+                     args=(args.host, args.port, broadcaster, gatekeeper,
+                           stop_evt),
                      daemon=True).start()
 
     def control_loop():
-        """Apply SIGHUP reloads off the signal handler (D-Bus / hyprctl)."""
+        """Apply SIGHUP reloads off the signal handler (D-Bus / hyprctl), and
+        drop every phone when the pairing key is reset."""
         while not stop_evt.is_set():
+            if gatekeeper.key_changed():
+                # "Forget paired phones": phones holding the old key must
+                # not keep watching / touching. They reconnect, fail the
+                # handshake and are told to scan the new QR code.
+                log("pairing key changed: disconnecting every phone")
+                broadcaster.close_all()
             if not reload_evt.wait(0.5):
                 continue
             reload_evt.clear()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tui.py - terminal UI for Screen Extender (Hyprland on Arch, GNOME on
+tui.py - terminal UI for Tandem (Hyprland on Arch, GNOME on
 Ubuntu / Fedora).
 
 A self-contained curses app (no third-party deps) that:
@@ -10,7 +10,7 @@ A self-contained curses app (no third-party deps) that:
   * launches the streaming daemon and shows a pairing QR code the phone app
     scans — no typing IP addresses.
 
-Run:  python3 tui.py     (or amvd)
+Run:  python3 tui.py     (or tandem)
 """
 
 import copy
@@ -24,14 +24,15 @@ import threading
 import time
 from collections import deque
 
+import about
 import backends
 import core
 import qr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DAEMON = os.path.join(HERE, "extenderd.py")
+DAEMON = os.path.join(HERE, "tandemd.py")
 
-TITLE =  " amVD - amFOSS virtual display "
+TITLE =  " Tandem - amFOSS "
 
 
 # --------------------------------------------------------------------------- #
@@ -60,6 +61,10 @@ def header(win):
     win.erase()
     addstr(win, 0, 0, TITLE, curses.color_pair(1) | curses.A_BOLD)
     h, w = win.getmaxyx()
+    # The attribution the license asks forks to keep (see about.py),
+    # right-aligned when the terminal is wide enough to fit it.
+    if w - len(TITLE) - 2 > len(about.CREDIT):
+        addstr(win, 0, w - len(about.CREDIT) - 2, about.CREDIT, curses.color_pair(5))
     addstr(win, 1, 0, "─" * (w - 1), curses.color_pair(1))
 
 
@@ -129,11 +134,7 @@ class Stream:
         # tether link — nothing to set up here. The phone connects to this PC's
         # tether IP; the pairing QR lists every reachable address.
         core.write_banner_file(self.cfg)        # settings shown on the phone
-        if self.cfg.touch:
-            # The daemon reads the key once at start-up; create it now (on a
-            # fresh install the QR that would create it isn't drawn yet).
-            core.pairing_key()
-        args = self.cfg.extenderd_args()
+        args = self.cfg.tandemd_args()
         self.error = None
         cmd = [sys.executable, DAEMON, "--keep-output",
                "--banner-file", core.BANNER_PATH] + args
@@ -327,7 +328,7 @@ def deps_screen(win, cfg):
             if not core.system_python():
                 addstr(win, row + 3, 2,
                        f"Note: running under {sys.executable}; distro packages "
-                       "install into /usr/bin/python3. Start with 'amvd'.",
+                       "install into /usr/bin/python3. Start with 'tandem'.",
                        curses.color_pair(4))
         elif missing:
             addstr(win, row, 2, f"Missing: {', '.join(missing)} "
@@ -467,7 +468,7 @@ def configure_screen(win, cfg, live=False):
                 value = ("on   (phones that scanned the QR can tap)"
                          if cfg.touch else "off  (view only)")
             elif kind == "forget":
-                value = "Enter: forget all (they must rescan the QR)"
+                value = "Enter: forget all (new QR + code; disconnects them)"
             elif key == "transport":
                 value = ("usb  (USB tethering first in the QR)"
                          if cfg.transport == "usb" else
@@ -555,7 +556,16 @@ def preflight(win, cfg):
                    "'Ubuntu' / 'GNOME' (not 'on Xorg')."]
     elif core.missing_packages(backend, required_only=True):
         deps_screen(win, cfg)
-        return not core.missing_packages(backend, required_only=True)
+        if core.missing_packages(backend, required_only=True):
+            return False
+    if not problem:
+        # The QR needs the pairing key and the certificate's fingerprint, and
+        # the daemon must agree on both: create them before either starts.
+        try:
+            core.pairing_key()
+            core.certificate_fingerprint()
+        except (RuntimeError, OSError) as e:
+            problem = ["Couldn't set up the encrypted connection.", str(e)]
     if problem:
         header(win)
         for i, line in enumerate(problem):
@@ -609,7 +619,7 @@ def touch_line(cfg, stream, touch_setup):
         return f"needs one-time setup ({touch_setup['problem']}) — press t", 4
     status = stream.touch_status
     if status.startswith("ready"):
-        return "on — phones that scanned this QR can tap", 3
+        return "on — paired phones can tap", 3
     if status:
         return status, 4
     return "starting…", 5
@@ -622,7 +632,7 @@ def live_screen(win, stream):
     d        -> disconnect: stop the daemon and remove the virtual monitor.
     """
     disconnect = False
-    uri, ips, refreshed = "", [], 0.0
+    uri, ips, pairing_code, refreshed = "", [], "", 0.0
     qr_uri, qr_lines = None, []      # QR encoding is pure Python: redo on change
     fw, usb, checked, fw_fixed = None, ("…", "hint", None), 0.0, False
     touch_setup = None
@@ -635,6 +645,7 @@ def live_screen(win, stream):
             if time.monotonic() - refreshed > 2:
                 ips = core.candidate_ips(cfg)
                 uri = core.connect_uri(cfg)
+                pairing_code = core.pairing_code()
                 refreshed = time.monotonic()
             if time.monotonic() - checked > 5:
                 fw = None if fw_fixed else core.firewall_check(cfg.port)
@@ -690,14 +701,17 @@ def live_screen(win, stream):
                 addstr(win, text_y, 4, "(enlarge the terminal to show the QR "
                                        "code)", curses.color_pair(5))
                 text_y += 1
-            addstr(win, text_y, 2, "…or type one of these in the app:",
+            addstr(win, text_y, 2, "…or type an address and the code in the app:",
                    curses.color_pair(5))
             for i, ip in enumerate(ips or ["<no network — enable USB tethering "
                                            "or join Wi-Fi>"]):
                 tag = "USB tethering" if ip == core.usb_tether_ip() else "network"
                 addstr(win, text_y + 1 + i, 4, f"{ip}:{cfg.port}   ({tag})",
                        curses.color_pair(1) | curses.A_BOLD)
-            y = text_y + 2 + max(1, len(ips))
+            code_y = text_y + 1 + max(1, len(ips))
+            addstr(win, code_y, 4, f"pairing code  {pairing_code}"[:left_w],
+                   curses.color_pair(1) | curses.A_BOLD)
+            y = code_y + 2
             if not live and not exited:
                 y = draw_checks(win, y, left_w, fw, usb) + 1
 
@@ -799,7 +813,7 @@ SYSTEM_TERMINFO_DIRS = ("/usr/share/terminfo", "/usr/lib/terminfo",
 def setup_terminal():
     """Make sure curses can load a terminfo entry for this terminal.
 
-    `amvd` runs the system Python, whose curses finds the system database.
+    `tandem` runs the system Python, whose curses finds the system database.
     Run directly under conda (`python3 tui.py`), setupterm fails with "could
     not find terminfo database": point it at the system directories, and if
     the terminal's entry (e.g. xterm-kitty) still isn't there, fall back to

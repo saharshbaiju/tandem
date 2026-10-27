@@ -5,7 +5,7 @@ Byte mode (UTF-8) only, versions 1..15, error correction L/M/Q/H. The core
 algorithm (Reed-Solomon ECC, interleaving, function patterns, mask penalty
 scoring) is a faithful port of Project Nayuki's QR Code generator (MIT).
 
-    matrix = qr.encode("asext://c?h=...", "M")   # list[list[bool]], True = dark
+    matrix = qr.encode("tandem://c?h=...", "M")   # list[list[bool]], True = dark
     lines = qr.render_halfblocks(matrix)          # text rows, glyph = dark
 """
 

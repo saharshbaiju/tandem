@@ -1,4 +1,4 @@
-# Screen Extender — Architecture & Pipeline
+# Tandem — Architecture & Pipeline
 
 This document explains the whole system, from the idea down to every stage of
 the pipeline, the exact bytes on the wire, and the reliability rules that keep a
@@ -38,7 +38,7 @@ The phone is a *thin client*: it decodes video and reports touches. All the
  │        │                      openh264              │        │             │
  │        └────────── raw Annex-B H.264 ──┘            │        │             │
  │                       │ pipe                        │        │             │
- │             extenderd.py  (parse, GOP cache,        │  TCP   │ MediaCodec  │
+ │             tandemd.py  (parse, GOP cache,        │  TCP   │ MediaCodec  │
  │             per-client senders, heartbeats) ────────┼───────▶│  → Surface  │
  │             phone_input.py (pairing, touches) ◀─────┼────────┤ touches     │
  │               → uinput touchscreen  (Hyprland)      │        │             │
@@ -88,7 +88,7 @@ therefore decides at start-up:
 
 | Compositor GPU (kernel driver) | Encoder | Notes |
 | --- | --- | --- |
-| `nvidia` | `h264_nvenc` — `preset=p1 tune=ull zerolatency=1 rc=cbr delay=0 forced-idr=1` | NVIDIA's VA driver (`nvidia-vaapi-driver`) only *decodes* |
+| `nvidia` | **xdph + GStreamer `nvh264enc`** (zero-copy, `backends/xdph.py`), then wf-recorder `h264_nvenc` — `preset=p1 tune=ull zerolatency=1 rc=cbr delay=0 forced-idr=1` | NVIDIA's VA driver (`nvidia-vaapi-driver`) only *decodes*; wf-recorder can't hand GPU frames to NVENC, see below |
 | `amdgpu` / `i915` / `xe` | `h264_vaapi` on that GPU's render node | `LIBVA_DRIVER_NAME` forced to `radeonsi` / `iHD` (`i965` when iHD isn't installed) |
 | anything, if the above fails to start | `libx264` on the CPU (`preset=ultrafast tune=zerolatency`, `-x yuv420p`) | NVIDIA without NVENC, nouveau, VMs, VA drivers without H.264 encode |
 
@@ -102,14 +102,14 @@ is never killed.
 Forcing `LIBVA_DRIVER_NAME` matters: NVIDIA Hyprland setups typically export
 `LIBVA_DRIVER_NAME=nvidia` globally, which makes `vainfo` (and FFmpeg) load the
 decode-only NVDEC driver even on the AMD/Intel node. Override the choice with
-`extenderd.py --encoder h264_vaapi|h264_nvenc` (`--device` then picks the VA node).
+`tandemd.py --encoder h264_vaapi|h264_nvenc` (`--device` then picks the VA node).
 
 The dev machine runs Hyprland on the NVIDIA GPU (`AQ_DRM_DEVICES=card0:card1`),
 so it streams via NVENC. NVENC in CBR mode emits a filler NAL after almost every
 frame; the daemon drops filler, SEI and AUD NALs (`NAL_DROP`) before they reach
 the network.
 
-**Cost of NVIDIA rendering: capture is *not* zero-copy there.** wf-recorder only
+**NVIDIA rendering: why wf-recorder isn't used there any more.** wf-recorder only
 does DMA-BUF capture for VA-API, and only on the compositor's own GPU (with NVENC
 and `-d` it fails with `Unsupported format: bgra`; with VA-API on the iGPU it
 logs `compositor running on different device, disabling DMA-BUF`). So with
@@ -117,9 +117,43 @@ Hyprland on NVIDIA every frame goes through `wl_shm` buffers
 (`/tmp/wf-recorder-shared-*`). Hyprland reads each frame back from the GPU on its
 single render thread. Measured at 2560x1440@120, that thread ran at **87 %** with
 capture running and **13 %** with wf-recorder paused. That leaves the main screen
-no headroom, so it drops frames, worse as the laptop heats up. The remedies are
-to render Hyprland on the iGPU (zero-copy VA-API again) or to stream at a lower
-fps/resolution, since the readback cost scales with pixels per second.
+no headroom, so it drops frames, worse as the laptop heats up. wf-recorder also
+keeps a pool of ~11 shared-memory frames (~0.5 GB RSS at 2400x1080), mapped into
+Hyprland as well.
+
+**The fix: capture through xdg-desktop-portal-hyprland (xdph), all on the GPU.**
+xdph asks Hyprland for **DMA-BUF** frames, which costs Hyprland a GPU blit
+instead of a readback, and GStreamer encodes them without a CPU copy:
+
+```
+xdph ScreenCast session (EXT-1)  ->  PipeWire node, DMA-BUF in NVIDIA's tiled layout
+  -> pipewiresrc -> glupload -> glcolorconvert (NV12 on the GPU)
+  -> nvh264enc (CUDA/GL interop; preset p1, tune ultra-low-latency, CBR, no B-frames)
+  -> h264parse (byte-stream, one access unit per buffer) -> pipe -> tandemd
+```
+
+- **No picker.** The daemon calls xdph's *backend* interface
+  (`org.freedesktop.impl.portal.ScreenCast` on
+  `org.freedesktop.impl.portal.desktop.hyprland`) directly, passing restore data
+  (xdph's format, version 3) that names the output. xdph treats it as a saved
+  choice ("restore data valid, not prompting"), so no dialog appears. The
+  PipeWire node comes back from `Start`; `pipewiresrc path=<node>` reads it.
+- **Damage-driven.** Hyprland only produces frames when EXT changes;
+  `keepalive-time=1000` re-sends the last frame every second so a phone that
+  joins a still desktop isn't left black.
+- **Session lifetime.** The session is closed in `stop_capture`, before any
+  output removal. Its D-Bus path is kept in `$XDG_RUNTIME_DIR/tandem-xdph-session`
+  so `remove_output` can close one a killed daemon left open.
+- **Fallback.** If xdph isn't running, a GStreamer element is missing, or the
+  pipeline produces nothing for 4 s, the backend moves on to wf-recorder NVENC,
+  then x264, as before. The TUI's Dependencies screen lists the pieces as
+  optional on NVIDIA machines.
+
+Measured on the dev machine (RTX 4060, Hyprland 0.56, 2400x1080@60 with a
+terminal redrawing every frame): both paths deliver ~59 fps, but only
+wf-recorder maps `wf-recorder-shared` buffers into Hyprland; the GStreamer
+process uses ~8 % CPU against wf-recorder's 11–12 %. End to end through the
+daemon to a paired test client: 503 decodable frames in 8 s.
 
 ---
 
@@ -149,13 +183,15 @@ hyprctl eval 'hl.monitor({ output = "EXT-1", mode = "2400x1080@60", position = "
   phone — set *before* the output is created so EXT opens on 11.
 - **Disconnect (`remove_output`) runs in a fixed order.** Each step closes a way
   the compositor could freeze:
+  0. close the xdph screencast session if one is still open (a killed daemon
+     can leave one);
   1. stop and *wait for* every wf-recorder still capturing EXT
      (`kill_stale_capture`: SIGTERM, then SIGKILL after 2 s). A screencopy frame
      still pending on a destroyed output can hang Hyprland;
   2. focus the primary, because removing the focused monitor is a crash path;
   3. move EXT's workspaces back to the primary, so no window vanishes;
   4. `hyprctl output remove`, then hand the primary back to `auto`.
-- wf-recorder is spawned with `PR_SET_PDEATHSIG`, so it dies with the daemon
+- wf-recorder and the GStreamer pipeline are spawned with `PR_SET_PDEATHSIG`, so they die with the daemon
   even when the daemon is SIGKILLed. Without that, an orphaned wf-recorder kept
   capturing a monitor that the TUI was about to remove.
 
@@ -193,7 +229,12 @@ the daemon exits (even if killed), Mutter removes it and rehomes its windows.
 LIBVA_DRIVER_NAME=radeonsi wf-recorder -o EXT-1 -c h264_vaapi -d /dev/dri/renderD128 \
     -p g=30 -p bf=0 -p b=12M -p rc_mode=CBR -p async_depth=1 \
     -r 60 --muxer=h264 -f /dev/stdout
-# compositor on NVIDIA:
+# compositor on NVIDIA (zero-copy; <node> comes from the xdph session):
+gst-launch-1.0 pipewiresrc path=<node> keepalive-time=1000 ! 'video/x-raw(memory:DMABuf)' \
+    ! glupload ! glcolorconvert ! 'video/x-raw(memory:GLMemory),format=NV12' \
+    ! nvh264enc preset=p1 tune=ultra-low-latency rc-mode=cbr bitrate=12000 gop-size=30 bframes=0 \
+    ! h264parse config-interval=-1 ! 'video/x-h264,stream-format=byte-stream,alignment=au' ! fdsink
+# compositor on NVIDIA, fallback (costs Hyprland a readback per frame):
 wf-recorder -o EXT-1 -c h264_nvenc -p g=30 -p bf=0 -p b=12M -p preset=p1 -p tune=ull \
     -p zerolatency=1 -p rc=cbr -p delay=0 -p forced-idr=1 -r 60 --muxer=h264 -f /dev/stdout
 ```
@@ -233,7 +274,7 @@ Every encoder is configured the same way, for the same reasons:
 | raw Annex-B, no container | the decoder eats it directly |
 | `keepalive-time=1000` (GNOME) | Mutter only sends frames on damage; resend the last one every second |
 
-### Stage 2 — NAL parsing + broadcast (`extenderd.py`)
+### Stage 2 — NAL parsing + broadcast (`tandemd.py`)
 
 The daemon splits the Annex-B byte stream into **NAL units**:
 
@@ -278,9 +319,12 @@ burst, and is showing the *current* picture within milliseconds (measured: 2 ms
 from accept to first picture data). Before this, a phone joining an idle desktop
 waited for damage that might never come — a black screen.
 
-### Stage 3 — Transport (framed TCP)
+### Stage 3 — Transport (framed TCP inside TLS)
 
-Every message, in both directions, is **`4-byte type` + `4-byte big-endian
+The TCP connection is wrapped in **TLS**, and a phone gets nothing until it has
+proved it scanned this computer's QR code (pairing key + certificate
+fingerprint): see [`SECURITY.md`](./SECURITY.md). Inside the TLS connection,
+every message, in both directions, is **`4-byte type` + `4-byte big-endian
 length` + body**:
 
 | Type | Direction | Body | When |
@@ -288,17 +332,19 @@ length` + body**:
 | `NALU` | PC → phone | one Annex-B NAL, start code included → straight to the decoder | video |
 | `ASX1` | PC → phone | JSON settings: `side width height fps scale quality bitrate codec gop host backend` | on connect, and on any live config change |
 | `PING` | PC → phone | empty | after 1 s with nothing else to send |
-| `HELO` | phone → PC | JSON `{"key": "<pairing key>", "app": "0.4.0"}` | once, right after connecting |
-| `INPT` | PC → phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | the answer to `HELO` |
+| `HELO` `CHAL` `AUTH` `OKAY` `DENY` | both | the pairing handshake ([`SECURITY.md`](./SECURITY.md) §3) | once, before anything else |
+| `INPT` | PC → phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | right after the phone is admitted |
 | `TUCH` | phone → PC | 6 bytes: `action u8, finger u8, x u16, y u16` (big-endian) | every touch change (Stage 5) |
 
-Unknown types are ignored on both ends, so new types stay compatible (an old
-phone never sends `HELO` and simply gets no touch; an old daemon ignores
-`HELO`/`TUCH` and never answers `INPT`). The daemon refuses phone → PC frames
-larger than 4 KB.
+After the handshake, unknown types are ignored on both ends, so new types stay
+compatible. The daemon refuses phone → PC frames larger than 4 KB (1 KB during
+the handshake).
 
-**Per-client sender threads.** Each phone has a queue of *whole frames* drained
-by its own thread with blocking `sendall` (5 s timeout). The parser only ever
+**One I/O thread per phone.** Each phone has a queue of *whole frames* and a
+single thread that both sends them and reads what the phone sends back,
+`select()`ing on the non-blocking TLS socket and a wake-up pipe (a TLS
+connection must not be used by two threads at once; see `SECURITY.md` §4.8). A
+send that makes no progress for 5 s means a dead phone. The parser only ever
 enqueues, so one slow phone can't stall the encoder pipe or other phones. If a
 queue exceeds 4 MB (weak Wi-Fi), the *queued* frames are dropped — never the one
 mid-send — and that phone restarts at the next keyframe. Previously the daemon
@@ -317,12 +363,16 @@ detected on both ends within seconds instead of hanging half-open.
 - `adb reverse tcp:5000 tcp:5000` also works (phone connects to `127.0.0.1`).
 
 **Pairing QR.** The TUI encodes
-`asext://c?h=<ip1>,<ip2>&p=5000&n=<hostname>&k=<pairing key>&v=1` with every
+`tandem://c?h=<ip1>,<ip2>&p=5000&n=<hostname>&k=<pairing key>&f=<cert fingerprint>&v=2` with every
 plausible address (USB tether first or LAN first, per *Preferred
 link*; Docker/VPN/VM bridges excluded) and draws it with Unicode half-blocks
 (`qr.py`, dependency-free, verified with `zbarimg`). The app connects to *all*
 listed hosts in parallel and keeps the first that answers — so the same QR works
-over USB and Wi-Fi. `k` is the pairing key that unlocks touch input (Stage 5).
+over USB and Wi-Fi. `k` is the pairing key the phone must prove it knows to
+connect at all, and `f` pins the computer's TLS certificate
+([`SECURITY.md`](./SECURITY.md)). Under the QR the TUI also shows the key as a
+typable *pairing code* (`xxxxx-xxxxx-xxxxx-xxxxx`) for entering an address by
+hand.
 
 > TCP's weakness: on lossy Wi-Fi a lost packet stalls everything behind it
 > (head-of-line blocking). The roadmap moves Wi-Fi to RTP/UDP + FEC.
@@ -343,7 +393,7 @@ laptop's touchpad while someone taps on the phone.
 
 ```
 phone: MotionEvent ─▶ TouchForwarder ─▶ TUCH (fraction of the video picture)
-   ─TCP─▶ client reader thread ─▶ PhoneInput (paired?) ─▶ TouchRouter (slots)
+   ─TLS─▶ client I/O thread ─▶ PhoneInput (touch on?) ─▶ TouchRouter (slots)
    ─▶ backend touch surface ─▶ compositor ─▶ window under the finger
 ```
 
@@ -359,25 +409,16 @@ device (10 slots), so two phones touching at once never collide, and when a
 phone disconnects mid-gesture its fingers are lifted (no stuck touch).
 `action`: 0 down, 1 move, 2 up, 3 cancel (lift every finger of that phone).
 
-**Pairing (who may touch).** The daemon listens on every interface, so anyone
-on the same Wi-Fi can *connect*. Watching the screen is one thing; controlling
-the desktop is another, so touch needs a **pairing key**:
-
-1. The TUI creates a random key once (`~/.config/archscreenextender/pairing-key`,
-   mode 0600, 144 bits) and puts it in the QR (`k=`).
-2. The daemon reads it from that file (`--pairing-key-file`; never on the
-   command line, which other local users can read).
-3. A phone sends the key in `HELO`. The daemon compares it in constant time
-   (`hmac.compare_digest`) and answers `INPT`. Touches from a phone that hasn't
-   been accepted are dropped.
-4. **Configure → Paired phones → forget all** regenerates the key: every phone
-   must scan the new QR before it can touch again.
-
-Video stays open to any client (as before); only input is gated. The key
-travels unencrypted over the LAN, like the video — TLS is on the roadmap.
+**Pairing (who may touch).** Only phones that passed the pairing handshake are
+connected at all ([`SECURITY.md`](./SECURITY.md)), so every phone the daemon
+streams to has scanned this computer's QR code (or typed its pairing code).
+Touch then only depends on touch input being on and a virtual touchscreen being
+available. The daemon tells each admitted phone with `INPT`. **Configure →
+Paired phones → forget all** creates a new key: the daemon disconnects every
+phone at once, and each must scan the new QR.
 
 **Hyprland: a uinput touchscreen** (`uinput_touch.py`). The daemon creates a
-kernel input device named `amvd-touch` through `/dev/uinput` (pure Python ioctls,
+kernel input device named `tandem-touch` through `/dev/uinput` (pure Python ioctls,
 no dependencies) speaking the multi-touch protocol *type B* that real
 touchscreens use (`ABS_MT_SLOT`, `ABS_MT_TRACKING_ID`, `ABS_MT_POSITION_X/Y`,
 plus `BTN_TOUCH` and `ABS_X/Y`, which libinput requires), flagged
@@ -385,10 +426,10 @@ plus `BTN_TOUCH` and `ABS_X/Y`, which libinput requires), flagged
 told to map it onto that monitor only:
 
 ```
-hyprctl eval 'hl.device({ name = "amvd-touch", output = "EXT-1" })'
+hyprctl eval 'hl.device({ name = "tandem-touch", output = "EXT-1" })'
 ```
 
-(legacy fallback: `hyprctl keyword device[amvd-touch]:output EXT-1`; re-applied on
+(legacy fallback: `hyprctl keyword device[tandem-touch]:output EXT-1`; re-applied on
 every live side/scale change because a config reload drops it). The device
 lives as long as the daemon: windows only see touch support while it exists.
 
@@ -398,9 +439,9 @@ mechanism that gives you your sound card), plus loading the `uinput` module at
 boot:
 
 ```
-/etc/udev/rules.d/70-amvd-uinput.rules
+/etc/udev/rules.d/70-tandem-uinput.rules
   KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
-/etc/modules-load.d/amvd-uinput.conf
+/etc/modules-load.d/tandem-uinput.conf
   uinput
 ```
 
@@ -458,8 +499,8 @@ brings it back in line with Hyprland.
 ## 6. Process & lifecycle
 
 ```
-amvd (python.sh: /usr/bin/python3) ──▶ tui.py
-tui.py ──spawns──▶ extenderd.py --keep-output --banner-file …   (same interpreter)
+tandem (python.sh: /usr/bin/python3) ──▶ tui.py
+tui.py ──spawns──▶ tandemd.py --keep-output --banner-file …   (same interpreter)
                        │
                        ├─ backend.setup()          create the virtual monitor
                        ├─ backend.start_capture()  wf-recorder | gst-launch-1.0  → pipe
@@ -470,7 +511,7 @@ tui.py ──spawns──▶ extenderd.py --keep-output --banner-file …   (sam
                                                    remove monitor (unless --keep-output on Hyprland)
 ```
 
-- **Always the system Python.** The launchers (`amvd`, `start-extender.sh`,
+- **Always the system Python.** The launchers (`tandem`, `start-extender.sh`,
   `install.sh`) source `python.sh`, which picks `/usr/bin/python3` rather than
   the first `python3` on `PATH`. Distro packages (PyGObject) only exist for the
   system interpreter, and conda's bundled ncurses can't find the system
@@ -487,7 +528,7 @@ tui.py ──spawns──▶ extenderd.py --keep-output --banner-file …   (sam
   SIGKILL (it used to wait 4 s, which the daemon's own 3 s encoder wait could
   overrun). Only after the daemon has exited is the monitor removed.
 - **Live edits:** `side`/`scale` are applied without restarting — the TUI rewrites
-  `~/.config/archscreenextender/daemon-banner.json` (atomically) and sends
+  `~/.config/tandem/daemon-banner.json` (atomically) and sends
   `SIGHUP`; the daemon's control thread moves/rescales the monitor through the
   backend and pushes a fresh `ASX1` frame to connected phones. Resolution, fps,
   quality, gop, port or backend changes restart the daemon; on Hyprland the
@@ -513,7 +554,7 @@ causes; each is fixed and documented next to the code:
 | "Reconnecting…" forever with a wrong address | Any failure, even the very first, auto-retried | Auto-retry only after a stream has worked; first-time failures show a specific error |
 | Hyprland: capture dies at once (`Unsupported format: bgra`) | Encoder on a different GPU than the compositor (Hyprland on NVIDIA, VA-API on the iGPU with the NVDEC VA driver) | Encoder follows the compositor GPU: NVENC on NVIDIA, VA-API (with the right `LIBVA_DRIVER_NAME`) elsewhere |
 | Hyprland: *"invalid scale"* / *"EXT-1 overlaps"* popups | Requested scale gave fractional logical pixels; position computed from it. Also a restart overlapping the old daemon's teardown | Nearest valid scale; a new daemon waits for the old one to exit |
-| Hyprland: main screen drops frames while streaming, worse over time | Compositor on NVIDIA → wf-recorder captures through CPU `wl_shm` copies on Hyprland's render thread (87 % vs 13 % with capture paused) | Documented in §3. Render on the iGPU or lower fps/resolution |
+| Hyprland: main screen drops frames while streaming, worse over time | Compositor on NVIDIA → wf-recorder captures through CPU `wl_shm` copies on Hyprland's render thread (87 % vs 13 % with capture paused) | Zero-copy capture via xdph + GStreamer NVENC (§3); wf-recorder only as a fallback |
 | Pressing `d` sometimes freezes the system | The TUI could SIGKILL the daemon before the daemon stopped wf-recorder. The orphaned capture stayed on EXT-1, and the output was removed under it, sometimes while it still had focus | Non-blocking signal handler, 8 s grace, `PR_SET_PDEATHSIG`, ordered `remove_output` (stop capture → focus primary → move workspaces → remove) |
 | Live view costs ~5 % CPU while idle | QR code re-encoded (pure Python) every 150 ms | Re-encoded only when the URI changes |
 | Resolution/scale/side ignored on Hyprland ≥ 0.55 | `hyprctl keyword`/`dispatch` broken by the Lua parser (fix existed but was left in a git stash) | `hyprctl eval` Lua API (restored and committed) |
@@ -526,6 +567,4 @@ causes; each is fixed and documented next to the code:
 - **HEVC** decode in the app (the Hyprland backend can already encode it).
 - **KDE Plasma** backend (KWin virtual outputs via `kwin_wayland` screencast).
 - **Pen input** (pressure, hover) and a keyboard from the phone.
-- **TLS** with the certificate fingerprint pinned in the QR (video and touch are
-  currently unencrypted on the LAN).
 - **Latency HUD** overlay for tuning.

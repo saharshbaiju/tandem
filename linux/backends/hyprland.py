@@ -4,9 +4,14 @@ hyprland.py - Hyprland backend: headless output + wf-recorder capture.
 Pipeline:
     hyprctl output create headless EXT-1   (GPU-backed virtual monitor)
         -> wf-recorder (wlr-screencopy + VA-API H.264, zero-copy on the iGPU)
-        -> raw Annex-B H.264 on a pipe -> extenderd's parser
+        -> raw Annex-B H.264 on a pipe -> tandemd's parser
 
-Touch input: a uinput touchscreen ("amvd-touch", see uinput_touch.py) that
+When Hyprland renders on NVIDIA, wf-recorder can only capture through shared
+memory, which costs Hyprland a GPU readback per frame on its render thread
+(main-screen stutter). There the capture goes through xdph + GStreamer +
+NVENC instead, all on the GPU; see xdph.py. wf-recorder stays the fallback.
+
+Touch input: a uinput touchscreen ("tandem-touch", see uinput_touch.py) that
 Hyprland maps onto EXT-1 with `hl.device({ name, output })`, so touches land on
 the phone's monitor and the mouse cursor stays where it is.
 
@@ -29,6 +34,8 @@ import time
 
 import uinput_touch
 
+from . import gnome, xdph
+
 # Workspace split: the laptop keeps LAPTOP_WS, the phone hosts EXT_WS, so the
 # secondary monitor behaves as a true extension. Bound as rules *before* the
 # output is created, so Hyprland opens EXT on its default workspace (first of
@@ -38,7 +45,7 @@ EXT_WS = range(11, 21)       # workspaces 11..20 live on the phone
 
 
 def log(*a):
-    print("[extenderd]", *a, file=sys.stderr, flush=True)
+    print("[tandemd]", *a, file=sys.stderr, flush=True)
 
 
 def hyprctl(*args):
@@ -204,6 +211,7 @@ def remove_output(name):
     3. move its workspaces (and windows) to the primary,
     4. remove it and hand the primary back to auto placement.
     """
+    xdph.close_leftover_session()
     kill_stale_capture(name)
     if not any(m.get("name") == name for m in monitors()):
         return
@@ -305,6 +313,14 @@ def encoder_candidates(requested, device):
     card = compositor_card()
     drv = gpu_driver(card) if card else None
     out = []
+    if requested == "auto" and drv == "nvidia":
+        reason = xdph.unavailable_reason()
+        if reason:
+            log(f"zero-copy NVIDIA capture unavailable ({reason}); "
+                "using wf-recorder, which costs Hyprland a copy per frame")
+        else:
+            out.append((XDPH_NVENC, None, {},
+                        f"NVENC on {card} via xdph + GStreamer (zero-copy)"))
     if requested == "auto":
         if drv == "nvidia":
             requested = "h264_nvenc"
@@ -328,6 +344,9 @@ def encoder_candidates(requested, device):
     else:
         out.append(("libx264", None, {}, "x264 on the CPU"))
     return out
+
+
+XDPH_NVENC = "xdph+nvh264enc"   # pseudo-encoder: the xdph.py pipeline
 
 
 def pick_encoder(requested, device):
@@ -414,6 +433,8 @@ class HyprlandBackend:
     def __init__(self, args):
         self.a = args
         self.proc = None
+        self.stream = None          # readable Annex-B byte stream
+        self.session = None         # xdph.ScreenCastSession while capturing
 
     @staticmethod
     def missing():
@@ -458,16 +479,43 @@ class HyprlandBackend:
         req = (a.encoder if a.encoder.startswith(("h264_", "hevc_", "libx26"))
                else "auto")
         cands = encoder_candidates(req, a.device)
+        if a.codec == "hevc":
+            cands = [c for c in cands if c[0] != XDPH_NVENC]   # H.264 only
         for i, (encoder, device, env, desc) in enumerate(cands):
             if a.codec == "hevc":
                 encoder = encoder.replace("h264_", "hevc_").replace("264", "265")
             log(f"encoder: {desc}")
-            self._spawn(encoder, device, env)
+            try:
+                if encoder == XDPH_NVENC:
+                    self._spawn_xdph()
+                else:
+                    self._spawn(encoder, device, env)
+            except Exception as e:
+                log(f"encoder {encoder} could not start ({e}); trying the next one")
+                self.stop_capture()
+                continue
             if i == len(cands) - 1 or not self._fails_to_start():
-                return self.proc.stdout
+                return self.stream
             self.stop_capture()
             log(f"encoder {encoder} failed to start; trying the next one")
-        return self.proc.stdout
+        return self.stream
+
+    def _spawn_xdph(self):
+        """Zero-copy NVIDIA capture: an xdph screencast into GStreamer NVENC."""
+        a = self.a
+        self.session = xdph.ScreenCastSession(a.output)
+        rfd, wfd = os.pipe()
+        cmd = xdph.build_pipeline(self.session.node,
+                                  gnome.bitrate_kbps(a.bitrate), a.gop, wfd)
+        log("capture cmd: " + " ".join(cmd))
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.PIPE, pass_fds=(wfd,),
+                                     preexec_fn=_die_with_parent)
+        os.close(wfd)              # our copy; EOF arrives when gst exits
+        self.stream = os.fdopen(rfd, "rb", buffering=0)
+        threading.Thread(target=self._wf_log, args=(self.proc,),
+                         daemon=True).start()
 
     def _spawn(self, encoder, device, env):
         a = self.a
@@ -490,6 +538,7 @@ class HyprlandBackend:
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, bufsize=0,
                                      preexec_fn=_die_with_parent)
+        self.stream = self.proc.stdout
         threading.Thread(target=self._wf_log, args=(self.proc,),
                          daemon=True).start()
 
@@ -505,7 +554,7 @@ class HyprlandBackend:
         while time.time() < end:
             if p.poll() is not None:
                 return True
-            r, _, _ = select.select([p.stdout], [], [], 0.1)
+            r, _, _ = select.select([self.stream], [], [], 0.1)
             if r:      # bytes waiting (or EOF): alive a moment later = works
                 time.sleep(0.2)
                 return p.poll() is not None
@@ -513,18 +562,19 @@ class HyprlandBackend:
         return True
 
     def _wf_log(self, proc):
-        """Forward wf-recorder's diagnostics (it explains why capture died)."""
+        """Forward the encoder's diagnostics (they explain why capture died)."""
+        tag = "gst: " if self.session else "wf: "
         for raw in proc.stderr:
             # progress lines are \r-separated; keep only the last segment
             line = raw.decode("utf-8", "replace").split("\r")[-1].strip()
             if line:
-                log("wf: " + line)
+                log(tag + line)
 
     def create_touch_surface(self):
         """A uinput touchscreen whose whole area is the phone's monitor."""
         problem = uinput_touch.uinput_access_problem()
         if problem:
-            raise RuntimeError(f"{problem}; run amvd on the computer and "
+            raise RuntimeError(f"{problem}; run tandem on the computer and "
                                "press t to set up touch")
         screen = uinput_touch.VirtualTouchscreen(self.a.width, self.a.height)
         if not map_touch_device(uinput_touch.DEVICE_NAME, self.a.output):
@@ -541,6 +591,7 @@ class HyprlandBackend:
         return ok
 
     def stop_capture(self):
+        """Stop the encoder, then end the screencast (before any removal)."""
         p = self.proc
         if p and p.poll() is None:
             p.terminate()
@@ -548,6 +599,13 @@ class HyprlandBackend:
                 p.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 p.kill()
+                p.wait()
+        if self.stream and self.stream is not getattr(p, "stdout", None):
+            self.stream.close()     # our end of the GStreamer pipe
+        self.stream = None
+        if self.session:
+            self.session.close()
+            self.session = None
 
     def teardown(self):
         remove_output(self.a.output)

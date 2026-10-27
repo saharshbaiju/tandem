@@ -1,4 +1,4 @@
-# Screen Extender — Android App
+# Tandem — Android App
 
 The phone is a thin client: it connects, decodes H.264 with the hardware decoder,
 puts every frame on screen the moment it's ready, and sends your touches back so
@@ -72,7 +72,7 @@ Light/dark follows the system.
 **Getting the address, three ways:**
 
 1. **Scan QR code** in the app (Google code scanner).
-2. **Stock camera app**: the QR is an `asext://` link and the app registers that
+2. **Stock camera app**: the QR is a `tandem://` link and the app registers that
    scheme, so pointing the camera at the terminal opens the app pre-filled.
 3. **Enter address manually**: `192.168.42.129` or `192.168.42.129:5000`.
 
@@ -97,14 +97,21 @@ and **Disconnect**. Back closes the sheet; while live it *opens* the sheet inste
 disconnecting (an accidental edge swipe never drops the stream — Disconnect is a
 deliberate tap in the sheet). Back while connecting cancels.
 
-**Touch:** once the computer has accepted the phone's pairing key, every touch
+**Touch:** when the computer has touch input on, every touch
 on the video goes to the computer (§4.6): tap, drag, scroll, long-press, pinch —
 handled by the desktop apps like a real touchscreen, while the computer's mouse
 pointer stays where it is. Touches on the black letterbox bars, the edge handle
-and the open sheet stay on the phone. Without touch (address typed by hand, an
-old QR, or touch off/unavailable on the computer) a tap on the video peeks the
-status pill instead, and the sheet's *Touch* row says why it's off — e.g. *"Scan
-the QR code on your computer to use touch."*
+and the open sheet stay on the phone. With touch off or unavailable on the
+computer, a tap on the video peeks the status pill instead, and the sheet's
+*Touch* row says why.
+
+**Security:** the app connects only with the computer's pairing key, and from
+a QR it also pins the computer's TLS certificate ([`SECURITY.md`](./SECURITY.md)).
+Entering an address by hand asks for the **pairing code** shown under the QR in
+tandem. A link opened from outside the app (camera, browser, another app) asks
+*"Pair with <name>?"* before it replaces the saved computer. Pairing failures
+are final (no retry loop) and say why: *wrong pairing code*, *this isn't the
+computer you paired with*, *update tandem on the computer*.
 
 **Errors are specific:** *"titan-arch is reachable, but the extender isn't
 running"* (connection refused) vs *"Couldn't reach titan-arch. Turn on USB
@@ -116,14 +123,16 @@ arrived"* (10 s watchdog).
 ## 3. Source layout
 
 ```
-app/src/main/java/com/archextender/
+app/src/main/java/io/github/saharshbaiju/tandem/
   MainActivity.kt          UI state machine, scanner, transitions, side sheet, lifecycle
-  StreamSession.kt         connect (parallel, all hosts) → framed reader → MediaCodec;
-                           HELO / INPT handshake and the touch sender thread
+  StreamSession.kt         connect (parallel, all hosts) → TLS + pairing → framed
+                           reader → MediaCodec; the touch sender thread
+  SecureChannel.kt         TLS with certificate pinning, pairing-key proofs (HMAC),
+                           pairing-code format (mirrors linux/secure_link.py)
   FrameReader.kt           the daemon's framed protocol: NALU / ASX1 / PING / INPT
-  FrameWriter.kt           phone → computer frames: HELO / TUCH
+  FrameWriter.kt           phone → computer frames: HELO / AUTH / TUCH
   TouchForwarder.kt        MotionEvent → TUCH (fractions of the video picture)
-  ConnectTarget.kt         asext:// QR / deep-link parsing, manual entry, persistence
+  ConnectTarget.kt         tandem:// QR / deep-link parsing, manual entry, persistence
   RippleRevealLayout.kt    water ripple + reveal (AGSL on 13+, canvas fallback)
   AspectRatioSurfaceView.kt  letterboxes the video to the stream's aspect ratio
 app/src/main/res/
@@ -162,8 +171,12 @@ Runs on its own thread:
 1. **Connect** to every host in parallel (3 s timeout each); the first to accept
    wins, the others are closed. A *refused* connection is reported in preference
    to a timeout (it means "computer reachable, extender not running").
-2. **Read frames** with a 4 s socket timeout (the daemon PINGs every second).
-3. **Say hello**: send `HELO {"key": <pairing key>, "app": <version>}`.
+2. **Secure it** (`SecureChannel`, 5 s timeout): TLS, refusing any certificate
+   but the one pinned by the QR; then `HELO` → `CHAL` → `AUTH` → `OKAY`, checking
+   the computer's proof before anything else. `DENY`, a wrong proof or a
+   certificate mismatch ends the session as *final* (`onStopped(…, final =
+   true)`): the activity shows the reason and doesn't reconnect.
+3. **Read frames** with a 4 s socket timeout (the daemon PINGs every second).
 4. `ASX1` → `ServerConfig` (shown in the side sheet; its width/height size the
    decoder's input buffers). `PING` → nothing (it just resets the timeout).
    `INPT {"touch": …, "reason": …}` → `onInputState` (touch on/off).
@@ -195,19 +208,22 @@ padded 1088) so the letterbox is exact.
 ### 4.3 `FrameReader`
 
 `4-byte type + 4-byte big-endian length + body`, read fully; lengths over 32 MB
-are treated as a corrupt stream. Types: `NALU`, `ASX1`, `PING`, `INPT`; unknown
-types are skipped for forward compatibility. `FrameWriter` is the mirror image
-for `HELO` and `TUCH`: each frame is assembled and written in one synchronized
+are treated as a corrupt stream. Types: `NALU`, `ASX1`, `PING`, `INPT` (and the
+handshake's `CHAL` / `OKAY` / `DENY`, read by `SecureChannel`); unknown types
+are skipped for forward compatibility. `FrameWriter` is the mirror image for
+`HELO`, `AUTH` and `TUCH`: each frame is assembled and written in one synchronized
 call, so two frames can never interleave on the socket.
 
 ### 4.4 `ConnectTarget`
 
-Parses `asext://c?h=<ip>[,<ip>…]&p=<port>&n=<name>&k=<pairing key>&v=1`,
-validates hosts, and persists the last target (key included) in
-`SharedPreferences`. Manual entry accepts `host`, `host:port`, or a separate port
-field; it keeps the saved name and pairing key when the typed address is one the
-saved computer already advertised on the same port (you only corrected the
-address), and otherwise has no key — view only until you scan the QR.
+Parses `tandem://c?h=<ip>[,<ip>…]&p=<port>&n=<name>&k=<pairing key>&f=<cert
+fingerprint>&v=2`, validates hosts, key and fingerprint, and persists the last
+target in `SharedPreferences` (excluded from backups). A `v=1` QR (versions before 0.5)
+is reported as outdated. Manual entry takes `host`, `host:port` or a separate
+port field, **plus the pairing code**; it keeps the saved name and pinned
+certificate when the code is the saved computer's (you only corrected the
+address). A target saved by an older version (no valid key) must be paired
+again.
 
 ### 4.5 `RippleRevealLayout`
 
@@ -287,12 +303,12 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ### 7.2 Drive it from the command line
 
 ```bash
-# open with a computer pre-filled (exactly what scanning the QR does);
-# add &k=$(cat ~/.config/archscreenextender/pairing-key) to enable touch
-adb shell am start -a android.intent.action.VIEW -d "'asext://c?h=192.168.42.129&p=5000&n=archbox&v=1'"
+# open with a computer pre-filled (what the QR does; the app asks to confirm).
+# The full link, with k= and f=, is printed by testsrc.py / start-extender.sh.
+adb shell am start -a android.intent.action.VIEW -d "'tandem://c?h=192.168.42.129&p=5000&n=archbox&k=<key>&f=<fp>&v=2'"
 
-# launch and connect to the saved computer immediately
-adb shell am start -n com.archextender/.MainActivity --ez autoconnect true
+# debug builds only: launch and connect to the saved computer immediately
+adb shell am start -n io.github.saharshbaiju.tandem.debug/.MainActivity --ez autoconnect true
 ```
 
 > Some phones (the original dev device included) block `adb shell input`
@@ -309,18 +325,19 @@ python3 linux/testsrc.py --static     # 2 s of video, then silence: tests GOP re
 python3 linux/testsrc.py --log-touch  # accept touches from paired phones, print them
 ```
 
-With `--log-touch`, every touch is printed as a fraction of the picture
-(`touch down  slot 0  x=0.500 y=0.500`), using this computer's pairing key; so
+Phones pair with it exactly as with the real daemon (it prints the QR link and
+the pairing code). With `--log-touch`, every touch is printed as a fraction of
+the picture (`touch down  slot 0  x=0.500 y=0.500`), so
 the touch path can be tested with `adb shell input tap/swipe` on the emulator.
 
 The **Android emulator** reaches the PC at `10.0.2.2`, so
-`asext://c?h=10.0.2.2&p=5000` connects an emulator to it. A Google Play system
+the printed link with `h=10.0.2.2` connects an emulator to it. A Google Play system
 image includes Play services, so even the QR scanner works there.
 
 ### 7.4 Logs
 
 ```bash
-adb logcat --pid=$(adb shell pidof com.archextender)
+adb logcat --pid=$(adb shell pidof io.github.saharshbaiju.tandem)
 adb logcat -s StreamSession          # connect / decoder / session-end reasons
 ```
 

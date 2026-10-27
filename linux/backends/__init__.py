@@ -1,8 +1,9 @@
 """
 Compositor backends: each one creates a virtual monitor and turns it into a raw
-Annex-B H.264 byte stream that extenderd parses and broadcasts.
+Annex-B H.264 byte stream that tandemd parses and broadcasts.
 
-    hyprland : Hyprland headless output + wf-recorder (VA-API)        [Arch]
+    hyprland : Hyprland headless output + wf-recorder (VA-API), or the
+               portal + GStreamer NVENC when Hyprland renders on NVIDIA [Arch]
     gnome    : Mutter ScreenCast virtual monitor + GStreamer/PipeWire [Ubuntu, Fedora]
 
 Backend interface (duck-typed):
@@ -46,6 +47,6 @@ def create(name, args):
 
 
 def describe(name):
-    return {"hyprland": "Hyprland (headless output + wf-recorder)",
+    return {"hyprland": "Hyprland (headless output + wf-recorder / portal)",
             "gnome": "GNOME / Mutter (virtual monitor + PipeWire)"}.get(
                 name, "unsupported desktop")

@@ -4,32 +4,35 @@ plugins {
 }
 
 android {
-    namespace = "com.archextender"
+    namespace = "io.github.saharshbaiju.tandem"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.archextender"
+        applicationId = "io.github.saharshbaiju.tandem"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
     }
 
     // Release signing. The keystore lives OUTSIDE the repo; point at it with
     // env vars or ~/.gradle/gradle.properties (see docs/RELEASING.md):
-    //   ASEXT_KEYSTORE, ASEXT_KEYSTORE_PASSWORD, ASEXT_KEY_ALIAS, ASEXT_KEY_PASSWORD
+    //   TANDEM_KEYSTORE, TANDEM_KEYSTORE_PASSWORD, TANDEM_KEY_ALIAS, TANDEM_KEY_PASSWORD
+    // (the ASEXT_* names from before the rename to Tandem still work).
     // Without them, release builds fall back to the debug key (local testing only).
-    fun secret(name: String): String? =
+    fun lookup(name: String): String? =
         System.getenv(name) ?: (project.findProperty(name) as String?)
-    val releaseKeystore = secret("ASEXT_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    fun secret(name: String): String? =
+        lookup(name) ?: lookup(name.replaceFirst("TANDEM_", "ASEXT_"))
+    val releaseKeystore = secret("TANDEM_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
 
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {
                 storeFile = releaseKeystore
-                storePassword = secret("ASEXT_KEYSTORE_PASSWORD")
-                keyAlias = secret("ASEXT_KEY_ALIAS") ?: "asext"
-                keyPassword = secret("ASEXT_KEY_PASSWORD") ?: secret("ASEXT_KEYSTORE_PASSWORD")
+                storePassword = secret("TANDEM_KEYSTORE_PASSWORD")
+                keyAlias = secret("TANDEM_KEY_ALIAS") ?: "amvd"
+                keyPassword = secret("TANDEM_KEY_PASSWORD") ?: secret("TANDEM_KEYSTORE_PASSWORD")
             }
         }
     }

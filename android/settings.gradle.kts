@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ArchScreenExtender"
+rootProject.name = "Tandem"
 include(":app")

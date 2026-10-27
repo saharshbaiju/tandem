@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# amVD Screen Extender — launch the TUI. Works when symlinked (~/.local/bin/amvd).
+# Tandem — launch the TUI. Works when symlinked (~/.local/bin/tandem).
 HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 source "$HERE/python.sh"   # the system Python, not whatever python3 is on PATH
-PY="$(amvd_python)" || { echo "amvd: python3 is required" >&2; exit 1; }
+PY="$(tandem_python)" || { echo "tandem: python3 is required" >&2; exit 1; }
 exec "$PY" "$HERE/tui.py" "$@"

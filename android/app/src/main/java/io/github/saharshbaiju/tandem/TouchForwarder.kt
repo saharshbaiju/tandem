@@ -1,4 +1,4 @@
-package com.archextender
+package io.github.saharshbaiju.tandem
 
 import android.view.MotionEvent
 import android.view.View

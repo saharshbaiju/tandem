@@ -1,0 +1,40 @@
+Tandem
+Copyright (C) 2026 Saharsh Baiju
+https://github.com/saharshbaiju/tandem
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 3, as published by the
+Free Software Foundation (see LICENSE), with the additional terms below.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+
+Additional terms (GNU GPL version 3, section 7)
+-----------------------------------------------
+
+1. Attribution (section 7(b)). This program displays the notice
+
+       Tandem by Saharsh Baiju · github.com/saharshbaiju/tandem
+
+   in the Android app's connect screen, in the terminal app's footer and in
+   the output of `tandemd.py --version`. Every copy and every modified
+   version must keep this notice, or a notice of equal prominence that names
+   Saharsh Baiju and links to https://github.com/saharshbaiju/tandem, in
+   those places or in the equivalent places of the modified version. A
+   modified version may add its own name and authors next to it.
+
+2. Name (section 7(e)). No rights are granted to use the name "Tandem" or
+   its logo for a modified version. A modified version that is distributed
+   must carry a different name, and must not suggest that it is the original
+   or that Saharsh Baiju endorses it. Saying truthfully that it is based on
+   Tandem is fine (and required by term 1).
+
+3. Additional permission (section 7, first paragraph). The Android app uses
+   Google Play services (the code scanner library), which is not free
+   software. As a special exception, you may link this program with Google
+   Play services libraries and distribute the result, provided that you
+   follow the GNU GPL for all of the code other than those libraries. If you
+   modify this program, you may extend this exception to your version, but
+   you are not obliged to; delete this paragraph if you don't.
