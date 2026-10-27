@@ -128,12 +128,10 @@
 }
 /*
  * Light theme: --black and --white swap, so every surface, rule and the
- * inverted security section flip together. Follows the system unless the
- * nav switch picked one (stored as data-theme on <html>).
+ * inverted security section flip together. Dark is the default, whatever
+ * the system uses; light only when the nav switch picked it (stored as
+ * data-theme on <html>).
  */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) { --black: #F8FAFD; --white: #000000; --gray-1: #5F6368; --gray-2: #C4C7C5; --gray-3: #E8EAED; }
-}
 :root[data-theme="light"] { --black: #F8FAFD; --white: #000000; --gray-1: #5F6368; --gray-2: #C4C7C5; --gray-3: #E8EAED; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1027,7 +1025,6 @@ const Theme = (() => {
     try { localStorage.setItem("tandem-theme", next); } catch {}
     read();
   });
-  matchMedia("(prefers-color-scheme: light)").addEventListener("change", read);
   read();
   return t;
 })();

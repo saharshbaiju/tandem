@@ -27,8 +27,8 @@ Only a phone that scanned the computer's QR code may control it. Pair by
 - [`docs/RELEASING.md`](docs/RELEASING.md) — how releases are built, signed and
   published (APK + Linux tarball on GitHub Releases).
 - [`website/index.html`](website/index.html) — the landing page: one static
-  file, no build step. Black and white with ASCII art; dark by default with a
-  light theme (follows the system, switch in the nav). The splash is the app's
+  file, no build step. Black and white with ASCII art; dark by default (whatever
+  the system uses), with a light theme to switch to in the nav. The splash is the app's
   connect ripple (`RippleRevealLayout`'s wave maths) rendered in ASCII.
   The scroll demo draws front views of a gunmetal laptop, phone, tablet and
   foldable in CSS, showing a Hyprland desktop (Waybar, Firefox on the GitHub
