@@ -62,8 +62,8 @@ no location, no storage.
                                      link drops ──▶ "Reconnecting…" (auto, backoff)
 ```
 
-**Connect screen** (Material 3, landscape two-pane): app identity on the left (the
-logo tile and "Tandem" in ASCII, `AsciiWordmarkView`); on
+**Connect screen** (Material 3, landscape two-pane): on the left just
+"Tandem" in ASCII (`AsciiWordmarkView`), the tagline and the credit; on
 the right a card that is either *Connect to your computer* (big **Scan QR code**
 button) or *Ready to connect* (the computer's name and addresses, **Connect**,
 *Scan again*, *Enter address manually*); the card scrolls when manual entry
@@ -92,8 +92,7 @@ launch the word "Tandem" appears in ASCII characters on black; drops spread from
 the centre (or wherever you tap) and bend it like water, then a hole with a
 bright rim opens onto the connect screen. About 1.5 s in all, and skipped when
 the system's animations are off. The launcher icon is an ASCII "T" on black
-(`drawable-nodpi/ic_launcher_foreground.png`, also the monochrome themed icon,
-and the logo tile at the top of the connect screen);
+(`drawable-nodpi/ic_launcher_foreground.png`, also the monochrome themed icon);
 the full wordmark is in `logo/` at the repo root.
 
 **The water transition** (`RippleRevealLayout`): on Android 13+ an AGSL shader

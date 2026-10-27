@@ -48,29 +48,10 @@
                 android:orientation="vertical"
                 android:paddingEnd="36dp">
 
-                <!-- The app's logo: the launcher icon's ASCII "T" on black. -->
-                <com.google.android.material.card.MaterialCardView
-                    style="?attr/materialCardViewFilledStyle"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    app:cardBackgroundColor="@color/brand"
-                    app:cardCornerRadius="18dp"
-                    app:strokeColor="?attr/colorOutlineVariant"
-                    app:strokeWidth="1dp">
-
-                    <ImageView
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:importantForAccessibility="no"
-                        android:scaleType="fitCenter"
-                        android:src="@drawable/ic_launcher_foreground" />
-                </com.google.android.material.card.MaterialCardView>
-
                 <!-- "Tandem" in ASCII, like the splash and the website. -->
                 <io.github.saharshbaiju.tandem.AsciiWordmarkView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp"
                     android:layout_marginBottom="6dp"
                     android:contentDescription="@string/app_name" />
 
@@ -82,23 +63,12 @@
                     android:textAppearance="?attr/textAppearanceBodyLarge"
                     android:textColor="?attr/colorOnSurfaceVariant" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/statusChip"
-                    style="@style/Widget.Material3.Chip.Assist"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="20dp"
-                    android:clickable="false"
-                    android:text="@string/status_idle"
-                    app:chipIcon="@drawable/ic_link"
-                    app:chipIconTint="?attr/colorOnSurfaceVariant" />
-
                 <!-- Attribution required by the GPL section 7 terms in NOTICE. -->
                 <TextView
                     android:id="@+id/credit"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="20dp"
+                    android:layout_marginTop="28dp"
                     android:text="@string/credit"
                     android:textAppearance="?attr/textAppearanceBodySmall"
                     android:textColor="?attr/colorOnSurfaceVariant" />

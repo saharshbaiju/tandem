@@ -14,8 +14,6 @@
     <string name="disconnect">Disconnect</string>
     <string name="address">IP address</string>
     <string name="port">Port</string>
-    <string name="status_idle">Not connected</string>
-    <string name="status_connecting">Connecting…</string>
     <string name="sheet_overline">Extended display</string>
     <string name="stat_resolution">Resolution</string>
     <string name="stat_refresh">Refresh rate</string>

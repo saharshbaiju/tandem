@@ -283,10 +283,6 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         b.primaryBtn.setIconResource(if (ready) R.drawable.ic_desktop else R.drawable.ic_qr_scan)
         b.scanBtn.visibility = if (ready) View.VISIBLE else View.GONE
         b.manualBtn.visibility = if (manual) View.GONE else View.VISIBLE
-        b.statusChip.setText(when (state) {
-            State.IDLE -> R.string.status_idle
-            else -> R.string.status_connecting
-        })
     }
 
     private fun showError(msg: String) {
