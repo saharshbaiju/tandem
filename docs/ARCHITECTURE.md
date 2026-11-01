@@ -803,6 +803,11 @@ On GNOME with a software encoder, add about 5 to 15 ms for `videoconvert` and
 x264. Frame threading (`threads=2`) costs about one frame. A VA-API GStreamer
 encoder brings the total back in line with Hyprland.
 
+Over Wi-Fi the transport row becomes about 5 to 20 ms, so about 30 to 60 ms in
+total. It is lowest on the phone's own hotspot, a direct link with no router
+and no other devices sharing the air. These Wi-Fi figures are an estimate and
+have not been measured yet.
+
 ---
 
 ## 6. Process and lifecycle

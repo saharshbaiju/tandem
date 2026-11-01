@@ -97,7 +97,12 @@ phone, open it, and allow installs from your browser when asked.
    - **Wi-Fi**: the phone and the computer are on the same network. If a firewall
      is in the way, the live view says so. Press **f** to open the port. The port
      is 5000, or the next free one if another program already uses 5000. The live
-     view shows which one is in use.
+     view shows which one is in use. For the best Wi-Fi, connect the computer
+     to the phone's own mobile hotspot. The two then talk directly, with no
+     router in between, no other devices competing for airtime and no guest or
+     campus network isolating them. The computer reaches the internet through
+     the phone's mobile data while it is connected. The video stream itself
+     stays on the hotspot link and uses no mobile data.
 
    While it waits for the phone, the live view shows **connection checks**. They
    cover whether USB debugging is authorised, whether a firewall is blocking the
@@ -142,8 +147,9 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor)
    phone_input.py → virtual touchscreen: uinput (Hyprland) / Mutter RemoteDesktop (GNOME)
 ```
 
-Target latency from glass to glass is about **25 to 45 ms** over USB, with hardware
-encoding.
+Target latency from glass to glass is about **25 to 45 ms** over USB and about
+**30 to 60 ms** over Wi-Fi, with hardware encoding. Wi-Fi is lowest on the
+phone's own hotspot.
 
 ### Why it is fast
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tandem: use your Android phone as a second monitor on Linux</title>
-<meta name="description" content="Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux (about 30 ms over USB). Free and open source. Works on Hyprland and GNOME (Arch, Ubuntu, Fedora) over USB, USB tethering or Wi-Fi, with touch input.">
+<meta name="description" content="Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux (about 30 ms over USB, 30 to 60 ms over Wi-Fi). Free and open source. Works on Hyprland and GNOME (Arch, Ubuntu, Fedora) over USB, USB tethering or Wi-Fi, with touch input.">
 <meta name="theme-color" content="#000000">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="author" content="Saharsh Baiju">
@@ -43,7 +43,7 @@
       "@id": "https://saharshbaiju.github.io/tandem/#app",
       "name": "Tandem",
       "alternateName": ["Tandem screen extender", "amVD", "Screen Extender"],
-      "description": "Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The compositor gets a new virtual display; the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms end to end over USB. Works on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), over a USB cable, USB tethering or Wi-Fi, with touch input and an encrypted, QR-paired connection.",
+      "description": "Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The compositor gets a new virtual display; the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms end to end over USB and 30 to 60 ms over Wi-Fi. Works on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), over a USB cable, USB tethering or Wi-Fi, with touch input and an encrypted, QR-paired connection.",
       "url": "https://saharshbaiju.github.io/tandem/",
       "applicationCategory": "UtilitiesApplication",
       "applicationSubCategory": "Second monitor / screen extender",
@@ -58,9 +58,9 @@
       "image": "https://saharshbaiju.github.io/tandem/assets/og.png",
       "featureList": [
         "Extends the Linux desktop onto an Android phone, tablet or foldable as a real monitor (not mirroring)",
-        "About 30 ms latency over USB: GPU H.264 encoding, hardware decoding on the phone, no buffering",
+        "About 30 ms latency over USB, 30 to 60 ms over Wi-Fi: GPU H.264 encoding, hardware decoding on the phone, no buffering",
         "Hyprland (Arch) and GNOME on Wayland (Ubuntu, Fedora) backends",
-        "USB cable (adb), USB tethering or Wi-Fi",
+        "USB cable (adb), USB tethering or Wi-Fi, lowest on the phone's own hotspot",
         "Touch input: tap, drag, scroll and pinch on the phone",
         "QR-code pairing, TLS encryption with a pinned certificate",
         "One-command install on Ubuntu, Fedora and Arch"
@@ -166,6 +166,7 @@ main, footer { position: relative; z-index: 1; }
 }
 .lede { font-size: clamp(19px, 1.7vw, 23px); line-height: 1.45; max-width: 32em; color: var(--gray-1); }
 .lede b { color: var(--white); font-weight: 600; }
+.lede a { color: var(--white); text-underline-offset: .18em; }
 .mono { font-family: var(--mono); }
 .wrap { padding-inline: var(--gutter); }
 
@@ -803,7 +804,7 @@ footer { background: var(--black); }
     </div>
   </div>
   <div class="facts">
-    <div><b>~30 ms</b><span>from your GPU to the phone's glass over USB.</span></div>
+    <div><b>~30 ms</b><span>from your GPU to the phone's glass over USB. About 30 to 60&nbsp;ms on Wi-Fi.</span></div>
     <div><b>Hyprland + GNOME</b><span>on Arch, Ubuntu 22.04+ and Fedora 36+.</span></div>
     <div><b>Touch</b><span>Tap, drag and scroll on the phone. Your mouse stays put.</span></div>
     <div><b>Paired + TLS</b><span>Only the phone that scanned your QR code connects.</span></div>
@@ -838,7 +839,7 @@ footer { background: var(--black); }
 <section class="pipe" id="pipe" aria-labelledby="pipeTitle">
   <div class="wrap pipe-pin">
     <h2 class="ms mega" id="pipeTitle"><span id="msNum">0</span><small>ms</small></h2>
-    <p class="lede">From the moment a pixel changes on your computer to the moment it lights up on the phone. Typically 25 to 45 ms over USB, with no buffering anywhere in between.</p>
+    <p class="lede">From the moment a pixel changes on your computer to the moment it lights up on the phone. Typically 25 to 45 ms over USB and about 30 to 60&nbsp;ms over Wi-Fi, with no buffering anywhere in between. Wi-Fi is quickest on the phone's own hotspot.</p>
     <div class="rail" id="rail">
       <canvas id="pipeArt" aria-hidden="true"></canvas>
       <div class="stages" id="stages"></div>
@@ -858,7 +859,7 @@ footer { background: var(--black); }
       </div>
       <div class="way" data-rv="row">
         <h3>Wi-Fi</h3>
-        <p>No cable at all. Put both on the same network. If a firewall blocks the phone, the live view tells you and opens the port when you press f.<span class="speed">cable-free</span></p>
+        <p>No cable at all. Put both on the same network. If a firewall blocks the phone, the live view tells you and opens the port when you press f. It runs best when the computer joins the phone's own hotspot: a direct link, with no router or other devices in the way. The picture stays on that link, and only the computer's own internet use goes over mobile data.<span class="speed">cable-free, about 30 to 60 ms</span></p>
       </div>
       <div class="way" data-rv="row">
         <h3>USB cable</h3>
@@ -953,10 +954,11 @@ footer { background: var(--black); }
   <div class="wrap oss-grid">
     <div data-rv="ask">
       <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
-      <p class="lede">Every line of Tandem is on GitHub. <b>A <em class="claim star-mark">star</em> helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it. Share it with anyone who has a spare phone, open an issue when something breaks, or send a fix. If it saved you buying a monitor, buy me a chai.</p>
+      <p class="lede">Every line of Tandem is on GitHub. <b>A <em class="claim star-mark">star</em> helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it. Share it with anyone who has a spare phone, or send a fix. <b>Found a bug?</b> Please <a href="https://github.com/saharshbaiju/tandem/issues/new">open an issue on GitHub</a> with your distro, desktop and phone, so it gets fixed for everyone. If it saved you buying a monitor, buy me a chai.</p>
       <div class="ctas">
         <a class="btn solid btn-star" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg>Star<span class="count" data-stars hidden></span></a>
         <button class="btn" type="button" data-share>Share Tandem</button>
+        <a class="btn" href="https://github.com/saharshbaiju/tandem/issues/new">Report a bug</a>
         <a class="btn" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg>Buy me a chai</a>
       </div>
     </div>
@@ -1840,7 +1842,7 @@ const Demo = (() => {
     ["Capture", "Zero-copy from the virtual monitor", "1–2 ms", 1.5],
     ["Encode", "H.264 on the GPU, no B-frames", "3–8 ms", 5.5],
     ["Send", "Split into frames, out over TLS", "< 1 ms", .5],
-    ["Travel", "Over the USB cable", "2–5 ms", 3.5],
+    ["Travel", "Over USB. Wi-Fi takes 5 to 20 ms", "2–5 ms", 3.5],
     ["Decode", "The phone's hardware decoder", "5–10 ms", 7.5],
     ["Show", "Drawn at the next screen refresh", "8–16 ms", 12],
   ];

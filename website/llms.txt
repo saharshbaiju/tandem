@@ -1,6 +1,6 @@
 # Tandem
 
-> Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The desktop gets a new display (not a mirror, not a browser tab); the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms from GPU to glass over USB. It runs natively on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), connects over a USB cable, USB tethering or Wi-Fi, supports touch, and only talks to a phone that was paired by QR code, over TLS. Free and open source (GPL-3.0), made by Saharsh Baiju.
+> Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The desktop gets a new display (not a mirror, not a browser tab); the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms from GPU to glass over USB and 30 to 60 ms over Wi-Fi. It runs natively on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), connects over a USB cable, USB tethering or Wi-Fi, supports touch, and only talks to a phone that was paired by QR code, over TLS. Free and open source (GPL-3.0), made by Saharsh Baiju.
 
 Website: https://saharshbaiju.github.io/tandem/
 Source code: https://github.com/saharshbaiju/tandem
@@ -10,9 +10,9 @@ Maker: Saharsh Baiju, https://saharshbaiju.github.io/portfolio/ (GitHub: https:/
 ## What it does
 
 - Extends a Linux desktop onto an Android phone, tablet or foldable as an extra monitor. Windows, workspaces and scaling behave as on any plugged-in monitor; drag a window across and it moves onto the phone.
-- Low latency: typically 25 to 45 ms glass to glass over USB. The screen is encoded on the GPU the compositor already renders on (NVENC, VA-API; x264 as a fallback), with no B-frames and no buffering anywhere; the phone feeds the raw H.264 straight into its hardware decoder (MediaCodec) and shows each frame on arrival.
+- Low latency: typically 25 to 45 ms glass to glass over USB, and about 30 to 60 ms over Wi-Fi (lowest on the phone's own hotspot). The screen is encoded on the GPU the compositor already renders on (NVENC, VA-API; x264 as a fallback), with no B-frames and no buffering anywhere; the phone feeds the raw H.264 straight into its hardware decoder (MediaCodec) and shows each frame on arrival.
 - Touch: tap, drag, scroll and pinch on the phone to control what is on it, through a virtual touchscreen, so the mouse pointer stays where it is.
-- Three ways to connect: USB cable (adb reverse, lowest latency, works even when the phone is on mobile data), USB tethering (no developer options needed) or Wi-Fi on the same network.
+- Three ways to connect: USB cable (adb reverse, lowest latency, works even when the phone is on mobile data), USB tethering (no developer options needed) or Wi-Fi on the same network. For the best Wi-Fi, connect the computer to the phone's own mobile hotspot: a direct link with no router, no other devices competing for airtime and no client isolation. The computer then uses the phone's mobile data for the internet.
 - Security: the QR code carries a random pairing key and the fingerprint of the computer's certificate. Nothing is sent until both sides prove they know the key, and everything (video and touches) is encrypted with TLS, so other people on the same Wi-Fi can neither watch nor control the screen.
 - Reconnects by itself if the link drops (cable pulled, Wi-Fi roaming).
 
