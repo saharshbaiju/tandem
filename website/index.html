@@ -507,11 +507,16 @@ main, footer { position: relative; z-index: 1; }
 .cmd .prompt { color: var(--gray-1); user-select: none; }
 /* The hero's copy of the command, small, under the buttons. */
 .hero-cmd { margin-top: 28px; max-width: 40em; }
-/* Total downloads under the hero buttons: small, counts up from 0. */
+/* Total downloads under the hero buttons. Arrives with the rest of the hero
+   (it's an .intro step), then each digit rolls up like an odometer. */
 .dl-count { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 15px; color: var(--gray-1); }
 .dl-count[hidden] { display: none; }
 .dl-count svg { width: 15px; height: 15px; flex: none; }
-.dl-count b { color: var(--white); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dl-count b { display: inline-flex; color: var(--white); font-weight: 600; font-variant-numeric: tabular-nums; }
+.roll { display: inline-block; height: 1.25em; line-height: 1.25em; overflow: hidden; }
+.roll > span { display: block; transform: translateY(0); will-change: transform; }
+.roll > span > i { display: block; font-style: normal; text-align: center; }
+.roll.sep { width: .3em; }
 .hero-cmd p { font-size: 15px; color: var(--gray-1); }
 .hero-cmd .cmd { margin-top: 10px; }
 /* One line, like a terminal; scroll it sideways, the fade says there's more. */
@@ -787,8 +792,8 @@ footer { background: var(--black); }
         <a class="btn solid" href="#install">Install on Linux</a>
         <a class="btn" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK<span class="count" data-version hidden></span></a>
       </div>
-      <p class="dl-count" data-downloads hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v9M4 7l4 4 4-4M2 14.5h12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b data-downloads-n>0</b> downloads</span></p>
-      <div class="hero-cmd intro" style="--i:5">
+      <p class="dl-count intro" style="--i:5" data-downloads><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v9M4 7l4 4 4-4M2 14.5h12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b data-downloads-n aria-label="0">0</b> downloads</span></p>
+      <div class="hero-cmd intro" style="--i:6">
         <p>Install with one command on Ubuntu, Fedora or Arch:</p>
         <div class="cmd"><code><span class="prompt" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash</code><button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash">Copy</button></div>
       </div>
@@ -2341,46 +2346,100 @@ const Footer = (() => {
 })();
 
 /* Total downloads: every APK and Linux tarball across all GitHub releases
-   (checksum files don't count). Counts up from 0 on load, then re-reads
-   every 90 s while the tab is visible, easing to the new total; that stays
-   well inside GitHub's 60 requests/hour for anonymous visitors. */
+   (checksum files don't count). The line comes in with the hero; once the
+   hero is in and the total is known, every digit rolls up from 0 like an
+   odometer, the ones spinning longest. It re-reads every 90 s while the tab
+   is visible and rolls forward to a new total; that stays well inside
+   GitHub's 60 requests/hour for anonymous visitors. */
 (() => {
   const box = document.querySelector("[data-downloads]");
   if (!box) return;
   const num = box.querySelector("[data-downloads-n]");
+  const hero = document.getElementById("top");
   const fmt = new Intl.NumberFormat("en");
-  let shown = 0, target = 0;
+  const TURNS = 4;                 // digits 0-9 repeated: room to spin forward
+  const ROLL = "transform 1.6s cubic-bezier(.16, 1, .3, 1)";
+  let columns = [], shown = -1;
 
-  function countTo(value) {
-    const from = shown;
-    target = value;
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      shown = value; num.textContent = fmt.format(value); return;
+  /** One rolling column: a strip of 0-9 x TURNS; `at` is the row in view. */
+  function column() {
+    const wrap = document.createElement("span");
+    wrap.className = "roll";
+    wrap.setAttribute("aria-hidden", "true");
+    const strip = document.createElement("span");
+    for (let t = 0; t < TURNS; t++)
+      for (let d = 0; d < 10; d++) { const i = document.createElement("i"); i.textContent = d; strip.appendChild(i); }
+    wrap.appendChild(strip);
+    return { wrap, strip, at: 0 };
+  }
+  const place = (col, row, animate) => {
+    col.strip.style.transition = animate ? ROLL : "none";
+    col.strip.style.transform = `translateY(${-row * 1.25}em)`;
+    col.at = row;
+  };
+
+  function show(value) {
+    if (value === shown) return;
+    const first = shown < 0;
+    shown = value;
+    num.setAttribute("aria-label", fmt.format(value));
+    const text = fmt.format(value);
+    const digits = text.replace(/\D/g, "");
+    // Rebuild when the number of digits changes (65 -> 100); new columns start at 0.
+    if (columns.length !== digits.length) {
+      const old = columns;
+      columns = [...digits].map((_, i) => old[i - (digits.length - old.length)] || column());
+      const parts = [];
+      let k = 0;
+      for (const ch of text) {
+        if (/\d/.test(ch)) parts.push(columns[k++].wrap);
+        else { const sep = document.createElement("span"); sep.className = "roll sep"; sep.textContent = ch; sep.setAttribute("aria-hidden", "true"); parts.push(sep); }
+      }
+      num.replaceChildren(...parts);
+      num.getBoundingClientRect();     // commit row 0 so the first roll animates
     }
-    const t0 = performance.now(), dur = from === 0 ? 1600 : 800;
-    const step = now => {
-      if (target !== value) return;                 // a newer total took over
-      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
-      shown = Math.round(from + (value - from) * e);
-      num.textContent = fmt.format(shown);
-      if (k < 1) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    [...digits].forEach((ch, i) => {
+      const col = columns[i], d = +ch;
+      // Always roll forward. The ones column spins the most turns on the first
+      // count, so the total visibly counts up; later updates take the short way.
+      const spins = first ? Math.max(0, i - (digits.length - 1) + (TURNS - 2)) : 0;
+      let row = col.at - (col.at % 10) + d + spins * 10;
+      if (row < col.at || (row === col.at && spins)) row += 10;
+      if (row >= TURNS * 10) {         // out of strip: jump back a whole turn unseen
+        place(col, col.at % 10, false);
+        col.strip.getBoundingClientRect();
+        row = (col.at % 10 <= d ? 0 : 10) + d;
+      }
+      place(col, row, !still);
+    });
   }
 
+  const heroIn = new Promise(resolve => {
+    if (hero.classList.contains("in")) return resolve();
+    new MutationObserver((_, obs) => {
+      if (hero.classList.contains("in")) { obs.disconnect(); resolve(); }
+    }).observe(hero, { attributes: true, attributeFilter: ["class"] });
+  });
+
+  let failures = 0;
   async function refresh() {
     if (document.hidden) return;
     try {
       const res = await fetch("https://api.github.com/repos/saharshbaiju/tandem/releases?per_page=100");
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(res.status);
       let n = 0;
       for (const r of await res.json())
         for (const a of r.assets || [])
           if (/\.(apk|tar\.gz)$/.test(a.name)) n += a.download_count;
-      if (!n || n === target) return;
-      box.hidden = false;
-      countTo(n);
-    } catch { /* offline: the line just stays hidden */ }
+      await heroIn;
+      // let the line finish fading in before the digits start rolling
+      if (shown < 0) await new Promise(r => setTimeout(r, 450));
+      show(n);
+    } catch {
+      // No total on first load (offline, rate-limited): don't leave a "0".
+      if (shown < 0 && ++failures >= 1) box.hidden = true;
+    }
   }
   refresh();
   setInterval(refresh, 90000);
