@@ -568,6 +568,16 @@ main, footer { position: relative; z-index: 1; }
 .oss { padding: clamp(72px, 12vh, 140px) 0; }
 .oss-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px clamp(32px, 5vw, 96px); align-items: end; }
 .oss .lede { margin-top: 24px; }
+/* Live tally: total downloads and people who viewed the page. Hidden until
+   a number arrives, so nothing ever shows a placeholder 0. */
+.tally { display: flex; flex-wrap: wrap; gap: 24px clamp(40px, 8vw, 140px); margin-bottom: clamp(56px, 10vh, 112px); }
+.tally[hidden] { display: none; }
+.tally > div[hidden] { display: none; }
+.tally b {
+  display: block; font: 900 clamp(64px, 12vw, 200px)/.86 var(--display);
+  font-variation-settings: "wdth" 112; letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+}
+.tally span { display: block; margin-top: 14px; font-size: clamp(16px, 1.4vw, 19px); color: var(--gray-1); }
 .btn svg { width: 15px; height: 15px; margin-right: 9px; flex: none; }
 /*
  * The ask: "star" in the lede gets the hero's red wipe when the section
@@ -939,6 +949,10 @@ footer { background: var(--black); }
 <div class="signal" aria-hidden="true"><canvas></canvas></div>
 
 <section class="oss" id="oss" aria-labelledby="ossTitle">
+  <div class="wrap tally" data-tally hidden>
+    <div data-tally-item="downloads" hidden><b data-count="downloads">0</b><span>downloads, all releases</span></div>
+    <div data-tally-item="views" hidden><b data-count="views">0</b><span>people have seen this page</span></div>
+  </div>
   <div class="wrap oss-grid">
     <div data-rv="ask">
       <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
@@ -2301,6 +2315,77 @@ const Footer = (() => {
     if (!/^v\d/.test(tag)) return;
     document.querySelectorAll("[data-version]").forEach(el => { el.textContent = tag; el.hidden = false; });
   } catch { /* offline: the buttons work without it */ }
+})();
+
+/* Live tally ---------------------------------------------------------------
+   Downloads: every APK and Linux tarball across all GitHub releases (the
+   checksum files don't count), re-read every 90 s while the tab is visible;
+   that stays well inside GitHub's 60 requests/hour for anonymous visitors.
+   Views: an Abacus counter (abacus.jasoncameron.dev, no cookies, no account).
+   Each browser counts once (localStorage), then the page listens to the
+   counter's event stream, so the number moves the moment someone arrives. */
+(() => {
+  const box = document.querySelector("[data-tally]");
+  if (!box) return;
+  const COUNTER = "https://abacus.jasoncameron.dev";
+  const NS = "saharshbaiju-tandem", KEY = "views";
+  const fmt = new Intl.NumberFormat("en");
+  const shown = {};
+
+  // Ease the number from what's on screen to the new value.
+  function show(name, value) {
+    if (!Number.isFinite(value)) return;
+    const el = box.querySelector(`[data-count="${name}"]`);
+    box.querySelector(`[data-tally-item="${name}"]`).hidden = false;
+    box.hidden = false;
+    const from = shown[name] ?? 0;
+    shown[name] = value;
+    if (from === value || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      el.textContent = fmt.format(value); return;
+    }
+    const t0 = performance.now(), dur = from === 0 ? 1400 : 700;
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmt.format(Math.round(from + (value - from) * e));
+      if (k < 1 && shown[name] === value) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  async function downloads() {
+    if (document.hidden) return;
+    try {
+      const res = await fetch("https://api.github.com/repos/saharshbaiju/tandem/releases?per_page=100");
+      if (!res.ok) return;
+      let n = 0;
+      for (const r of await res.json())
+        for (const a of r.assets || [])
+          if (/\.(apk|tar\.gz)$/.test(a.name)) n += a.download_count;
+      show("downloads", n);
+    } catch { /* offline: the tally just stays hidden */ }
+  }
+  downloads();
+  setInterval(downloads, 90000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) downloads(); });
+
+  async function views() {
+    // Local previews (file://, localhost) read the counter but never add to it.
+    let counted = location.protocol === "file:" || /^(localhost|127\.|\[::1\])/.test(location.hostname);
+    try { counted = counted || localStorage.getItem("tandem-viewed") === "1"; } catch {}
+    try {
+      const res = await fetch(`${COUNTER}/${counted ? "get" : "hit"}/${NS}/${KEY}`);
+      if (res.ok) {
+        show("views", (await res.json()).value);
+        if (!counted) try { localStorage.setItem("tandem-viewed", "1"); } catch {}
+      }
+    } catch { return; }
+    if (!("EventSource" in window)) return;
+    try {
+      const live = new EventSource(`${COUNTER}/stream/${NS}/${KEY}`);
+      live.onmessage = e => { try { show("views", JSON.parse(e.data).value); } catch {} };
+    } catch { /* no stream: the first number stays */ }
+  }
+  views();
 })();
 
 /* Live star count. */
