@@ -64,7 +64,7 @@ The 0.5.0 release notes describe the rename.
 2. Build and package:
 
    ```bash
-   V=0.5.1
+   V=0.6.0
    (cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew assembleRelease assembleDebug)
    mkdir -p dist
    cp android/app/build/outputs/apk/release/app-release.apk dist/Tandem-$V.apk
