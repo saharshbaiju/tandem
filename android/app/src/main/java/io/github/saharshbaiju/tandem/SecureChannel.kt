@@ -1,6 +1,7 @@
 package io.github.saharshbaiju.tandem
 
 import android.util.Base64
+import java.io.IOException
 import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -48,10 +49,50 @@ object SecureChannel {
     const val KEY_LENGTH = 20
 
     /**
-     * The handshake failed in a way retrying can't fix (wrong pairing code,
-     * different computer, outdated version): stop and tell the user.
+     * The handshake failed in a way retrying can't fix (the computer's proof
+     * is wrong, it answered nonsense): stop and tell the user.
      */
     class PairingException(message: String) : Exception(message)
+
+    /**
+     * The computer sent DENY {reason, retry?, retry_after?}. [retryable] when
+     * the refusal is temporary (all phone slots taken, busy, locked out for a
+     * while): then [retryAfterMs] is its hint for when to try again (0 = none).
+     * Anything else (wrong pairing code, app too old) is final.
+     */
+    class DeniedException(message: String, val retryable: Boolean, val retryAfterMs: Long) :
+        Exception(message)
+
+    /** Parse a DENY body. Daemons before the retry fields only give a reason. */
+    fun parseDeny(body: ByteArray): DeniedException {
+        val o = try { JSONObject(String(body, Charsets.UTF_8)) } catch (_: Exception) { JSONObject() }
+        val reason = o.optString("reason", "").ifBlank { "the computer refused the connection" }
+        val retryAfterMs = (o.optDouble("retry_after", 0.0) * 1000).toLong().coerceIn(0, 10 * 60_000L)
+        val temporary = o.optBoolean("retry", false) || retryAfterMs > 0 ||
+            TEMPORARY_DENIALS.any { it in reason.lowercase() }
+        return DeniedException(reason, temporary, retryAfterMs)
+    }
+
+    /** Reasons older daemons give for a refusal that goes away by itself. */
+    private val TEMPORARY_DENIALS = listOf("phones connected", "busy", "try again", "too many")
+
+    /** Somewhere in [e]'s causes, our pin refused the computer's certificate. */
+    fun isCertificateMismatch(e: Throwable): Boolean = causes(e).any { CERT_MISMATCH in (it.message ?: "") }
+
+    /**
+     * The other end answered, but not in TLS (BoringSSL/Conscrypt wording):
+     * a Tandem from before 0.5 talks plain text. A reset or EOF mid-handshake
+     * is *not* this; that's just a bad link and worth retrying.
+     */
+    fun isNotTls(e: Throwable): Boolean = causes(e).any { c ->
+        val m = c.message ?: ""
+        NOT_TLS_MARKERS.any { it in m }
+    }
+
+    private val NOT_TLS_MARKERS = listOf("WRONG_VERSION_NUMBER", "UNKNOWN_PROTOCOL",
+        "not an SSL/TLS record", "HTTP_REQUEST", "Unable to parse TLS packet header")
+
+    private fun causes(e: Throwable) = generateSequence(e) { it.cause.takeIf { c -> c !== it } }.take(10)
 
     private val random = SecureRandom()
 
@@ -95,7 +136,8 @@ object SecureChannel {
 
     /**
      * Prove we know [key] and check the computer does too. Returns normally
-     * when both sides are verified; throws [PairingException] otherwise.
+     * when both sides are verified; throws [PairingException] (bad answer or
+     * proof), [DeniedException] (refused) or IOException (link broke).
      */
     fun authenticate(reader: FrameReader, writer: FrameWriter, key: String,
                      certFingerprint: ByteArray, appVersion: String) {
@@ -124,9 +166,13 @@ object SecureChannel {
         }
     }
 
-    /** CHAL (or OKAY when [expectOk]) as JSON; DENY becomes a [PairingException]. */
+    /**
+     * CHAL (or OKAY when [expectOk]) as JSON; DENY becomes a [DeniedException].
+     * An EOF is an IOException, not a pairing failure: daemons close without a
+     * word when busy or restarting, and that is worth retrying.
+     */
     private fun readHandshakeFrame(reader: FrameReader, expectOk: Boolean = false): JSONObject {
-        val f = reader.next() ?: throw PairingException("the computer closed the connection")
+        val f = reader.next() ?: throw IOException("the computer closed the connection while pairing")
         val body = try {
             JSONObject(String(f.body, Charsets.UTF_8))
         } catch (_: Exception) {
@@ -135,7 +181,7 @@ object SecureChannel {
         val wanted = if (expectOk) TYPE_OK else TYPE_CHALLENGE
         return when (f.type) {
             wanted -> body
-            TYPE_DENY -> throw PairingException(body.optString("reason", "the computer refused the connection"))
+            TYPE_DENY -> throw parseDeny(f.body)
             else -> throw PairingException("unexpected answer from the computer (${f.type})")
         }
     }

@@ -11,29 +11,45 @@ Pipeline:
            and broadcasts framed NALs over TCP
         -> phone feeds whole access units into MediaCodec -> Surface
 
-Reliability rules (each one fixed a real "connects then drops" bug):
-  * Every client has its own sender thread and a queue of *whole* frames. We
+Reliability rules (each one fixed a real "connects then drops" or "stops when
+I drag something onto it" bug):
+  * Every client has its own I/O thread and a queue of *whole* frames. We
     only ever drop whole queued frames, never the tail of a half-sent one, so
-    the framing on the wire can't desync.
-  * A PING frame goes out after 1s of silence. The phone uses a read timeout,
-    so a dead link is detected on both ends instead of hanging half-open.
-  * The current GOP (SPS+PPS+IDR+P-frames since) is cached and replayed to new
-    clients, so a phone joining a *static* desktop gets a picture immediately
-    instead of waiting for damage that may never come.
-  * The tail NAL is flushed as soon as the encoder pipe goes quiet, so the last
-    frame of a burst isn't held hostage until the next frame arrives.
+    the framing on the wire can't desync. Control frames (settings, touch
+    state) sit in their own queue that is never dropped.
+  * A client's backlog is bounded by *age* (and a hard byte cap), not just
+    bytes: a phone that falls ~0.3 s behind is resynced instead of being fed
+    seconds-old video.
+  * A resync (fell behind, joined, or the phone asked with KEYQ) replays the
+    cached GOP (SPS+PPS+IDR+P-frames since) immediately, so the phone is back
+    on "now" even when the desktop is static and no new keyframe is coming.
+    Without a cache it asks the backend for a keyframe.
+  * The encoder is supervised: if it exits mid-session it is restarted with
+    backoff, keeping the virtual monitor and the connected phones.
+  * A PING frame goes out after 1s of silence; TCP_USER_TIMEOUT and an
+    optional read timeout detect a phone that vanished.
+  * The tail NAL is flushed as soon as the encoder pipe goes quiet (~1 ms), so
+    the last frame of a burst isn't held hostage until the next frame arrives.
+    A tail that turns out to have been cut short is detected and resynced
+    rather than silently patched over.
+  * Touches are injected on their own thread (phone_input.py): a slow
+    compositor can never stall the video.
 
-Transport is TCP on 0.0.0.0 (USB tethering, Wi-Fi, adb reverse all work),
-wrapped in TLS. A connection receives nothing until it passes the pairing
-handshake in secure_link.py (certificate fingerprint + mutual proof of the
-pairing key from the QR code); see that module for the threat model.
+Transport is TCP on every interface, IPv4 and IPv6 (USB tethering, Wi-Fi, adb
+reverse all work), wrapped in TLS. A connection receives nothing until it
+passes the pairing handshake in secure_link.py (certificate fingerprint +
+mutual proof of the pairing key from the QR code); see that module for the
+threat model.
 
-Touch input flows the other way on the same connection: each client's I/O
-thread hands the phone's frames (touches) to phone_input.PhoneInput, which
-replays them on the backend's virtual touchscreen. See phone_input.py.
+Signals: SIGTERM / SIGINT / SIGHUP stop the daemon cleanly; SIGUSR1 re-reads
+--banner-file and applies live side/scale changes. With --parent-pid, the
+death of that process (the TUI) stops the daemon too (SIGUSR2 via
+PR_SET_PDEATHSIG).
 """
 
 import argparse
+import ctypes
+import errno
 import fcntl
 import json
 import os
@@ -42,6 +58,7 @@ import signal
 import socket
 import ssl
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -62,8 +79,34 @@ NAL_PPS = 8
 NAL_DROP = (6, 9, 12)
 
 
+_log_file = None          # set once stderr is gone (terminal closed, TUI died)
+
+
 def log(*a):
-    print("[tandemd]", *a, file=sys.stderr, flush=True)
+    """Log to stderr; never raise.
+
+    stderr can disappear under us: a closed terminal (EIO) or a TUI that died
+    (EPIPE). A logging failure must not kill a thread or skip the shutdown
+    path, so we fall back to a file in $XDG_RUNTIME_DIR.
+    """
+    global _log_file
+    line = " ".join(["[tandemd]"] + [str(x) for x in a])
+    if _log_file is None:
+        try:
+            print(line, file=sys.stderr, flush=True)
+            return
+        except (OSError, ValueError):
+            path = os.path.join(os.environ.get("XDG_RUNTIME_DIR")
+                                or tempfile.gettempdir(), "tandemd.log")
+            try:
+                _log_file = open(path, "a", buffering=1)
+            except OSError:
+                _log_file = False
+    if _log_file:
+        try:
+            _log_file.write(line + "\n")
+        except (OSError, ValueError):
+            pass
 
 
 def kill_stale():
@@ -104,17 +147,25 @@ def kill_stale():
 # --------------------------------------------------------------------------- #
 #
 # Every message is:  4-byte type + 4-byte big-endian length + body.
+# PC -> phone:
 #   NALU -> one Annex-B NAL (with start code), straight to the decoder
 #   ASX1 -> JSON of the active settings, shown on the phone (any time)
 #   PING -> empty keepalive, sent after HEARTBEAT seconds of silence
 #   INPT -> JSON: is touch allowed for this phone? (phone_input.py)
+# phone -> PC:
+#   TUCH -> one touch event (phone_input.py)
+#   KEYQ -> empty: "my decoder needs a fresh keyframe" (it dropped or failed
+#           to decode something). Answered with a GOP replay / new IDR.
+#   PING -> empty heartbeat. A phone that sends them is timed out after
+#           READ_TIMEOUT of silence (older apps never send one: no timeout).
 # Before any of these, the handshake frames HELO / CHAL / AUTH / OKAY / DENY
-# (secure_link.py). Phone -> PC touches (TUCH) are handled in phone_input.py.
-# Unknown types are ignored on both ends, so new ones stay compatible.
+# (secure_link.py). Unknown types are ignored on both ends, so new ones stay
+# compatible.
 
 FRAME_NAL = b"NALU"
 FRAME_BANNER = b"ASX1"
 FRAME_PING = b"PING"
+FRAME_KEYFRAME_REQUEST = b"KEYQ"
 
 
 def frame(ftype, body=b""):
@@ -144,7 +195,7 @@ def build_banner_payload(args, backend_name=""):
 def load_banner_payload(args, backend_name=""):
     """Current banner body: the live --banner-file if present, else from args.
 
-    The TUI keeps --banner-file up to date and sends SIGHUP so live changes
+    The TUI keeps --banner-file up to date and sends SIGUSR1 so live changes
     (side / scale) reach already-connected phones.
     """
     if args.banner_file:
@@ -165,81 +216,159 @@ def load_banner_payload(args, backend_name=""):
 # --------------------------------------------------------------------------- #
 
 HEARTBEAT = 1.0                    # seconds of silence before a PING
-SEND_TIMEOUT = 5.0                 # a send blocked this long = dead peer
-MAX_PENDING = 4 * 1024 * 1024      # queued bytes before a slow client resyncs
-MAX_GOP_CACHE = 16 * 1024 * 1024   # stop caching a GOP that grows past this
+SEND_TIMEOUT = 5.0                 # no send progress this long = dead peer
+READ_TIMEOUT = 5.0                 # silence from a phone that sends heartbeats
+SEND_SLICE = 64 * 1024             # bytes per send(): progress is visible and
+#                                    touches are read between slices
+MAX_QUEUE_AGE = 0.3                # oldest queued video older than this: resync
+MAX_PENDING = 4 * 1024 * 1024      # hard cap on queued video bytes
+MAX_GOP_CACHE = MAX_PENDING // 2   # a bigger GOP isn't kept (or replayed): it
+#                                    could never be replayed under the cap
+RESYNC_GRACE = 1.0                 # after a replay, let the phone drain it
+RESYNC_RETRY = 1.0                 # re-ask for a keyframe this often
+RESYNC_RESTART_AFTER = 4.0         # still no keyframe: restart the encoder
+KEYQ_MIN_INTERVAL = 0.5            # rate limit for a phone's KEYQ
 MAX_CLIENTS = 4                    # phones streaming at once
+
+# Socket tuning (all best effort: a missing option is harmless)
+NOTSENT_LOWAT = 128 * 1024         # unsent kernel bytes before select() blocks
+USER_TIMEOUT_MS = 5000             # unacked data this long = dead link
+DSCP_AF41 = 0x88                   # interactive video; Wi-Fi WMM -> AC_VI
 
 
 class Client:
-    """One admitted phone: a queue of whole frames to send, and the frames it
-    sends back (touches), both driven by a single I/O thread.
+    """One admitted phone: queues of whole frames to send, and the frames it
+    sends back (touches, keyframe requests), both driven by one I/O thread.
 
     One thread, not a sender + a reader: an SSL connection must not be used
     by two threads at the same time (OpenSSL's rule; CPython releases the GIL
     inside SSL_read/SSL_write). The socket is non-blocking and the thread
     select()s on it plus a wake-up pipe that push() pokes.
+
+    Video frames carry their enqueue time so the backlog is bounded by age.
+    The Broadcaster owns the resync state (started / resync_since / ...) and
+    only touches it under its own lock.
     """
 
     def __init__(self, sock, addr, on_dead, on_message=None):
         self.sock = sock
         self.addr = addr
         self.started = False        # True once it has a keyframe to decode from
+        self.resync_since = time.monotonic()   # waiting for a keyframe since
+        self.last_keyframe_ask = 0.0
+        self.last_keyq = 0.0        # last KEYQ we acted on (rate limit)
         self.alive = True
-        self._q = deque()
-        self._qbytes = 0
+        self._video = deque()       # (frame, enqueue time)
+        self._video_bytes = 0
+        self._control = deque()     # banner / INPT: never dropped, sent first
+        self._grace_until = 0.0     # no age check before this (GOP replay)
+        self._replay_left = 0       # replayed frames still queued
+        self._age_floor = 0.0       # ages count from here (replay drained)
         self._lock = threading.Lock()
         self._on_dead = on_dead
         self._on_message = on_message
         self._wake_r, self._wake_w = os.pipe()
+        self._wake_open = True
         os.set_blocking(self._wake_r, False)
         os.set_blocking(self._wake_w, False)
         sock.setblocking(False)
         threading.Thread(target=self._io_loop, daemon=True,
                          name=f"client-{addr[0]}").start()
 
+    # ---- producer side (any thread) --------------------------------------- #
+
     def send_message(self, frame_type, body=b""):
         """Queue a control frame (not video) for this phone."""
-        self.push(frame(frame_type, body))
+        with self._lock:
+            if self.alive:
+                self._control.append(frame(frame_type, body))
+                self._wake_locked()
 
-    def push(self, data):
+    def push_video(self, data, now):
+        """Queue one video frame. False if the client is too far behind: its
+        queued video was dropped and it must be resynced (Broadcaster)."""
+        with self._lock:
+            if not self.alive:
+                return True
+            if self._video and (
+                    self._video_bytes + len(data) > MAX_PENDING
+                    or (now >= self._grace_until
+                        and now - max(self._video[0][1], self._age_floor)
+                        > MAX_QUEUE_AGE)):
+                # Weak Wi-Fi or a busy phone. Drop the queued frames (whole
+                # frames only: the one in flight is already out of the queue).
+                age = now - self._video[0][1]
+                self._drop_video_locked()
+                log(f"client {self.addr[0]} fell behind ({age * 1000:.0f} ms "
+                    "queued); resyncing")
+                return False
+            self._video.append((data, now))
+            self._video_bytes += len(data)
+            self._wake_locked()
+            return True
+
+    def push_replay(self, frames, now):
+        """Queue a GOP replay as one batch. It fits the byte cap by design
+        (MAX_GOP_CACHE), and is exempt from the age check until it has been
+        sent (at most RESYNC_GRACE): it is a burst on purpose. Frames queued
+        behind it are aged from the moment it finished."""
         with self._lock:
             if not self.alive:
                 return
-            self._q.append(data)
-            self._qbytes += len(data)
-            if self._qbytes > MAX_PENDING:
-                # Too slow (weak Wi-Fi). Drop the queued frames — whole frames
-                # only, the one in flight is already out of the queue — and
-                # restart this client at the next keyframe.
-                self._q.clear()
-                self._qbytes = 0
-                self.started = False
-                log(f"client {self.addr[0]} fell behind; resync at next keyframe")
-        self._wake()
+            self._drop_video_locked()
+            for f in frames:
+                self._video.append((f, now))
+                self._video_bytes += len(f)
+            self._replay_left = len(frames)
+            self._grace_until = now + RESYNC_GRACE
+            self._wake_locked()
+
+    def drop_video(self):
+        with self._lock:
+            self._drop_video_locked()
 
     def close(self):
         with self._lock:
             self.alive = False
-        self._wake()
+            self._wake_locked()
 
-    def _wake(self):
-        try:
-            os.write(self._wake_w, b"x")
-        except (BlockingIOError, OSError):
-            pass                     # already poked / closing
+    def _drop_video_locked(self):
+        self._video.clear()
+        self._video_bytes = 0
+        self._replay_left = 0
+
+    def _wake_locked(self):
+        # Under self._lock and only while the pipe is open: the I/O thread
+        # closes it under the same lock, so a stray b"x" can never land in a
+        # recycled fd number (e.g. another phone's freshly accepted socket).
+        if self._wake_open:
+            try:
+                os.write(self._wake_w, b"x")
+            except OSError:
+                pass                 # already poked (pipe full)
 
     def _next_frame(self):
         with self._lock:
-            if not self._q:
+            if self._control:
+                return self._control.popleft()
+            if not self._video:
                 return None
-            data = self._q.popleft()
-            self._qbytes -= len(data)
+            data, _t = self._video.popleft()
+            self._video_bytes -= len(data)
+            if self._replay_left:
+                self._replay_left -= 1
+                if not self._replay_left:          # replay drained: age
+                    now = time.monotonic()          # checks resume from now
+                    self._age_floor = self._grace_until = now
             return data
+
+    # ---- I/O thread -------------------------------------------------------- #
 
     def _io_loop(self):
         out, sent = b"", 0           # frame being sent, bytes of it already out
-        last_send = time.monotonic()
+        last_send = time.monotonic()   # last *progress*, not last whole frame
+        self._last_recv = time.monotonic()
+        self._peer_heartbeats = False  # the phone sends PINGs: time it out
         inbuf = bytearray()
         try:
             while self.alive:
@@ -248,12 +377,18 @@ class Client:
                     if not out and time.monotonic() - last_send >= HEARTBEAT:
                         out = PING
                 now = time.monotonic()
+                if (self._peer_heartbeats
+                        and now - self._last_recv > READ_TIMEOUT):
+                    log(f"client {self.addr[0]} went silent; dropping it")
+                    break
                 if out:
                     if now - last_send > SEND_TIMEOUT:
                         raise OSError("send stalled")   # dead or stuck peer
                     wait = 0.5
                 else:
                     wait = max(0.0, HEARTBEAT - (now - last_send))
+                    if self._peer_heartbeats:
+                        wait = min(wait, 0.5)
                 readable, writable, _ = select.select(
                     [self.sock, self._wake_r], [self.sock] if out else [], [], wait)
                 if self._wake_r in readable:
@@ -266,7 +401,12 @@ class Client:
                     break
                 if out and self.sock in writable:
                     try:
-                        sent += self.sock.send(memoryview(out)[sent:])
+                        # A bounded slice: CPython's SSL send is all-or-nothing
+                        # per call, so a whole 1 MB IDR on a slow link would
+                        # show no progress for seconds. The retry after
+                        # SSLWantWrite passes the same slice, as OpenSSL needs.
+                        end = min(len(out), sent + SEND_SLICE)
+                        sent += self.sock.send(memoryview(out)[sent:end])
                         last_send = time.monotonic()
                     except (ssl.SSLWantWriteError, ssl.SSLWantReadError):
                         pass         # buffer full / TLS wants a read first
@@ -275,12 +415,14 @@ class Client:
         finally:
             with self._lock:
                 self.alive = False
-                self._q.clear()
-            for fd in (self._wake_r, self._wake_w):
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+                self._drop_video_locked()
+                self._control.clear()
+                self._wake_open = False
+                for fd in (self._wake_r, self._wake_w):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
             try:
                 self.sock.close()
             except OSError:
@@ -300,6 +442,7 @@ class Client:
             if not chunk:
                 return False
             inbuf += chunk
+            self._last_recv = time.monotonic()
         while len(inbuf) >= 8:
             length = int.from_bytes(inbuf[4:8], "big")
             if length > MAX_INCOMING_FRAME:
@@ -310,29 +453,109 @@ class Client:
                 break
             frame_type, body = bytes(inbuf[:4]), bytes(inbuf[8:8 + length])
             del inbuf[:8 + length]
-            if self._on_message:
-                self._on_message(self, frame_type, body)
+            if frame_type == FRAME_PING:
+                self._peer_heartbeats = True
+            elif self._on_message:
+                try:
+                    self._on_message(self, frame_type, body)
+                except Exception as e:
+                    # A touch/input bug must never end the video connection.
+                    log(f"client {self.addr[0]}: error handling "
+                        f"{frame_type!r} ({e!r})")
         return True
 
 
 def _tune_socket(sock):
-    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    for opt, val in (("TCP_KEEPIDLE", 3), ("TCP_KEEPINTVL", 1),
-                     ("TCP_KEEPCNT", 3)):
-        if hasattr(socket, opt):
-            sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, opt), val)
-    # Keep the kernel send buffer modest: a huge one hides backpressure and
-    # turns into latency instead of a resync.
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 512 * 1024)
+    """Low-latency, dead-peer-detecting socket options (all best effort)."""
+    def opt(level, name, value, fallback=None):
+        num = getattr(socket, name, fallback)
+        if num is None:
+            return False
+        try:
+            sock.setsockopt(level, num, value)
+            return True
+        except OSError:
+            return False
+
+    opt(socket.IPPROTO_TCP, "TCP_NODELAY", 1)
+    opt(socket.SOL_SOCKET, "SO_KEEPALIVE", 1)
+    for name, val in (("TCP_KEEPIDLE", 3), ("TCP_KEEPINTVL", 1),
+                      ("TCP_KEEPCNT", 3)):
+        opt(socket.IPPROTO_TCP, name, val)
+    # Keepalive probes don't run while data is unacked (a PING always is on a
+    # dead link): TCP_USER_TIMEOUT aborts those sockets in seconds, not the
+    # ~15 minutes of retransmits.
+    opt(socket.IPPROTO_TCP, "TCP_USER_TIMEOUT", USER_TIMEOUT_MS, 18)
+    # Keep the kernel's *unsent* backlog small, so queued video stays in our
+    # queue where whole frames can be dropped. Without TCP_NOTSENT_LOWAT, fall
+    # back to a modest send buffer (a huge one hides backpressure).
+    if not opt(socket.IPPROTO_TCP, "TCP_NOTSENT_LOWAT", NOTSENT_LOWAT, 25):
+        opt(socket.SOL_SOCKET, "SO_SNDBUF", 512 * 1024)
+    # Mark as interactive video: Wi-Fi (WMM) maps it to the video access
+    # category ahead of bulk traffic. Networks that ignore DSCP are unaffected.
+    opt(socket.IPPROTO_IP, "IP_TOS", DSCP_AF41)
+    if sock.family == socket.AF_INET6:
+        opt(socket.IPPROTO_IPV6, "IPV6_TCLASS", DSCP_AF41, 67)
+
+
+class KeyframeSource:
+    """Gets a fresh IDR out of the encoder on demand, off the caller's thread.
+
+    Asks the backend's optional request_keyframe() (True = an IDR is coming).
+    When that isn't available or didn't work and a phone has been stuck for a
+    while (`urgent`), restarting the encoder is the one universal way: every
+    encoder starts with SPS+PPS+IDR. Restarts are rare and rate-limited.
+    """
+
+    MIN_INTERVAL = 0.25          # between backend requests
+    MIN_RESTART_INTERVAL = 15.0  # between encoder restarts for a keyframe
+
+    def __init__(self, backend, restart_capture):
+        self._request = getattr(backend, "request_keyframe", None)
+        self._restart_capture = restart_capture
+        self._cond = threading.Condition()
+        self._wanted = False
+        self._urgent = False
+        self._last_restart = 0.0
+        threading.Thread(target=self._run, daemon=True,
+                         name="keyframe-requests").start()
+
+    def request(self, urgent=False):
+        """Non-blocking: called under no lock from any thread."""
+        with self._cond:
+            self._wanted = True
+            self._urgent = self._urgent or urgent
+            self._cond.notify()
+
+    def _run(self):
+        while True:
+            with self._cond:
+                while not self._wanted:
+                    self._cond.wait()
+                urgent, self._wanted, self._urgent = self._urgent, False, False
+            coming = False
+            if self._request:
+                try:
+                    coming = bool(self._request())
+                except Exception as e:
+                    log(f"warning: keyframe request failed ({e})")
+            now = time.monotonic()
+            if (urgent and not coming and self._restart_capture
+                    and now - self._last_restart > self.MIN_RESTART_INTERVAL):
+                self._last_restart = now
+                log("no keyframe is coming; restarting the encoder for one")
+                self._restart_capture()
+            time.sleep(self.MIN_INTERVAL)
 
 
 class Broadcaster:
-    """Fans NAL frames out to every client; owns the SPS/PPS/GOP caches."""
+    """Fans NAL frames out to every client; owns the SPS/PPS/GOP caches and
+    every client's resync state."""
 
     def __init__(self, banner_payload=b"", phone_input=None):
         self._clients = []
-        self.phone_input = phone_input      # handles HELO / TUCH, or None
+        self.phone_input = phone_input      # handles TUCH / INPT, or None
+        self.keyframes = None               # KeyframeSource, set by main()
         self._lock = threading.Lock()
         self.sps = None             # framed
         self.pps = None             # framed
@@ -345,32 +568,39 @@ class Broadcaster:
             self.banner_payload = payload
             clients = list(self._clients)
         for c in clients:
-            c.push(frame(FRAME_BANNER, payload))
+            c.send_message(FRAME_BANNER, payload)
+
+    def full(self):
+        with self._lock:
+            return len(self._clients) >= MAX_CLIENTS
 
     def add(self, sock, addr):
         """Start streaming to a phone that passed the pairing handshake."""
         with self._lock:
             if len(self._clients) >= MAX_CLIENTS:
+                # Normally refused before the handshake (deny_before_okay);
+                # this only catches two phones racing for the last slot.
                 secure_link.deny(sock, f"already {MAX_CLIENTS} phones connected")
                 sock.close()
                 log(f"client {addr[0]} refused: {MAX_CLIENTS} phones already "
                     "connected")
                 return
-            c = Client(sock, addr, self._remove,
-                       self.phone_input.on_message if self.phone_input else None)
-            c.push(frame(FRAME_BANNER, self.banner_payload))
-            if self.gop:
-                # Replay the current GOP: the decoder catches up to "now"
-                # instantly, even if the desktop is static.
-                for f in self.gop:
-                    c.push(f)
-                c.started = True
+            c = Client(sock, addr, self._remove, self._on_client_message)
+            c.send_message(FRAME_BANNER, self.banner_payload)
+            # Replay the current GOP: the decoder catches up to "now"
+            # instantly, even if the desktop is static.
+            replayed = self._start_locked(c, time.monotonic())
             self._clients.append(c)
-            n = len(self._clients)
+            # Logged under the lock: the I/O thread is already running, and a
+            # phone that drops at once must log "disconnected" *after* this
+            # line, or the TUI's live count (which parses them) goes wrong.
+            log(f"client connected: {addr[0]}:{addr[1]} "
+                f"(total {len(self._clients)})"
+                + ("  [gop replay]" if replayed else ""))
+        if not replayed:
+            self._ask_keyframe()
         if self.phone_input:
             self.phone_input.on_admitted(c)       # tells the phone about touch
-        log(f"client connected: {addr[0]}:{addr[1]} (total {n})"
-            + ("  [gop replay]" if c.started else ""))
 
     def _remove(self, c):
         with self._lock:
@@ -387,12 +617,112 @@ class Broadcaster:
         for c in clients:
             c.close()
 
+    def _on_client_message(self, client, frame_type, body):
+        """Frames a phone sends: keyframe requests here, the rest is input."""
+        if frame_type == FRAME_KEYFRAME_REQUEST:
+            self.resync(client, "phone asked for a keyframe", rate_limit=True)
+        elif self.phone_input:
+            self.phone_input.on_message(client, frame_type, body)
+
+    # ---- resync ------------------------------------------------------------ #
+
+    def _start_locked(self, c, now):
+        """Replay SPS+PPS+GOP to `c` and mark it started. False if there is
+        nothing to replay (it then waits for the next IDR)."""
+        if not (self.gop and self.sps and self.pps):
+            return False
+        c.push_replay(self.gop, now)
+        c.started = True
+        return True
+
+    def _desync_locked(self, c, now):
+        # resync_since only moves when the phone *starts* waiting: the app
+        # re-sends KEYQ every ~1.5 s while it waits, and resetting the clock
+        # each time would keep RESYNC_RESTART_AFTER from ever firing.
+        if c.started:
+            c.resync_since = now
+        c.started = False
+        c.last_keyframe_ask = now
+
+    def resync(self, c, reason, rate_limit=False):
+        """Restart `c` from a keyframe right away (KEYQ, decoder trouble)."""
+        now = time.monotonic()
+        with self._lock:
+            if c not in self._clients:
+                return
+            if rate_limit:
+                if now - c.last_keyq < KEYQ_MIN_INTERVAL:
+                    return
+                c.last_keyq = now
+            c.drop_video()
+            self._desync_locked(c, now)
+            replayed = self._start_locked(c, now)
+        log(f"client {c.addr[0]}: {reason}; "
+            + ("replayed the current GOP" if replayed
+               else "waiting for a keyframe"))
+        if not replayed:
+            self._ask_keyframe()
+
+    def stream_restarted(self):
+        """The encoder was restarted: old caches are invalid, and every phone
+        restarts on the new stream's first SPS+PPS+IDR."""
+        now = time.monotonic()
+        with self._lock:
+            self.sps = self.pps = self.gop = None
+            self._gop_bytes = 0
+            for c in self._clients:
+                c.drop_video()
+                self._desync_locked(c, now)
+
+    def stream_corrupted(self):
+        """A NAL we already sent turned out truncated: the GOP (and every
+        phone's decoder state) may hold it. Resync everyone on a new IDR."""
+        now = time.monotonic()
+        with self._lock:
+            self.gop = None
+            self._gop_bytes = 0
+            for c in self._clients:
+                c.drop_video()          # it decodes from the broken frame
+                self._desync_locked(c, now)
+            waiting = bool(self._clients)
+        if waiting:
+            self._ask_keyframe()
+
+    def tick(self):
+        """Periodic (parser thread): keep after phones still waiting for a
+        keyframe, which matters on a static desktop that makes no new IDR."""
+        now = time.monotonic()
+        ask = urgent = False
+        with self._lock:
+            for c in self._clients:
+                if c.started:
+                    continue
+                if self._start_locked(c, now):
+                    log(f"client {c.addr[0]} started from the GOP cache")
+                    continue
+                if now - c.last_keyframe_ask >= RESYNC_RETRY:
+                    c.last_keyframe_ask = now
+                    ask = True
+                    urgent = urgent or (now - c.resync_since
+                                        >= RESYNC_RESTART_AFTER
+                                        and self.sps is not None)
+        if ask:
+            self._ask_keyframe(urgent)
+
+    def _ask_keyframe(self, urgent=False):
+        if self.keyframes:
+            self.keyframes.request(urgent)
+
+    # ---- video ------------------------------------------------------------- #
+
     def feed(self, nal_type, nal, first_slice):
         """Called per NAL by the parser thread."""
         if nal_type in NAL_DROP:
             return
         f = frame(FRAME_NAL, nal)
         keyframe = nal_type == NAL_IDR and first_slice
+        now = time.monotonic()
+        ask = False
         with self._lock:
             if nal_type == NAL_SPS:
                 self.sps = f
@@ -405,19 +735,23 @@ class Broadcaster:
                 self.gop.append(f)
                 self._gop_bytes += len(f)
                 if self._gop_bytes > MAX_GOP_CACHE:
-                    self.gop = None          # too big; joiners wait for an IDR
+                    self.gop = None          # too big to replay; wait for IDR
 
             for c in self._clients:
                 if c.started:
-                    c.push(f)
-                elif keyframe and self.sps and self.pps:
-                    # A resyncing client restarts on a keyframe, prefixed with
-                    # the parameter sets so its decoder is valid immediately.
-                    c.push(self.sps)
-                    c.push(self.pps)
-                    c.push(f)
-                    c.started = True
+                    if c.push_video(f, now):
+                        continue
+                    # Fell behind: back on "now" from the cache (which already
+                    # holds `f`), or wait for the next IDR.
+                    self._desync_locked(c, now)
+                    if not self._start_locked(c, now):
+                        ask = True
+                elif keyframe and self._start_locked(c, now):
+                    # A resyncing client restarts on a keyframe (the GOP is
+                    # just SPS+PPS+this IDR), so its decoder is valid at once.
                     log(f"client {c.addr[0]} started on keyframe")
+        if ask:
+            self._ask_keyframe()
 
 
 # --------------------------------------------------------------------------- #
@@ -426,10 +760,21 @@ class Broadcaster:
 
 START = b"\x00\x00\x01"
 F_SETPIPE_SZ = 1031
+F_GETPIPE_SZ = 1032
 # How long the pipe must be idle before the buffered tail counts as a complete
-# NAL. Encoders write an access unit as back-to-back write()s (microseconds
-# apart), and a frame interval is >= 8 ms even at 120 fps.
-TAIL_QUIET = 0.005
+# NAL. A NAL is only *known* complete when the next start code arrives, which
+# would hold every frame back a whole frame interval; instead we use how
+# encoders write: GStreamer's fdsink writes one access unit per write(), and
+# ffmpeg (wf-recorder) writes a packet in full 32 KiB buffers plus a short
+# final flush. Pipe writes that fit are atomic for the reader, so a read whose
+# size isn't page-aligned ended on the end of a write = an access unit, and
+# 1 ms of quiet is plenty. A page-aligned read is likely mid-packet (a full
+# avio buffer, or a write that filled the pipe): wait longer before trusting
+# the tail.
+TAIL_QUIET = 0.001
+TAIL_QUIET_ALIGNED = 0.030
+PAGE = 4096
+IDLE_TICK = 0.25                  # Broadcaster.tick() at least this often
 
 
 def _nal_header(nal):
@@ -444,42 +789,62 @@ def _nal_header(nal):
     return t, first
 
 
-def parse_annexb(stream, broadcaster, stop_evt):
-    """Read raw H.264 and hand each NAL (start code included) to feed().
+def _start_code_at_head(buf):
+    """True / False if buf begins with a start code (after optional zero
+    bytes), None if there aren't enough bytes yet to tell."""
+    i = 0
+    while i < len(buf) and buf[i] == 0:
+        i += 1
+    if i == len(buf):
+        return None
+    return i >= 2 and buf[i] == 1
 
-    A NAL is complete once the next start code shows up. Encoders write whole
-    access units per write(), so when the pipe goes quiet for a moment the
-    buffered tail is a complete NAL too — we flush it right away instead of
-    holding the last frame of a burst until the next frame arrives.
+
+class AnnexBSplitter:
+    """Incremental Annex-B splitter: push() bytes, get complete NALs out.
+
+    Pure (no I/O), so it is unit-testable. `on_nal(nal)` gets every NAL with
+    its start code; `on_truncated()` is called when bytes arrive that
+    continue a tail we already flushed as complete.
     """
-    fd = stream.fileno()
-    try:
-        fcntl.fcntl(fd, F_SETPIPE_SZ, 1 << 20)   # whole AUs fit in one write
-    except OSError:
-        pass
 
-    def emit(nal):
-        t, first = _nal_header(nal)
-        broadcaster.feed(t, nal, first)
+    def __init__(self, on_nal, on_truncated=None):
+        self.on_nal = on_nal
+        self.on_truncated = on_truncated
+        self.buf = bytearray()
+        self._after_flush = False   # last NAL went out on a quiet pipe
 
-    buf = bytearray()
-    while not stop_evt.is_set():
-        has_tail = buf.startswith(START) or buf.startswith(b"\x00" + START)
-        ready, _, _ = select.select([fd], [], [], TAIL_QUIET if has_tail else 0.5)
-        if not ready:
-            if has_tail and len(buf) > 4:
-                emit(bytes(buf))
-                buf.clear()
-            continue
-        chunk = os.read(fd, 1 << 20)
-        if not chunk:
-            break
+    def has_tail(self):
+        return len(self.buf) > 4 and _start_code_at_head(self.buf) is True
+
+    def flush_tail(self):
+        """The pipe went quiet: the buffered tail is a complete NAL."""
+        if self.has_tail():
+            self.on_nal(bytes(self.buf))
+            self.buf.clear()
+            self._after_flush = True
+
+    def push(self, chunk):
+        buf = self.buf
         buf += chunk
-
+        if self._after_flush:
+            head = _start_code_at_head(buf)
+            if head is None:
+                return                  # only zeros so far: can't tell yet
+            self._after_flush = False
+            if not head:
+                # The flushed tail was cut short (writer paused mid-NAL). Its
+                # rest has no start code: drop it, loudly, and resync.
+                nxt = buf.find(START)
+                lost = len(buf) if nxt < 0 else nxt
+                log(f"warning: encoder output paused mid-frame; {lost} bytes "
+                    "of a frame already sent were lost, resyncing")
+                if self.on_truncated:
+                    self.on_truncated()
         start = buf.find(START)
         if start < 0:
             del buf[:-3]                # keep a possible partial start code
-            continue
+            return
         if start > 0 and buf[start - 1] == 0:
             start -= 1                  # 4-byte start code
         search = start + 4
@@ -488,66 +853,314 @@ def parse_annexb(stream, broadcaster, stop_evt):
             if nxt < 0:
                 break
             end = nxt - 1 if buf[nxt - 1] == 0 else nxt
-            emit(bytes(buf[start:end]))
+            self.on_nal(bytes(buf[start:end]))
             start, search = end, nxt + 3
         del buf[:start]
+
+
+def parse_annexb(stream, broadcaster, stop_evt, restart_evt=None):
+    """Read raw H.264 and hand each NAL (start code included) to feed().
+
+    Returns "stopped" (stop/restart requested) or "eof" (the encoder exited).
+    """
+    fd = stream.fileno()
+    try:
+        fcntl.fcntl(fd, F_SETPIPE_SZ, 1 << 20)   # whole AUs fit in one write
+    except OSError as e:
+        try:
+            size = fcntl.fcntl(fd, F_GETPIPE_SZ)
+        except OSError:
+            size = 0
+        if size:      # a pipe that stayed small (pipe-max-size, user quota)
+            log(f"note: encoder pipe is {size // 1024} KiB ({e}); large "
+                "frames arrive in pieces")
+
+    def emit(nal):
+        t, first = _nal_header(nal)
+        broadcaster.feed(t, nal, first)
+
+    splitter = AnnexBSplitter(emit, broadcaster.stream_corrupted)
+    quiet = TAIL_QUIET
+    last_tick = time.monotonic()
+    while not stop_evt.is_set() and not (restart_evt and restart_evt.is_set()):
+        if time.monotonic() - last_tick >= IDLE_TICK:
+            broadcaster.tick()
+            last_tick = time.monotonic()
+        tail = splitter.has_tail()
+        ready, _, _ = select.select([fd], [], [], quiet if tail else IDLE_TICK)
+        if not ready:
+            splitter.flush_tail()
+            continue
+        chunk = os.read(fd, 1 << 20)
+        if not chunk:
+            return "eof"
+        quiet = TAIL_QUIET_ALIGNED if len(chunk) % PAGE == 0 else TAIL_QUIET
+        splitter.push(chunk)
+    return "stopped"
+
+
+# --------------------------------------------------------------------------- #
+# Capture supervisor
+# --------------------------------------------------------------------------- #
+
+RESTART_BACKOFF = (0.2, 0.5, 1.0, 2.0)
+STABLE_RUN = 10.0            # a capture that ran this long resets the backoff
+MAX_QUICK_FAILURES = 6       # this many short runs in a row: give up
+
+
+def _stop_capture(backend):
+    try:
+        backend.stop_capture()
+    except Exception as e:
+        log(f"warning: stopping capture failed ({e})")
+
+
+def _close_quietly(stream):
+    try:
+        if stream:
+            stream.close()
+    except OSError:
+        pass
+
+
+def supervise_capture(backend, stream, broadcaster, stop_evt, restart_evt):
+    """Parse the encoder's output; restart the encoder if it exits.
+
+    Encoders die mid-session for ordinary reasons (PipeWire renegotiates
+    after a resolution / modifier change, a driver hiccup, a GPU reset). The
+    virtual monitor, the listener and connected phones are kept; phones are
+    resynced onto the new stream. Returns True when stop_evt is set, False
+    after repeated quick failures (stop_evt is then set too, error logged).
+    """
+    quick_failures = 0
+    while True:
+        started = time.monotonic()
+        reason = parse_annexb(stream, broadcaster, stop_evt, restart_evt)
+        if stop_evt.is_set():
+            return True
+        if reason == "eof":
+            log("warning: the encoder exited; restarting capture")
+        restart_evt.clear()
+        _stop_capture(backend)
+        _close_quietly(stream)
+        stream = None
+        broadcaster.stream_restarted()
+        if time.monotonic() - started >= STABLE_RUN or reason != "eof":
+            quick_failures = 0
+        while stream is None:
+            if quick_failures >= MAX_QUICK_FAILURES:
+                log("error: the encoder keeps failing; stopping (see the "
+                    "encoder messages above)")
+                stop_evt.set()
+                return False
+            delay = RESTART_BACKOFF[min(quick_failures,
+                                        len(RESTART_BACKOFF) - 1)]
+            quick_failures += 1
+            if stop_evt.wait(delay):
+                return True
+            try:
+                stream = backend.start_capture()
+            except Exception as e:
+                log(f"warning: could not restart capture ({e})")
+                _stop_capture(backend)
+                stream = None
+            else:
+                if stream is None:
+                    log("warning: capture restart produced no stream")
+        log("capture restarted")
 
 
 # --------------------------------------------------------------------------- #
 # TCP accept loop
 # --------------------------------------------------------------------------- #
 
-def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# accept() errors that only concern the one connection being accepted
+ACCEPT_SKIP = {errno.ECONNABORTED, errno.EPROTO, errno.ENETDOWN,
+               errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EHOSTDOWN,
+               errno.ENOPROTOOPT, errno.EOPNOTSUPP, errno.EPERM,
+               getattr(errno, "ENONET", -1)}
+# resource exhaustion: back off a moment and keep serving
+ACCEPT_PAUSE = {errno.EMFILE, errno.ENFILE, errno.ENOBUFS, errno.ENOMEM}
+
+
+def _peer(addr):
+    """(host, port) with IPv4-mapped IPv6 shown as plain IPv4."""
+    host = addr[0]
+    if host.startswith("::ffff:") and "." in host:
+        host = host[len("::ffff:"):]
+    return host, addr[1]
+
+
+ANY_HOST = ("0.0.0.0", "", "::")
+
+
+def _listen_socket(host):
+    """A listening-ready socket for `host`.
+
+    The default (0.0.0.0, or "::") listens dual-stack on "::" with
+    IPV6_V6ONLY off, so phones reach us over IPv4 *and* IPv6 (a hostname that
+    resolves to an AAAA record first). Falls back to IPv4 where IPv6 is off.
+    """
+    if host in ANY_HOST and socket.has_ipv6:
+        try:
+            srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            return srv, "::"
+        except OSError:
+            pass                       # IPv6 disabled in the kernel
+    if host in ANY_HOST:
+        host = "0.0.0.0"
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    return socket.socket(family, socket.SOCK_STREAM), host
+
+
+def _bind_with_retries(host, port, stop_evt):
+    """Bound socket, or None. A stale daemon may still hold the port briefly."""
+    srv, bind_host = _listen_socket(host)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     for attempt in range(15):
         try:
-            srv.bind((host, port))
-            break
-        except OSError:
+            srv.bind((bind_host, port))
+            return srv
+        except OSError as e:
             if stop_evt.is_set():
-                return
+                break
+            if bind_host == "::" and e.errno in (errno.EADDRNOTAVAIL,
+                                                 errno.EAFNOSUPPORT):
+                srv.close()            # IPv6 disabled: plain IPv4
+                srv, bind_host = (socket.socket(socket.AF_INET,
+                                                socket.SOCK_STREAM), "0.0.0.0")
+                srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                continue
             if attempt == 14:
                 log(f"error: port {port} still in use after retries")
                 stop_evt.set()
-                return
+                break
             time.sleep(0.3)
+    srv.close()
+    return None
+
+
+def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
+    srv = _bind_with_retries(host, port, stop_evt)
+    if srv is None:
+        return
     srv.listen(8)
     srv.settimeout(0.5)
-    log(f"listening on {host}:{port} (TLS, pairing required)")
-    while not stop_evt.is_set():
-        try:
-            sock, addr = srv.accept()
-        except socket.timeout:
-            continue
-        except OSError:
-            break
-        if gatekeeper.throttle.blocked(addr[0]):
-            sock.close()              # locked out after repeated failures
-            continue
-        if not gatekeeper.pending.acquire(blocking=False):
-            sock.close()              # too many handshakes in flight
-            continue
-        # The handshake waits on the phone; never let it stall accept().
-        threading.Thread(target=admit, daemon=True, name=f"admit-{addr[0]}",
-                         args=(sock, addr, broadcaster, gatekeeper)).start()
-    srv.close()
+    if host in ANY_HOST:
+        host = ("every interface (IPv4 + IPv6)"
+                if srv.family == socket.AF_INET6 else "every interface (IPv4)")
+    log(f"listening on {host} port {port} (TLS, pairing required)")
+    try:
+        while not stop_evt.is_set():
+            try:
+                sock, addr = srv.accept()
+            except socket.timeout:
+                continue
+            except OSError as e:
+                if e.errno in ACCEPT_SKIP:
+                    continue
+                if e.errno in ACCEPT_PAUSE:
+                    log(f"warning: can't accept connections right now ({e})")
+                    stop_evt.wait(0.1)
+                    continue
+                log(f"error: listener failed ({e})")
+                stop_evt.set()       # visible to the TUI, unlike a dead thread
+                break
+            addr = _peer(addr)
+            if not gatekeeper.pending.acquire(blocking=False):
+                sock.close()              # too many handshakes in flight
+                continue
+            # Locked out after repeated failures: say so (a silent close looks
+            # like a TLS failure to the app, i.e. "update Tandem"). It still
+            # needs a handshake slot, so a flood can't take more than those.
+            if gatekeeper.throttle.blocked(addr[0]):
+                target, targs = refuse, (sock, addr, gatekeeper, LOCKED_OUT)
+            else:
+                target, targs = admit, (sock, addr, broadcaster, gatekeeper)
+            # The handshake waits on the phone; never let it stall accept().
+            try:
+                threading.Thread(target=target, args=targs, daemon=True,
+                                 name=f"admit-{addr[0]}").start()
+            except RuntimeError as e:     # can't start a thread
+                gatekeeper.pending.release()
+                sock.close()
+                log(f"warning: could not handle {addr[0]} ({e})")
+    finally:
+        srv.close()
+
+
+# DENY reasons sent before any OKAY (the app shows them to the user)
+PHONES_FULL = f"already {MAX_CLIENTS} phones connected to this computer"
+LOCKED_OUT = ("too many failed pairing attempts from this phone; try again "
+              "in a minute")
+
+
+def deny_before_okay(sock, gatekeeper, reason):
+    """Tell a phone why it can't connect, *before* any OKAY. True if told.
+
+    The phone shows a DENY that answers its hello (that's how it learns about
+    an outdated app or a wrong code), but ignores one after OKAY. So: TLS,
+    read the hello, DENY. No pairing proof is exchanged; nothing is streamed.
+    """
+    deadline = time.monotonic() + secure_link.HANDSHAKE_TIMEOUT
+    tls = None
+    try:
+        sock.settimeout(secure_link.HANDSHAKE_TIMEOUT)
+        if not sock.recv(1, socket.MSG_PEEK):
+            return False              # the app's parallel connect: abandoned
+        tls = gatekeeper.context.wrap_socket(sock, server_side=True)
+        secure_link.read_json_frame(tls, deadline)
+        secure_link.deny(tls, reason)
+        return True
+    except (secure_link.AuthError, OSError, ValueError):
+        return False
+    finally:
+        for s in (tls, sock):
+            try:
+                if s:
+                    s.close()
+            except OSError:
+                pass
+
+
+def refuse(sock, addr, gatekeeper, reason):
+    """Thread target for a locked-out address: DENY, free the handshake slot.
+    Not logged: a misbehaving device would flood the log."""
+    try:
+        deny_before_okay(sock, gatekeeper, reason)
+    finally:
+        gatekeeper.pending.release()
 
 
 def admit(sock, addr, broadcaster, gatekeeper):
     """TLS + pairing proof, then hand the phone to the broadcaster."""
     try:
         _tune_socket(sock)
+        if broadcaster.full():
+            if deny_before_okay(sock, gatekeeper, PHONES_FULL):
+                log(f"client {addr[0]} refused: {MAX_CLIENTS} phones already "
+                    "connected")
+            return
         tls, app = gatekeeper.handshake(sock)
     except secure_link.Abandoned:
         sock.close()              # the app's parallel connect: another address won
         return
-    except (secure_link.AuthError, OSError) as e:
+    except Exception as e:
+        # AuthError / OSError expected; anything else (a malformed hello the
+        # parser didn't anticipate) is still just a failed handshake.
         try:
             sock.close()
         except OSError:
             pass
-        locked = gatekeeper.throttle.failed(addr[0])
+        # Only protocol failures count toward the lock-out (it exists to stop
+        # guessing the pairing proof). A reset or a dropped Wi-Fi packet in
+        # the middle of the handshake is the network, not an attacker: counting
+        # it locked flaky phones out for a minute.
+        transport = isinstance(e, OSError)     # AuthError is not an OSError
+        locked = not transport and gatekeeper.throttle.failed(addr[0])
+        if not isinstance(e, (secure_link.AuthError, OSError)):
+            e = f"malformed handshake ({type(e).__name__}: {e})"
         log(f"client {addr[0]} rejected: {e}"
             + (" (locked out for a minute)" if locked else ""))
         return
@@ -586,6 +1199,26 @@ def start_touch(args, backend):
 # main
 # --------------------------------------------------------------------------- #
 
+PR_SET_PDEATHSIG = 1                # linux/prctl.h
+PARENT_GONE_SIGNAL = signal.SIGUSR2
+
+
+def exit_with_parent(parent_pid):
+    """Get PARENT_GONE_SIGNAL when `parent_pid` (the TUI) dies, however it dies.
+
+    The TUI starts us in our own session so terminal signals can't kill the
+    encoder under us; the flip side is that a TUI killed outright (SIGKILL,
+    OOM) would leave us streaming to a monitor nobody will ever remove.
+    """
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(PR_SET_PDEATHSIG, int(PARENT_GONE_SIGNAL), 0, 0, 0):
+            raise OSError(ctypes.get_errno(), "prctl failed")
+    except (OSError, AttributeError) as e:
+        log(f"note: can't follow the launcher's lifetime ({e})")
+    if os.getppid() != parent_pid:      # it died before we asked
+        os.kill(os.getpid(), PARENT_GONE_SIGNAL)
+
 def main():
     # Raw text so --version prints the credit on its own line, unwrapped.
     ap = argparse.ArgumentParser(description="Tandem daemon",
@@ -614,7 +1247,7 @@ def main():
     ap.add_argument("--quality", default="high",
                     help="quality preset label, reported to the phone")
     ap.add_argument("--banner-file", default=None,
-                    help="JSON settings file; re-read on SIGHUP for live "
+                    help="JSON settings file; re-read on SIGUSR1 for live "
                          "side/scale changes")
     ap.add_argument("--position", default=None,
                     help="(deprecated, ignored) placement now follows --side")
@@ -622,10 +1255,16 @@ def main():
                     help="keyframe interval in frames")
     ap.add_argument("--device", default="/dev/dri/renderD128",
                     help="VA-API render node (Hyprland backend)")
-    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--host", default="0.0.0.0",
+                    help="address to listen on (default: every interface, "
+                         "IPv4 and IPv6)")
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--keep-output", action="store_true",
                     help="don't remove the Hyprland headless output on exit")
+    ap.add_argument("--parent-pid", type=int, default=None,
+                    help="stop when this process exits, and then remove the "
+                         "output even with --keep-output (the TUI passes "
+                         "its own PID)")
     ap.add_argument("--pairing-key-file", default=secure_link.PAIRING_KEY_PATH,
                     help="file holding the pairing key (created if missing); "
                          "only phones that prove they know it (from the QR "
@@ -636,6 +1275,39 @@ def main():
     ap.add_argument("--no-touch", dest="touch", action="store_false",
                     help="don't accept touch input from phones")
     args = ap.parse_args()
+
+    # Handlers first: a stop or reload that arrives during the (seconds-long)
+    # setup must not kill us half-way with the default action. SIGHUP is a
+    # stop too: it means our terminal went away.
+    stop_evt = threading.Event()
+    reload_evt = threading.Event()
+
+    def shutdown(*_):
+        """Signal handler: only flag the stop. The capture loop sees it within
+        a fraction of a second and the `finally` below stops capture — waiting
+        for the encoder here would stall the handler and push the TUI past its
+        kill timeout, leaving wf-recorder orphaned on an output that is about
+        to vanish."""
+        if stop_evt.is_set():
+            return
+        log("shutting down")
+        stop_evt.set()
+
+    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGHUP, shutdown)
+    signal.signal(signal.SIGUSR1, lambda *_: reload_evt.set())
+
+    # The launcher died: nobody is left to reuse or remove the output.
+    parent_gone = threading.Event()
+
+    def on_parent_gone(*_):
+        parent_gone.set()
+        shutdown()
+
+    if args.parent_pid:
+        signal.signal(PARENT_GONE_SIGNAL, on_parent_gone)
+        exit_with_parent(args.parent_pid)
 
     try:
         gatekeeper = secure_link.Gatekeeper.from_files(args.pairing_key_file,
@@ -650,6 +1322,11 @@ def main():
         log(f"error: {backend.name} backend is missing: {', '.join(missing)}")
         sys.exit(1)
     log(f"backend: {backends.describe(backend.name)}")
+    if args.codec != "h264":
+        # Kept for experiments, but the NAL parsing here (GOP cache, resync)
+        # and the Android app are H.264 only: say so instead of a black screen.
+        log(f"warning: --codec {args.codec}: the Tandem app and this daemon's "
+            "keyframe handling only support h264; phones will show nothing")
 
     kill_stale()
     try:
@@ -658,82 +1335,90 @@ def main():
         log(f"error: could not create the virtual monitor ({e})")
         sys.exit(1)
 
-    stop_evt = threading.Event()
-    reload_evt = threading.Event()
-
+    stream = None
+    touch_surface = None
+    phone_input = None
+    broadcaster = None
+    failed = False
     try:
-        stream = backend.start_capture()
-    except Exception as e:
-        log(f"error: could not start capture ({e})")
-        backend.teardown()
-        sys.exit(1)
-
-    touch_surface, touch_problem = start_touch(args, backend)
-    phone_input = PhoneInput(touch_surface=touch_surface,
-                             unavailable_reason=touch_problem)
-    broadcaster = Broadcaster(load_banner_payload(args, backend.name),
-                              phone_input)
-
-    threading.Thread(target=accept_loop,
-                     args=(args.host, args.port, broadcaster, gatekeeper,
-                           stop_evt),
-                     daemon=True).start()
-
-    def control_loop():
-        """Apply SIGHUP reloads off the signal handler (D-Bus / hyprctl), and
-        drop every phone when the pairing key is reset."""
-        while not stop_evt.is_set():
-            if gatekeeper.key_changed():
-                # "Forget paired phones": phones holding the old key must
-                # not keep watching / touching. They reconnect, fail the
-                # handshake and are told to scan the new QR code.
-                log("pairing key changed: disconnecting every phone")
-                broadcaster.close_all()
-            if not reload_evt.wait(0.5):
-                continue
-            reload_evt.clear()
-            payload = load_banner_payload(args, backend.name)
-            try:
-                cfg = json.loads(payload)
-                side = cfg.get("side", args.side)
-                scale = float(cfg.get("scale", args.scale))
-                if (side, scale) != (args.side, args.scale):
-                    args.side, args.scale = side, scale
-                    backend.apply_live(side, scale)
-            except Exception as e:
-                log(f"warning: live reconfigure failed ({e})")
-            broadcaster.set_banner(payload)
-            log("config reloaded (live settings change)")
-
-    threading.Thread(target=control_loop, daemon=True).start()
-
-    def shutdown(*_):
-        """Signal handler: only flag the stop. The parser loop sees it within
-        0.5 s and the `finally` below stops capture — waiting for the encoder
-        here would stall the handler and push the TUI past its kill timeout,
-        leaving wf-recorder orphaned on an output that is about to vanish."""
         if stop_evt.is_set():
             return
-        log("shutting down")
-        stop_evt.set()
+        try:
+            stream = backend.start_capture()
+        except Exception as e:
+            log(f"error: could not start capture ({e})")
+            failed = True
+            return
+        if stop_evt.is_set():
+            return
 
-    signal.signal(signal.SIGINT, shutdown)
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGHUP, lambda *_: reload_evt.set())
+        touch_surface, touch_problem = start_touch(args, backend)
+        phone_input = PhoneInput(touch_surface=touch_surface,
+                                 unavailable_reason=touch_problem)
+        broadcaster = Broadcaster(load_banner_payload(args, backend.name),
+                                  phone_input)
+        restart_evt = threading.Event()
+        broadcaster.keyframes = KeyframeSource(backend, restart_evt.set)
 
-    try:
-        parse_annexb(stream, broadcaster, stop_evt)
+        threading.Thread(target=accept_loop,
+                         args=(args.host, args.port, broadcaster, gatekeeper,
+                               stop_evt),
+                         daemon=True).start()
+
+        def control_loop():
+            """Apply SIGUSR1 reloads off the signal handler (D-Bus / hyprctl),
+            and drop every phone when the pairing key is reset."""
+            while not stop_evt.is_set():
+                if gatekeeper.key_changed():
+                    # "Forget paired phones": phones holding the old key must
+                    # not keep watching / touching. They reconnect, fail the
+                    # handshake and are told to scan the new QR code.
+                    log("pairing key changed: disconnecting every phone")
+                    broadcaster.close_all()
+                if not reload_evt.wait(0.5):
+                    continue
+                reload_evt.clear()
+                payload = load_banner_payload(args, backend.name)
+                try:
+                    cfg = json.loads(payload)
+                    side = cfg.get("side", args.side)
+                    scale = float(cfg.get("scale", args.scale))
+                    if (side, scale) != (args.side, args.scale):
+                        args.side, args.scale = side, scale
+                        backend.apply_live(side, scale)
+                except Exception as e:
+                    log(f"warning: live reconfigure failed ({e})")
+                broadcaster.set_banner(payload)
+                log("config reloaded (live settings change)")
+
+        threading.Thread(target=control_loop, daemon=True).start()
+
+        failed = not supervise_capture(backend, stream, broadcaster,
+                                       stop_evt, restart_evt)
     finally:
         shutdown()
-        backend.stop_capture()
-        broadcaster.close_all()
+        _stop_capture(backend)
+        _close_quietly(stream)
+        if broadcaster:
+            broadcaster.close_all()
+        if phone_input:
+            phone_input.close()
         if touch_surface:
-            touch_surface.close()
+            try:
+                touch_surface.close()
+            except Exception as e:
+                log(f"warning: closing the touch device failed ({e})")
         # A GNOME virtual monitor dies with our session anyway; only Hyprland's
-        # headless output can outlive the daemon (the TUI uses that on restart).
-        if not args.keep_output or backend.name == "gnome":
+        # headless output can outlive the daemon (the TUI uses that on restart,
+        # so not once the TUI itself is gone).
+        if (not args.keep_output or backend.name == "gnome"
+                or parent_gone.is_set()):
+            if parent_gone.is_set():
+                log("the launcher exited; removing the virtual monitor")
             backend.teardown()
         log("stopped")
+        if failed:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

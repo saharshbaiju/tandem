@@ -24,6 +24,7 @@ written to SESSION_FILE so a later run (or the TUI's disconnect) can close a
 session that a killed daemon left open.
 """
 
+import itertools
 import os
 import sys
 import time
@@ -52,8 +53,17 @@ ELEMENTS = ("pipewiresrc", "glupload", "glcolorconvert", "nvh264enc",
             "h264parse")
 
 
+# Session and request object paths must be unique on xdph's bus. A pid plus
+# a per-process counter stays unique when capture is restarted mid-session
+# (a timestamp alone repeats within the same second).
+_serial = itertools.count(1)
+
+
 def log(*a):
-    print("[tandemd]", *a, file=sys.stderr, flush=True)
+    try:                       # never raise on a closed terminal / TUI pipe
+        print("[tandemd]", *a, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
 
 
 def _bus():
@@ -87,9 +97,8 @@ class ScreenCastSession:
 
     def __init__(self, output):
         self.bus = _bus()
-        tag = f"tandem{os.getpid()}_{int(time.time())}"
+        tag = f"tandem{os.getpid()}_{int(time.time())}_{next(_serial)}"
         self.path = f"{XDPH_PATH}/session/tandem/{tag}"
-        self._request = 0
         self._call("CreateSession", "(oosa{sv})", (self.path, "", {}))
         restore = GLib.Variant("(suv)", ("hyprland", 3, GLib.Variant("a{sv}", {
             "output": GLib.Variant("s", output),
@@ -117,8 +126,7 @@ class ScreenCastSession:
 
     def _call(self, method, signature, args):
         """Call an xdph ScreenCast method; returns its results dict."""
-        self._request += 1
-        handle = f"{XDPH_PATH}/request/tandem/{os.getpid()}_{self._request}"
+        handle = f"{XDPH_PATH}/request/tandem/{os.getpid()}_{next(_serial)}"
         code, results = self.bus.call_sync(
             XDPH_BUS, XDPH_PATH, SCREENCAST_IFACE, method,
             GLib.Variant(signature, (handle,) + tuple(args)),
@@ -165,23 +173,34 @@ def close_leftover_session():
         close_session(path)
 
 
-def build_pipeline(node, kbps, gop, fd):
-    """gst-launch argv: DMA-BUF frames of `node` -> NVENC -> Annex-B on fd."""
-    enc = ["nvh264enc", "rc-mode=cbr", f"bitrate={kbps}", f"gop-size={gop}",
-           "bframes=0", "zerolatency=true", "repeat-sequence-header=true"]
+def build_pipeline(node, kbps, gop, fd, fps=60):
+    """gst-launch argv: DMA-BUF frames of `node` -> NVENC -> Annex-B on fd.
+
+    Every property beyond the basics is probed, so an older nvcodec plugin
+    gets the subset it understands instead of failing to parse (which would
+    push capture back onto the slow wl_shm path).
+    """
+    enc = gnome._with_props(
+        "nvh264enc", "rc-mode=cbr", f"bitrate={kbps}", f"gop-size={gop}",
+        bframes=0,                         # no reorder delay
+        zerolatency="true",
+        rc_lookahead=0,
+        # A VBV of a couple of frames keeps IDRs from bursting the link.
+        vbv_buffer_size=gnome.vbv_kbits(kbps, fps),
+        # SPS/PPS before every IDR; h264parse config-interval=-1 below
+        # covers plugins without this.
+        repeat_sequence_header="true")
     if gnome.has_prop("nvh264enc", "tune"):
-        enc += ["preset=p1", "tune=ultra-low-latency"]     # GStreamer 1.24+
+        enc += " preset=p1 tune=ultra-low-latency"     # GStreamer 1.24+
     else:
-        enc += ["preset=low-latency-hp"]
-    # keepalive-time: Hyprland only sends frames on damage; re-send the last
-    # one every second so a newly joined phone isn't left on a black screen.
-    desc = (f"pipewiresrc path={node} do-timestamp=true keepalive-time=1000 "
+        enc += " preset=low-latency-hp"
+    desc = (f"{gnome.pipewiresrc(node)} "
             f"! video/x-raw(memory:DMABuf) "
-            f"! queue max-size-buffers=1 leaky=downstream "
+            f"! {gnome.LEAKY_QUEUE} "
             f"! glupload ! glcolorconvert "
             f"! video/x-raw(memory:GLMemory),format=NV12 "
-            f"! {' '.join(enc)} "
+            f"! {enc} "
             f"! h264parse config-interval=-1 "
             f"! video/x-h264,stream-format=byte-stream,alignment=au "
             f"! fdsink fd={fd} sync=false")
-    return ["gst-launch-1.0", "-q", "-e"] + desc.split()
+    return gnome.gst_launch(desc)

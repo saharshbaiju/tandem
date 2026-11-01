@@ -66,7 +66,13 @@ ENCODERS = ("vah264enc", "vah264lpenc", "vaapih264enc", "x264enc", "openh264enc"
 
 
 def log(*a):
-    print("[tandemd]", *a, file=sys.stderr, flush=True)
+    # Never raise: once the terminal or the TUI reading our stderr is gone,
+    # a print would throw, and in the gst log thread that would stop the
+    # draining of gst-launch's stderr until its pipe fills and it stalls.
+    try:
+        print("[tandemd]", *a, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
 
 
 def is_gnome_wayland():
@@ -94,7 +100,12 @@ def gst_inspect(element):
 
 
 def has_prop(element, prop):
-    return any(line.strip().startswith(prop + " ")
+    """True if `element` has property `prop` (per gst-inspect-1.0).
+
+    gst-inspect pads names to a column, but a long name runs straight into
+    the colon ("repeat-sequence-header: ..."), so accept either separator.
+    """
+    return any(line.strip().startswith((prop + " ", prop + ":"))
                for line in gst_inspect(element).splitlines())
 
 
@@ -114,50 +125,114 @@ def bitrate_kbps(bitrate):
     return max(1, int(float(s)) // 1000)
 
 
-def encoder_chain(enc, kbps, gop):
+# Rate-control buffer (VBV / CPB) length, in frames. Encoders default to
+# 0.6-1.5 s, which lets one IDR grow to many times an average frame and
+# serialise the Wi-Fi link for its whole length: a latency spike every GOP.
+# Two frames keeps every frame, IDRs included, near the average size.
+VBV_FRAMES = 2
+
+
+def vbv_ms(fps):
+    """VBV length in milliseconds (for encoders that size it in time)."""
+    return max(1, round(1000 * VBV_FRAMES / max(1, fps)))
+
+
+def vbv_kbits(kbps, fps):
+    """VBV size in kbit (for encoders that size it in bits)."""
+    return max(1, kbps * VBV_FRAMES // max(1, fps))
+
+
+def _with_props(element, *required, **optional):
+    """`element req... key=value...`, keeping only optional props it has.
+
+    Optional props are given with "_" for "-" (cpb_size -> cpb-size) and are
+    probed with has_prop, so an older plugin without one still parses.
+    """
+    parts = [element, *required]
+    for key, value in optional.items():
+        prop = key.replace("_", "-")
+        if has_prop(element, prop):
+            parts.append(f"{prop}={value}")
+    return " ".join(parts)
+
+
+def videoconvert():
+    """CPU colour conversion, threaded where supported (default is 1 thread,
+    which is a few ms per 1080p frame of avoidable latency)."""
+    return _with_props("videoconvert", n_threads=min(4, os.cpu_count() or 1))
+
+
+def encoder_chain(enc, kbps, gop, fps=60):
     """GStreamer elements from raw frames to H.264 for `enc`.
 
     Every chain is single-slice and B-frame free: the phone's hardware decoder
-    wants exactly one complete access unit per input buffer.
+    wants exactly one complete access unit per input buffer. Each one is also
+    set up for low latency: fastest preset, no lookahead, and a VBV of
+    VBV_FRAMES frames where the element exposes one.
     """
     if enc in ("vah264enc", "vah264lpenc"):
         conv = ("vapostproc ! video/x-raw(memory:VAMemory),format=NV12"
                 if gst_inspect("vapostproc")
-                else "videoconvert ! video/x-raw,format=NV12")
-        return (f"{conv} ! {enc} rate-control=cbr bitrate={kbps} "
-                f"key-int-max={gop} b-frames=0 target-usage=7")
+                else f"{videoconvert()} ! video/x-raw,format=NV12")
+        return f"{conv} ! " + _with_props(
+            enc, "rate-control=cbr", f"bitrate={kbps}",
+            f"key-int-max={gop}", "b-frames=0", "target-usage=7",
+            cpb_size=vbv_kbits(kbps, fps))
     if enc == "vaapih264enc":
-        return (f"videoconvert ! video/x-raw,format=NV12 ! vaapih264enc "
-                f"rate-control=cbr bitrate={kbps} keyframe-period={gop} "
-                f"max-bframes=0")
+        return (f"{videoconvert()} ! video/x-raw,format=NV12 ! " + _with_props(
+            enc, "rate-control=cbr", f"bitrate={kbps}",
+            f"keyframe-period={gop}", "max-bframes=0",
+            cpb_length=vbv_ms(fps)))
     if enc == "x264enc":
         # sliced-threads=false keeps one slice per frame; 2 frame threads cost
         # ~1 frame of latency but keep 1080p60 realtime on modest CPUs.
-        return (f"videoconvert ! video/x-raw,format=I420 ! x264enc "
-                f"tune=zerolatency speed-preset=ultrafast bitrate={kbps} "
-                f"key-int-max={gop} bframes=0 threads=2 sliced-threads=false "
-                f"byte-stream=true")
+        return (f"{videoconvert()} ! video/x-raw,format=I420 ! " + _with_props(
+            enc, "tune=zerolatency", "speed-preset=ultrafast",
+            f"bitrate={kbps}", f"key-int-max={gop}", "bframes=0", "threads=2",
+            "sliced-threads=false", "byte-stream=true",
+            vbv_buf_capacity=vbv_ms(fps)))
     if enc == "openh264enc":
-        return (f"videoconvert ! video/x-raw,format=I420 ! openh264enc "
+        # openh264 has no VBV-size property; its bitrate mode is already
+        # frame-level and skips frames rather than buffering them.
+        return (f"{videoconvert()} ! video/x-raw,format=I420 ! openh264enc "
                 f"usage-type=screen rate-control=bitrate bitrate={kbps * 1000} "
                 f"gop-size={gop} complexity=low")
     raise ValueError(f"unsupported encoder {enc}")
 
 
-def build_pipeline(node, width, height, kbps, gop, enc, fd=3):
-    """gst-launch argv: PipeWire node -> H.264 Annex-B access units on `fd`."""
+# The single frame of buffering between capture and encoder: when the
+# encoder falls behind, drop the oldest raw frame instead of queueing
+# (a queue's default 200 buffers / 1 s would hold seconds of lag).
+LEAKY_QUEUE = ("queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 "
+               "leaky=downstream")
+
+
+def pipewiresrc(node, extra=""):
+    """pipewiresrc for `node`, re-sending the last frame every second where
+    the plugin supports it: compositors only send frames on damage, and a
+    newly joined phone shouldn't wait on a static desktop for its first one."""
     src = f"pipewiresrc path={node} do-timestamp=true"
     if has_prop("pipewiresrc", "keepalive-time"):
-        # Mutter only sends frames on damage; re-send the last one every second
-        # so a newly joined phone isn't stuck waiting on a static desktop.
         src += " keepalive-time=1000"
-    desc = (f"{src} ! video/x-raw,width={width},height={height} "
-            f"! queue max-size-buffers=1 leaky=downstream "
-            f"! {encoder_chain(enc, kbps, gop)} "
+    return f"{src} {extra}".strip()
+
+
+def gst_launch(desc):
+    """argv for gst-launch-1.0. No -e: it makes SIGINT wait for an EOS to
+    drain through the pipeline, which can hang a stop on a stalled source;
+    our frames are an endless live stream with nothing to finalise."""
+    return ["gst-launch-1.0", "-q"] + desc.split()
+
+
+def build_pipeline(node, width, height, kbps, gop, enc, fd=3, fps=60):
+    """gst-launch argv: PipeWire node -> H.264 Annex-B access units on `fd`."""
+    desc = (f"{pipewiresrc(node)} ! video/x-raw,width={width},height={height} "
+            f"! {LEAKY_QUEUE} "
+            f"! {encoder_chain(enc, kbps, gop, fps)} "
             f"! h264parse config-interval=-1 "
             f"! video/x-h264,stream-format=byte-stream,alignment=au "
             f"! fdsink fd={fd} sync=false")
-    return ["gst-launch-1.0", "-q", "-e"] + desc.split()
+    return gst_launch(desc)
 
 
 # --------------------------------------------------------------------------- #
@@ -181,21 +256,94 @@ def connectors(bus):
         return set()
 
 
-def place_monitor(bus, connector, side, scale):
-    """Move `connector` flush against the primary on `side` and set its scale.
+# Per-monitor settings GetCurrentState reports (monitor properties) and the
+# key ApplyMonitorsConfig takes them back under. A key Mutter doesn't report
+# is left out, so its default never overrides what the user chose; an older
+# Mutter ignores keys it doesn't know.
+MONITOR_PROPS = (("is-underscanning", "underscanning", "b"),
+                 ("color-mode", "color-mode", "u"),         # HDR, GNOME 47+
+                 ("rgb-range", "rgb-range", "u"))           # GNOME 47+
 
-    Rebuilds the whole layout (Mutter applies configs atomically), keeps every
-    other monitor where it is, then shifts everything so the top-left is 0,0 —
-    Mutter rejects layouts with offset or non-adjacent monitors.
+
+def _apply_props(mprops):
+    """The apply-side properties that keep a monitor exactly as it is."""
+    out = {}
+    for reported, key, sig in MONITOR_PROPS:
+        if reported in mprops:
+            value = mprops[reported]
+            out[key] = GLib.Variant(sig, bool(value) if sig == "b" else value)
+    return out
+
+
+def _overlaps(a, b):
+    """True if rectangles (x, y, w, h) share any area (touching is fine)."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+
+def place_beside(anchor, others, ext_size, side):
+    """Top-left for a w x h monitor on `side` of `anchor`, overlapping none.
+
+    `anchor` and `others` are (x, y, w, h) rectangles (anchor among others).
+    Flush against the anchor, top/left-aligned with it, when that spot is
+    free. If another monitor is in the way, go to the outermost edge of the
+    whole layout on that side instead and line up with the monitor that
+    forms that edge (the one nearest the anchor), so the new monitor still
+    shares an edge with something (Mutter rejects detached monitors).
+    """
+    ax, ay, aw, ah = anchor
+    ew, eh = ext_size
+    horizontal = side in ("left", "right")
+    if side == "left":
+        spot = (ax - ew, ay)
+    elif side == "up":
+        spot = (ax, ay - eh)
+    elif side == "down":
+        spot = (ax, ay + ah)
+    else:
+        spot = (ax + aw, ay)
+    if not any(_overlaps((*spot, ew, eh), r) for r in others):
+        return spot
+
+    # Monitor edge on `side` of each rectangle; the outermost one wins.
+    def edge(r):
+        x, y, w, h = r
+        return {"left": x, "up": y, "down": y + h}.get(side, x + w)
+
+    outer = (min if side in ("left", "up") else max)(edge(r) for r in others)
+    # Line up with the edge-forming monitor closest to the anchor, along
+    # the edge: same row for left/right, same column for up/down.
+    along = (lambda r: abs(r[1] - ay)) if horizontal else \
+        (lambda r: abs(r[0] - ax))
+    rx, ry, _rw, _rh = min((r for r in others if edge(r) == outer), key=along)
+    if side == "left":
+        return outer - ew, ry
+    if side == "up":
+        return rx, outer - eh
+    if side == "down":
+        return rx, outer
+    return outer, ry
+
+
+def place_monitor(bus, connector, side, scale):
+    """Put `connector` on `side` of the primary monitor and set its scale.
+
+    Mutter applies a whole layout at once, so every other monitor is re-sent
+    exactly as GetCurrentState reports it: same mode, scale, transform,
+    primary flag, position (relative to each other) and per-monitor settings
+    such as underscan and HDR colour mode. The layout is then shifted so its
+    top-left is 0,0, which Mutter requires. Nothing is sent if the virtual
+    monitor is already where it should be. Returns True if a change was sent.
     """
     serial, monitors, logicals, props = display_state(bus)
     physical = props.get("layout-mode", 1) == 2
 
-    current = {}                                  # connector -> (mode_id, w, h, scales)
-    for spec, modes, _mprops in monitors:
-        for mid, w, h, _rate, _pref, scales, mprops in modes:
-            if mprops.get("is-current"):
-                current[spec[0]] = (mid, w, h, scales)
+    current = {}            # connector -> (mode_id, w, h, scales, apply props)
+    for spec, modes, mprops in monitors:
+        for mid, w, h, _rate, _pref, scales, modeprops in modes:
+            if modeprops.get("is-current"):
+                current[spec[0]] = (mid, w, h, scales, _apply_props(mprops))
 
     lms = []
     for x, y, sc, transform, primary, specs, _lp in logicals:
@@ -204,45 +352,113 @@ def place_monitor(bus, connector, side, scale):
     ext = next((lm for lm in lms if connector in lm["conns"]), None)
     if ext is None or connector not in current:
         raise RuntimeError(f"virtual monitor {connector} not in layout yet")
+    if any(c not in current for lm in lms for c in lm["conns"]):
+        raise RuntimeError("a monitor has no current mode (layout changing)")
 
-    if scale:
-        supported = current[connector][3] or [1.0]
-        ext["scale"] = min(supported, key=lambda s: abs(s - scale))
+    def layout():
+        """The layout as plain values, normalised to 0,0, for comparison."""
+        minx = min(lm["x"] for lm in lms)
+        miny = min(lm["y"] for lm in lms)
+        return [(lm["x"] - minx, lm["y"] - miny, float(lm["scale"]),
+                 lm["transform"], bool(lm["primary"]), tuple(lm["conns"]))
+                for lm in lms]
 
-    def size(lm):
-        _mid, w, h, _sc = current[lm["conns"][0]]
-        if lm["transform"] % 2:                   # 90 / 270 degrees
-            w, h = h, w
-        if physical:
-            return w, h
-        return int(round(w / lm["scale"])), int(round(h / lm["scale"]))
+    before = layout()
 
     others = [lm for lm in lms if lm is not ext]
-    if others:
-        pr = next((lm for lm in others if lm["primary"]), others[0])
-        pw, ph = size(pr)
-        ew, eh = size(ext)
-        ext["x"], ext["y"] = {
-            "left": (pr["x"] - ew, pr["y"]),
-            "up": (pr["x"], pr["y"] - eh),
-            "down": (pr["x"], pr["y"] + ph),
-        }.get(side, (pr["x"] + pw, pr["y"]))
-        ext["primary"] = False
+    if scale:
+        supported = current[connector][3] or [1.0]
+        if props.get("global-scale-required") and others:
+            # This Mutter can only use one scale for all monitors.
+            ext["scale"] = others[0]["scale"]
+        else:
+            ext["scale"] = min(supported, key=lambda s: abs(s - scale))
 
-    minx = min(lm["x"] for lm in lms)
-    miny = min(lm["y"] for lm in lms)
-    config = [(lm["x"] - minx, lm["y"] - miny, float(lm["scale"]),
-               lm["transform"], lm["primary"],
-               [(c, current[c][0], {}) for c in lm["conns"]])
-              for lm in lms]
+    def rect(lm):
+        _mid, w, h, _sc, _p = current[lm["conns"][0]]
+        if lm["transform"] % 2:                   # 90 / 270 degrees
+            w, h = h, w
+        if not physical:
+            w, h = int(round(w / lm["scale"])), int(round(h / lm["scale"]))
+        return lm["x"], lm["y"], w, h
+
+    if others:
+        # The primary is the anchor (deterministic); if there's none, the
+        # top-left-most monitor.
+        anchor = next((lm for lm in others if lm["primary"]),
+                      min(others, key=lambda lm: (lm["x"], lm["y"])))
+        ext["x"], ext["y"] = place_beside(rect(anchor),
+                                          [rect(lm) for lm in others],
+                                          rect(ext)[2:], side)
+        if ext["primary"]:
+            # Never leave the primary on the phone, and never leave the
+            # layout without one (Mutter rejects a config with no primary).
+            ext["primary"] = False
+            anchor["primary"] = True
+
+    after = layout()
+    if after == before:
+        return False
+
+    config = [(x, y, sc, transform, primary,
+               [(c, current[c][0], current[c][4]) for c in conns])
+              for x, y, sc, transform, primary, conns in after]
+    global_props = {}
+    if props.get("supports-changing-layout-mode") and "layout-mode" in props:
+        # Without it Mutter falls back to its *default* layout mode, which
+        # may not be the one our coordinates were computed in.
+        global_props["layout-mode"] = GLib.Variant("u", props["layout-mode"])
     _call(bus, DC_BUS, DC_PATH, DC_IFACE, "ApplyMonitorsConfig",
           GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})",
-                       (serial, APPLY_TEMPORARY, config, {})))
+                       (serial, APPLY_TEMPORARY, config, global_props)))
+    return True
 
 
 # --------------------------------------------------------------------------- #
 # Touch input (Mutter RemoteDesktop)
 # --------------------------------------------------------------------------- #
+
+class _DBusWorker:
+    """A thread with its own GLib main loop, for asynchronous D-Bus calls.
+
+    An async Gio call delivers its reply on the main context it was made
+    from, and nothing iterates the default context during a session. So the
+    calls are made from here: run(fn) queues fn onto this loop (in order) and
+    returns at once, and the replies are handled here too.
+    """
+
+    def __init__(self, name):
+        self._ctx = GLib.MainContext.new()
+        self._loop = GLib.MainLoop.new(self._ctx, False)
+        self._thread = threading.Thread(target=self._main, name=name,
+                                        daemon=True)
+        self._thread.start()
+
+    def _main(self):
+        self._ctx.push_thread_default()   # async replies come back here
+        try:
+            self._loop.run()
+        finally:
+            self._ctx.pop_thread_default()
+
+    def run(self, fn):
+        """Run fn() on the worker thread, after everything queued before."""
+        def once():
+            fn()
+            return False                   # one-shot source
+        source = GLib.idle_source_new()
+        source.set_callback(once)
+        source.attach(self._ctx)           # thread-safe; wakes the loop
+
+    def drain(self, timeout):
+        """Wait (up to `timeout` s) until everything queued so far has run."""
+        done = threading.Event()
+        self.run(done.set)
+        return done.wait(timeout)
+
+    def stop(self):
+        self.run(self._loop.quit)
+
 
 class MutterTouchscreen:
     """Touches injected through a RemoteDesktop session onto our stream.
@@ -250,9 +466,18 @@ class MutterTouchscreen:
     Mutter takes coordinates in the stream's own pixel space (the virtual
     monitor's width x height), so fractions from the phone are scaled by the
     monitor size we asked for.
+
+    Calls never block the caller: gnome-shell answers on its main loop,
+    which is busiest exactly while a drag is being composited, and a
+    synchronous round-trip per event would stall the thread that also sends
+    the video. Each call is sent asynchronously from a _DBusWorker. Down and
+    up are always sent, in order; motion is coalesced per finger while
+    MAX_IN_FLIGHT calls are unanswered, so a slow gnome-shell sees fewer,
+    newer positions instead of a growing backlog.
     """
 
     slot_count = 10
+    MAX_IN_FLIGHT = 4
 
     def __init__(self, bus, rd_session, stream_path, width, height):
         self.description = "Mutter RemoteDesktop touch on the virtual monitor"
@@ -263,42 +488,81 @@ class MutterTouchscreen:
         self._height = height
         self._active_slots = set()
         self._warned = False
+        self._worker = _DBusWorker("tandem-mutter-touch")
+        # Worker-thread state only (no lock needed):
+        self._in_flight = 0
+        self._pending_motion = {}         # slot -> (px, py), newest only
 
     def down(self, slot, x, y):
         self._active_slots.add(slot)
-        self._notify("NotifyTouchDown", "(sudd)",
-                     (self._stream, slot, *self._to_pixels(x, y)))
+        px, py = self._to_pixels(x, y)
+        self._worker.run(lambda: self._send_now(
+            slot, "NotifyTouchDown", "(sudd)", (self._stream, slot, px, py)))
 
     def move(self, slot, x, y):
         if slot in self._active_slots:
-            self._notify("NotifyTouchMotion", "(sudd)",
-                         (self._stream, slot, *self._to_pixels(x, y)))
+            px, py = self._to_pixels(x, y)
+            self._worker.run(lambda: self._send_motion(slot, px, py))
 
     def up(self, slot):
         if slot in self._active_slots:
             self._active_slots.discard(slot)
-            self._notify("NotifyTouchUp", "(u)", (slot,))
+            self._worker.run(lambda: self._send_now(
+                slot, "NotifyTouchUp", "(u)", (slot,)))
 
     def release_all(self):
         for slot in sorted(self._active_slots):
             self.up(slot)
 
     def close(self):
-        self.release_all()      # the session itself is stopped in teardown()
+        """Lift every finger and let the calls go out before the session is
+        stopped in teardown(), then end the worker thread."""
+        self.release_all()
+        self._worker.drain(1.0)
+        self._worker.stop()
 
     def _to_pixels(self, x, y):
         x = min(max(x, 0.0), 1.0)
         y = min(max(y, 0.0), 1.0)
         return x * (self._width - 1), y * (self._height - 1)
 
-    def _notify(self, method, signature, values):
+    # -- worker thread ------------------------------------------------------ #
+
+    def _send_motion(self, slot, px, py):
+        if self._in_flight >= self.MAX_IN_FLIGHT:
+            self._pending_motion[slot] = (px, py)  # replaced by newer ones
+            return
+        self._pending_motion.pop(slot, None)
+        self._call("NotifyTouchMotion", "(sudd)", (self._stream, slot, px, py))
+
+    def _send_now(self, slot, method, signature, values):
+        """Down / up: never coalesced or dropped. A finger's held-back
+        motion goes first so its last position isn't lost."""
+        held = self._pending_motion.pop(slot, None)
+        if held:
+            self._call("NotifyTouchMotion", "(sudd)",
+                       (self._stream, slot, *held))
+        self._call(method, signature, values)
+
+    def _call(self, method, signature, values):
+        self._bus.call(RD_BUS, self._session, RD_SESSION_IFACE, method,
+                       GLib.Variant(signature, values), None,
+                       Gio.DBusCallFlags.NO_AUTO_START, 1000, None,
+                       self._on_reply, None)
+        self._in_flight += 1               # only once a reply is owed
+
+    def _on_reply(self, bus, result, *_user_data):
+        self._in_flight -= 1
         try:
-            _call(self._bus, RD_BUS, self._session, RD_SESSION_IFACE, method,
-                  GLib.Variant(signature, values), timeout=1000)
+            bus.call_finish(result)
         except Exception as e:
             if not self._warned:          # once, not at 120 events/s
                 self._warned = True
                 log(f"warning: touch event rejected by Mutter ({e})")
+        # A reply frees a slot: send the newest held-back motion, if any.
+        if self._pending_motion and self._in_flight < self.MAX_IN_FLIGHT:
+            slot, (px, py) = next(iter(self._pending_motion.items()))
+            self._send_motion(slot, px, py)
 
 
 # --------------------------------------------------------------------------- #
@@ -319,6 +583,9 @@ class GnomeBackend:
         self.proc = None
         self.connector = None
         self._before = set()
+        # apply_live (control thread) and the placement watcher can run at
+        # once; two ApplyMonitorsConfig calls on one serial would fail.
+        self._place_lock = threading.Lock()
 
     @staticmethod
     def missing():
@@ -409,6 +676,12 @@ class GnomeBackend:
                                  self.a.width, self.a.height)
 
     def start_capture(self):
+        """Start the encoder on our PipeWire node; returns its H.264 stream.
+
+        Safe to call again after stop_capture() (or after gst-launch exited
+        on its own, e.g. a renegotiation) within one session: the virtual
+        monitor and touch session belong to setup()/teardown(), not to this.
+        """
         a = self.a
         if a.codec != "h264":
             log("note: GNOME backend encodes h264 only; ignoring codec "
@@ -416,58 +689,106 @@ class GnomeBackend:
         enc = pick_encoder(getattr(a, "encoder", None))
         if not enc:
             raise RuntimeError("no usable GStreamer H.264 encoder found")
+        self.stop_capture()                 # never two encoders on one node
         rfd, wfd = os.pipe()
         cmd = build_pipeline(self.node, a.width, a.height,
-                             bitrate_kbps(a.bitrate), a.gop, enc, fd=wfd)
+                             bitrate_kbps(a.bitrate), a.gop, enc, fd=wfd,
+                             fps=getattr(a, "fps", 60) or 60)
         log(f"encoder {enc}; capture cmd: " + " ".join(cmd))
-        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                                     stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.PIPE, pass_fds=(wfd,))
-        os.close(wfd)              # our copy; EOF arrives when gst exits
-        threading.Thread(target=self._gst_log, daemon=True).start()
-        threading.Thread(target=self._place_when_ready, daemon=True).start()
+        try:
+            # Own session: a Ctrl-C or hangup on the launching terminal
+            # must not kill the encoder behind the daemon's back. It still
+            # dies with the daemon: its next write to the pipe gets EPIPE,
+            # and the PipeWire node goes when our D-Bus connection closes.
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE, pass_fds=(wfd,),
+                                    start_new_session=True)
+        except BaseException:
+            os.close(rfd)
+            raise
+        finally:
+            os.close(wfd)          # our copy; EOF arrives when gst exits
+        self.proc = proc
+        # Both threads get *this* process: after a restart, self.proc is the
+        # next one and the old threads must finish with the old one.
+        threading.Thread(target=self._gst_log, args=(proc,),
+                         daemon=True).start()
+        threading.Thread(target=self._place_when_ready, args=(proc,),
+                         daemon=True).start()
         return os.fdopen(rfd, "rb", buffering=0)
 
-    def _gst_log(self):
-        for line in self.proc.stderr:
+    @staticmethod
+    def _gst_log(proc):
+        for line in proc.stderr:
             line = line.decode("utf-8", "replace").rstrip()
             if line:
                 log("gst: " + line)
 
-    def _place_when_ready(self):
-        """Wait for Mutter to add the monitor (after caps negotiate), place it."""
+    def _place_when_ready(self, proc):
+        """Wait for Mutter to add the monitor (after caps negotiate), place it.
+
+        Keeps watching for a few seconds after that: on a capture restart
+        Mutter may drop the old virtual monitor and add a new one (possibly
+        under a new connector name, at its default spot) once the new
+        pipeline negotiates. place_monitor sends nothing when the monitor is
+        already in place, so re-checking is free of flicker.
+        """
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and self.proc.poll() is None:
+        settle_until = None
+        error = None
+        while time.monotonic() < deadline and proc.poll() is None:
+            if settle_until and time.monotonic() > settle_until:
+                return
             new = connectors(bus) - self._before
             if new:
-                self.connector = sorted(new)[0]
-                log(f"virtual monitor appeared as {self.connector}")
-                self.apply_live(self.a.side, self.a.scale, bus)
-                return
-            time.sleep(0.2)
-        log("warning: virtual monitor never appeared in DisplayConfig")
+                connector = (self.connector if self.connector in new
+                             else sorted(new)[0])
+                if connector != self.connector:
+                    self.connector = connector
+                    log(f"virtual monitor appeared as {connector}")
+                # Errors are expected while Mutter is still adding it to
+                # the layout; only the last one is worth reporting.
+                error = self._place(self.a.side, self.a.scale, bus)
+                if error is None:
+                    settle_until = settle_until or time.monotonic() + 5
+            time.sleep(0.25)
+        if settle_until is None and proc.poll() is None:
+            log("warning: could not place virtual monitor "
+                f"({error or 'it never appeared in DisplayConfig'})")
 
     def apply_live(self, side, scale, bus=None):
         if not self.connector:
             return False
+        error = self._place(side, scale, bus)
+        if error:
+            log(f"warning: could not place virtual monitor ({error})")
+        return error is None
+
+    def _place(self, side, scale, bus=None):
+        """place_monitor under the lock; returns None or the error."""
         try:
-            place_monitor(bus or Gio.bus_get_sync(Gio.BusType.SESSION, None),
-                          self.connector, side, scale)
-            log(f"placed {self.connector} side={side} scale={scale}")
-            return True
+            with self._place_lock:
+                changed = place_monitor(
+                    bus or Gio.bus_get_sync(Gio.BusType.SESSION, None),
+                    self.connector, side, scale)
         except Exception as e:
-            log(f"warning: could not place virtual monitor ({e})")
-            return False
+            return e
+        if changed:
+            log(f"placed {self.connector} side={side} scale={scale}")
+        return None
 
     def stop_capture(self):
-        p = self.proc
+        """Stop the encoder only (the virtual monitor stays). Idempotent."""
+        p, self.proc = self.proc, None
         if p and p.poll() is None:
             p.terminate()
             try:
                 p.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 p.kill()
+                p.wait()
 
     def teardown(self):
         """Stop the session: Mutter removes the monitor and rehomes windows.

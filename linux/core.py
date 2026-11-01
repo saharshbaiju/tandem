@@ -497,6 +497,130 @@ def firewall_check(port: int):
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Port selection: never fight another program for the port
+# --------------------------------------------------------------------------- #
+
+PORT_SEARCH = 50          # how far past the configured port to look
+
+
+def port_free(port: int) -> bool:
+    """True if the daemon could listen on `port` on every interface right now.
+
+    Binds like tandemd's listener: dual-stack [::] (IPv4 + IPv6) when the
+    kernel has IPv6, else 0.0.0.0, with SO_REUSEADDR. So a program on only
+    127.0.0.1 (Flask's default) or only [::1] counts as taking the port.
+    """
+    attempts = []
+    if socket.has_ipv6:
+        attempts.append((socket.AF_INET6, "::"))
+    attempts.append((socket.AF_INET, "0.0.0.0"))
+    for family, host in attempts:
+        try:
+            s = socket.socket(family, socket.SOCK_STREAM)
+        except OSError:
+            continue                    # IPv6 disabled: try the IPv4 bind
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+        finally:
+            s.close()
+    return False
+
+
+def port_owner(port: int):
+    """(pid, argv) of the process listening on TCP `port`, or (None, []).
+
+    `ss -p` only names processes of the current user (without root), which
+    covers the usual case: another of your own programs on the port.
+    """
+    try:
+        out = subprocess.run(["ss", "-ltnpH", f"sport = :{port}"],
+                             capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None, []
+    m = re.search(r"pid=(\d+)", out)
+    if not m:
+        return None, []
+    pid = int(m.group(1))
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            argv = [a.decode("utf-8", "replace")
+                    for a in f.read().split(b"\x00") if a]
+    except OSError:
+        argv = []
+    return pid, argv
+
+
+def tandemd_running() -> bool:
+    """True if a Tandem daemon of this user is running (same test as
+    tandemd.kill_stale: a python process whose argv ends in tandemd.py)."""
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            if os.stat(f"/proc/{entry}").st_uid != os.getuid():
+                continue                # another user's: we can't stop it
+            with open(f"/proc/{entry}/cmdline", "rb") as f:
+                args = [a.decode("utf-8", "replace")
+                        for a in f.read().split(b"\x00") if a]
+        except OSError:
+            continue
+        if (any(a.endswith("tandemd.py") for a in args)
+                and any("python" in a for a in args)):
+            return True
+    return False
+
+
+def describe_process(pid, argv) -> str:
+    """'python app.py (pid 123, in ~/project)' for messages."""
+    if pid is None:
+        return "another program"
+    name = " ".join([os.path.basename(argv[0])] + argv[1:3]) if argv else "?"
+    try:
+        cwd = os.readlink(f"/proc/{pid}/cwd").replace(os.path.expanduser("~"),
+                                                      "~", 1)
+        return f"{name} (pid {pid}, in {cwd})"
+    except OSError:
+        return f"{name} (pid {pid})"
+
+
+def choose_port(cfg: Config) -> str:
+    """Make sure the daemon can listen on cfg.port; returns a note or "".
+
+    A leftover Tandem daemon on the port is fine: the new daemon stops it
+    (tandemd.kill_stale). Any other program keeps its port, and Tandem moves to
+    the next free one instead. The new port is saved, so the QR code stays the
+    same from then on and phones only rescan once.
+    """
+    if port_free(cfg.port):
+        return ""
+    pid, argv = port_owner(cfg.port)
+    if any(a.endswith("tandemd.py") for a in argv):
+        return ""
+    if pid is None and tandemd_running():
+        # `ss` is missing or couldn't name the owner, but one of our daemons
+        # is running: almost certainly the holder, and the new daemon stops
+        # it. Moving the port would break every paired phone for nothing.
+        return ""
+    owner = describe_process(pid, argv)
+    for port in range(cfg.port + 1, min(cfg.port + PORT_SEARCH, 65535) + 1):
+        if port_free(port):
+            old, cfg.port = cfg.port, port
+            saved = load_config()         # persist the port, nothing else
+            saved.port = port
+            save_config(saved)
+            return (f"port {old} is used by {owner}; Tandem now uses port "
+                    f"{port} — rescan the QR code on the phone")
+    return (f"port {cfg.port} is used by {owner} and no free port was found "
+            "near it; pick another one in Configure → Port")
+
+
 _adb_reverse_cache = {}
 
 

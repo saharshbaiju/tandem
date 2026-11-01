@@ -5,6 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.res.ColorStateList
+import android.graphics.Rect
+import android.net.ConnectivityManager
+import android.net.LinkAddress
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +28,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -29,6 +37,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Connect screen (Material 3) -> water-ripple transition -> full-bleed desktop.
@@ -44,7 +54,14 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
  *
  * Touch: while LIVE, and when the computer has touch input on, every touch
  * on the video goes to the computer (see [TouchForwarder]). Without touch, a
- * tap on the video just peeks the edge handle.
+ * tap on the video just peeks the edge handle. On Android 10+ the middle of
+ * each side edge is excluded from the back gesture then, so dragging a window
+ * off the phone's edge isn't cancelled by the system.
+ *
+ * While streaming: a low-latency Wi-Fi lock is held, the display's fastest
+ * refresh rate is requested (so a 120 Hz phone doesn't sit at 60), and
+ * a network change (Wi-Fi back, cable plugged) retries a pending reconnect
+ * at once instead of waiting out the backoff.
  *
  * Security: a computer is only ever connected to with its pairing key (and,
  * from a QR, its certificate fingerprint); see [SecureChannel]. A link from
@@ -75,11 +92,12 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     private var serverConfig: ServerConfig? = null
     private var touchAllowed = false       // the computer accepted our pairing key
     private var touchRefusedReason = ""    // why not, shown in the side sheet
-    private val touchForwarder = TouchForwarder { action, finger, x, y ->
-        session?.sendTouch(action, finger, x, y)
-    }
+    private val touchForwarder = TouchForwarder { points -> session?.sendTouches(points) }
     private var linkHost = ""
+    private var stopNote = ""              // why the last session dropped, for the sheet
+    private var retryNotBefore = 0L        // uptimeMillis: the computer asked us to wait until then
     private var wifiLock: WifiManager.WifiLock? = null
+    private val networks by lazy { NetworkWatcher(this) { lost -> ui.post { onNetworksChanged(lost) } } }
 
     private val autoHide = Runnable { fadeChrome() }
     private val reconnect = Runnable { launchSession() }
@@ -98,6 +116,14 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         b.surface.holder.addCallback(this)
+        // Keep the picture clear of a punch-hole camera where the letterbox allows.
+        ViewCompat.setOnApplyWindowInsetsListener(b.surface) { _, insets ->
+            val cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            b.surface.setSafeInsets(cut.left, cut.top, cut.right, cut.bottom)
+            insets
+        }
+        b.surface.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateGestureExclusion() }
+        networks.start()
         b.primaryBtn.setOnClickListener { onPrimary() }
         b.scanBtn.setOnClickListener { scan() }
         b.manualBtn.setOnClickListener { toggleManual() }
@@ -260,7 +286,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         render()
     }
 
-    private fun setTarget(t: ConnectTarget) {
+    private fun setTarget(newTarget: ConnectTarget) {
+        // a fresh QR of the same computer keeps the address that last worked
+        val t = newTarget.keepingLastGoodHostOf(target)
         target = t
         t.save(prefs)
         hideError()
@@ -304,7 +332,6 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         rippleStartedAt = SystemClock.uptimeMillis()
         b.connectScreen.startRipple(x, y)
         setState(State.CONNECTING)
-        acquireWifiLock()
         launchSession()
     }
 
@@ -312,7 +339,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         val t = target ?: return
         if (!surfaceReady || !wantConnected || session != null) return
         setTouchState(false, "")       // until the new session's INPT arrives
-        session = StreamSession(t, appVersion(), b.surface.holder.surface, this)
+        acquireWifiLock()
+        session = StreamSession(t, appVersion(), b.surface.holder.surface, this, networks::networkFor)
     }
 
     private fun userDisconnect(why: String) {
@@ -347,6 +375,11 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     override fun onConnected(session: StreamSession, host: String) = runOnUiThread {
         if (session !== this.session) return@runOnUiThread
         linkHost = host
+        // Remember the address that worked: it's tried first next time, and
+        // even after a newer QR of this computer lists other addresses.
+        target?.takeIf { host.isNotEmpty() && it.lastGoodHost != host }?.let {
+            target = it.copy(lastGoodHost = host).also { t -> t.save(prefs) }
+        }
         if (state == State.CONNECTING) {
             ui.removeCallbacks(noVideoWatchdog)
             ui.postDelayed(noVideoWatchdog, 10_000)
@@ -358,6 +391,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         ui.removeCallbacks(noVideoWatchdog)
         everStreamed = true
         reconnectAttempt = 0
+        stopNote = ""
         val wasConnecting = state == State.CONNECTING
         setState(State.LIVE)
         if (wasConnecting) {
@@ -390,6 +424,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         if (session !== this.session) return@runOnUiThread
         serverConfig = config
         fillSheet()
+        applyFrameRate()
     }
 
     override fun onInputState(session: StreamSession, touchAllowed: Boolean, reason: String) =
@@ -402,14 +437,19 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         touchAllowed = allowed
         touchRefusedReason = refusedReason
         fillSheet()
+        updateGestureExclusion()
     }
 
-    override fun onStopped(session: StreamSession, reason: String?, final: Boolean) = runOnUiThread {
+    override fun onStopped(session: StreamSession, reason: String?, final: Boolean,
+                           retryAfterMs: Long) = runOnUiThread {
         if (session !== this.session) return@runOnUiThread
         this.session = null
         setTouchState(false, "")
         if (!wantConnected) return@runOnUiThread
-        if (final) {
+        // Once this computer streamed to us it does speak TLS: a garbled
+        // answer now is a broken link, not an outdated computer.
+        val isFinal = final && !(everStreamed && reason == StreamSession.OUTDATED_COMPUTER)
+        if (isFinal) {
             // Wrong pairing code, a different computer, an outdated version:
             // retrying can't fix it. Back to the connect screen, say why.
             failConnect(friendlyError(reason))
@@ -422,8 +462,11 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         }
         // It worked before: keep the last frame up and retry with backoff
         // (cable re-plugged, Wi-Fi roam, daemon restarted for a config change).
+        stopNote = reason.orEmpty()
         setState(State.RECONNECTING)
-        val delay = BACKOFF_MS[reconnectAttempt.coerceAtMost(BACKOFF_MS.size - 1)]
+        // the computer may ask us to wait longer (e.g. all phone slots taken)
+        val delay = maxOf(BACKOFF_MS[reconnectAttempt.coerceAtMost(BACKOFF_MS.size - 1)], retryAfterMs)
+        retryNotBefore = SystemClock.uptimeMillis() + retryAfterMs
         reconnectAttempt++
         ui.removeCallbacks(reconnect)
         ui.postDelayed(reconnect, delay)
@@ -452,6 +495,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         state = s
         render()
         fillSheet()
+        updateGestureExclusion()
+        applyFrameRate()
         if (s == State.RECONNECTING) showChrome()
         if (s == State.IDLE) {
             // no live chrome on the connect screen (a tap while connecting
@@ -532,6 +577,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         b.controlSheet.animate().translationX(0f).setDuration(380)
             .setInterpolator(EMPHASIZED).start()
         b.edgeHandle.animate().alpha(0f).setDuration(150).start()
+        updateGestureExclusion()
     }
 
     private fun closeSheet() {
@@ -542,6 +588,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         b.controlSheet.animate().translationX(b.controlSheet.width + dp(24f))
             .setDuration(300).setInterpolator(EMPHASIZED).start()
         if (state != State.IDLE) showChrome()
+        updateGestureExclusion()
     }
 
     private fun fillSheet() {
@@ -555,7 +602,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         }
         b.sheetSubtitle.text = when (state) {
             State.LIVE -> "Connected via $link  ·  $linkHost"
-            State.RECONNECTING -> "Reconnecting…"
+            State.RECONNECTING -> if (stopNote.isEmpty()) "Reconnecting…" else "Reconnecting… ($stopNote)"
             State.CONNECTING -> "Connecting…"
             State.IDLE -> "Not connected"
         }
@@ -627,6 +674,92 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         }
     }
 
+    // ------------------------------------------------------- streaming extras
+
+    /**
+     * Android 10+: while touches go to the desktop, take the middle of each
+     * side edge away from the back gesture (the system allows ~200 dp per
+     * edge), so a drag that reaches the edge isn't cancelled mid-way. The
+     * rest of the edge still opens the sheet.
+     */
+    private fun updateGestureExclusion() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val v = b.surface
+        val exclude = state == State.LIVE && touchAllowed && !sheetOpen && v.width > 0 && v.height > 0
+        v.systemGestureExclusionRects = if (!exclude) emptyList() else {
+            val edge = dp(EDGE_EXCLUSION_WIDTH_DP).toInt()
+            val tall = minOf(v.height, dp(EDGE_EXCLUSION_HEIGHT_DP).toInt())
+            val top = (v.height - tall) / 2
+            listOf(Rect(0, top, edge, top + tall), Rect(v.width - edge, top, v.width, top + tall))
+        }
+    }
+
+    /**
+     * While streaming, ask for the display's fastest refresh rate at the
+     * current resolution, preferring one that is a whole multiple of the
+     * stream's fps (a 60 fps stream on a 144/120 Hz panel gets 120 Hz: no
+     * judder). OEM video heuristics often hold a full-screen SurfaceView at
+     * 60 Hz, which adds vsync wait to every frame and slows touch sampling.
+     * Cleared when idle so the phone's own policy applies again.
+     *
+     * Deliberately not Surface.setFrameRate(fps, FIXED_SOURCE): that tells
+     * the system the content *is* fps, and it then happily drops a 120 Hz
+     * panel to 60 Hz for a 60 fps stream, doubling the scan-out wait.
+     * preferredDisplayModeId works the same on every API level we support.
+     */
+    private fun applyFrameRate() {
+        val streaming = state == State.LIVE || state == State.RECONNECTING
+        val mode = if (streaming) displayModeFor(serverConfig?.fps ?: 0) else 0
+        val attrs = window.attributes
+        if (attrs.preferredDisplayModeId != mode) {
+            attrs.preferredDisplayModeId = mode
+            window.attributes = attrs
+        }
+    }
+
+    /**
+     * The display mode at the current resolution with the highest refresh
+     * rate that is a whole multiple of [fps], else the highest one
+     * (also when [fps] is 0 = unknown). 0 = no preference.
+     */
+    private fun displayModeFor(fps: Int): Int {
+        val screen = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) this.display
+                      else @Suppress("DEPRECATION") windowManager.defaultDisplay) ?: return 0
+        val current = screen.mode
+        val sameSize = screen.supportedModes.filter {
+            it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight
+        }
+        fun isMultiple(rate: Float): Boolean {
+            if (fps <= 0) return false
+            val ratio = rate / fps
+            return ratio >= 0.99f && kotlin.math.abs(ratio - kotlin.math.round(ratio)) < 0.02f
+        }
+        val best = sameSize.filter { isMultiple(it.refreshRate) }.maxByOrNull { it.refreshRate }
+            ?: sameSize.maxByOrNull { it.refreshRate }
+        return best?.modeId ?: 0
+    }
+
+    /**
+     * A network came or went. A pending reconnect retries at once (Wi-Fi
+     * back, cable plugged in). If the network carrying a live stream went
+     * away, end that session now rather than after the read timeout.
+     */
+    private fun onNetworksChanged(lost: LinkProperties?) {
+        if (!wantConnected) return
+        if (lost != null && state == State.LIVE && NetworkWatcher.holds(lost, linkHost)) {
+            Log.i(TAG, "the network carrying the stream went away")
+            session?.stop()
+            return
+        }
+        if (state == State.RECONNECTING && session == null) {
+            ui.removeCallbacks(reconnect)
+            reconnectAttempt = 0
+            // ...but still no sooner than the computer asked (all slots taken)
+            val wait = maxOf(NETWORK_SETTLE_MS, retryNotBefore - SystemClock.uptimeMillis())
+            ui.postDelayed(reconnect, wait)
+        }
+    }
+
     @SuppressLint("WifiManagerLeak")
     private fun acquireWifiLock() {
         if (wifiLock?.isHeld == true) return
@@ -648,6 +781,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         surfaceReady = true
+        applyFrameRate()
         if (wantConnected) launchSession()
     }
 
@@ -660,6 +794,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         val s = session
         session = null
         s?.stopAndJoin()
+        // in the background: no stream, so no reason to keep Wi-Fi awake
+        releaseWifiLock()
         if (wantConnected && everStreamed) setState(State.RECONNECTING)
     }
 
@@ -669,12 +805,82 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         ui.removeCallbacksAndMessages(null)
         session?.stop()
         releaseWifiLock()
+        networks.stop()
     }
 
     companion object {
         private const val TAG = "MainActivity"
         private const val MIN_RIPPLE_MS = 550L
         private val BACKOFF_MS = longArrayOf(300, 800, 1500, 2500, 3000)
+        private const val NETWORK_SETTLE_MS = 300L     // let routes / DHCP settle first
+        private const val EDGE_EXCLUSION_WIDTH_DP = 32f
+        private const val EDGE_EXCLUSION_HEIGHT_DP = 200f
         private val EMPHASIZED = PathInterpolator(0.2f, 0f, 0f, 1f)
+    }
+}
+
+/**
+ * Tracks the phone's networks and their addresses, including ones without
+ * internet (a PC hotspot, a travel router, Ethernet): VPNs are left out.
+ * [networkFor] tells [StreamSession] which network holds a computer's
+ * address on its subnet so the socket can be bound to it; [onChange] fires
+ * (on a system thread) when networks come or go, with the lost network's
+ * properties when one went away.
+ */
+private class NetworkWatcher(
+    context: Context,
+    private val onChange: (lost: LinkProperties?) -> Unit,
+) : ConnectivityManager.NetworkCallback() {
+
+    private val cm = context.getSystemService(ConnectivityManager::class.java)
+    private val links = ConcurrentHashMap<Network, LinkProperties>()
+
+    fun start() {
+        val request = NetworkRequest.Builder()
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        try { cm?.registerNetworkCallback(request, this) } catch (e: Exception) {
+            Log.w("NetworkWatcher", "can't watch networks", e)   // reconnects still back off
+        }
+    }
+
+    fun stop() {
+        try { cm?.unregisterNetworkCallback(this) } catch (_: Exception) {}
+        links.clear()
+    }
+
+    fun networkFor(address: InetAddress): Network? =
+        links.entries.firstOrNull { (_, lp) -> lp.linkAddresses.any { onSubnet(it, address) } }?.key
+
+    override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
+        val before = links.put(network, lp)
+        if (before?.linkAddresses != lp.linkAddresses) onChange(null)
+    }
+
+    override fun onLost(network: Network) {
+        onChange(links.remove(network))
+    }
+
+    companion object {
+        /** [host] (an IP literal) is on one of [lp]'s subnets. */
+        fun holds(lp: LinkProperties, host: String): Boolean {
+            // literals only: never a DNS lookup on the UI thread
+            val literal = host.isNotEmpty() && (host.all { it.isDigit() || it == '.' } || ':' in host)
+            if (!literal) return false
+            val address = try { InetAddress.getByName(host) } catch (_: Exception) { return false }
+            return lp.linkAddresses.any { onSubnet(it, address) }
+        }
+
+        private fun onSubnet(link: LinkAddress, address: InetAddress): Boolean {
+            val a = link.address.address
+            val b = address.address
+            if (a.size != b.size || address.isLoopbackAddress) return false
+            val bits = link.prefixLength.coerceIn(0, a.size * 8)
+            for (i in 0 until bits / 8) if (a[i] != b[i]) return false
+            val rest = bits % 8
+            if (rest == 0) return true
+            val mask = (0xFF shl (8 - rest)) and 0xFF
+            return (a[bits / 8].toInt() and mask) == (b[bits / 8].toInt() and mask)
+        }
     }
 }

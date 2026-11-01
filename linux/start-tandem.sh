@@ -22,12 +22,20 @@ if [[ "$MODE" != "usb" && "$MODE" != "wifi" ]]; then
   echo "usage: $0 [usb|wifi] [extra tandemd args]"; exit 1
 fi
 
-TANDEM_HERE="$HERE" "$PY" - "$MODE" "$PORT" <<'EOF'
+# Another program on the port: move to the next free one (core.choose_port).
+PORT_FILE="$(mktemp)"
+trap 'rm -f "$PORT_FILE"' EXIT
+TANDEM_HERE="$HERE" "$PY" - "$MODE" "$PORT" "$PORT_FILE" <<'EOF'
 import os, sys
 sys.path.insert(0, os.environ["TANDEM_HERE"])
 import core, qr
 cfg = core.load_config()
 cfg.transport, cfg.port = sys.argv[1], int(sys.argv[2])
+note = core.choose_port(cfg)
+if note:
+    print(f"\n  {note}\n")
+with open(sys.argv[3], "w") as f:
+    f.write(str(cfg.port))
 uri = core.connect_uri(cfg)
 # black modules on a white field, whatever the terminal theme is
 for line in qr.render_halfblocks(qr.encode(uri, "M"), quiet=2):
@@ -46,6 +54,11 @@ EOF
 # The QR carries the pairing key and the TLS certificate's fingerprint
 # (core.connect_uri creates both on first use); the daemon admits only phones
 # that prove they know that key (see secure_link.py).
+# Ctrl+C or closing the terminal (SIGHUP) stops the daemon cleanly: it stops
+# the encoder and removes the virtual monitor. `kill -USR1 <pid>` re-reads
+# --banner-file (live side/scale changes) instead.
 KEY_FILE="$HOME/.config/tandem/pairing-key"   # core.PAIRING_KEY_PATH
+PORT="$(cat "$PORT_FILE")"
+rm -f "$PORT_FILE"
 exec "$PY" "${HERE}/tandemd.py" --port "${PORT}" \
   --pairing-key-file "${KEY_FILE}" "$@" </dev/null

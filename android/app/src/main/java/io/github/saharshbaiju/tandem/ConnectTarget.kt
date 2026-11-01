@@ -10,9 +10,14 @@ import android.net.Uri
  *
  *     tandem://c?h=192.168.42.129,10.0.0.5&p=5000&n=archbox&k=<key>&f=<fp>&v=2
  *
- * [StreamSession] tries all [hosts] in parallel, so the same QR works over USB
- * tethering and Wi-Fi. Scanning it with the stock camera also opens the app
- * (the manifest registers the `tandem` scheme).
+ * [StreamSession] tries all [candidateHosts] in parallel, so the same QR works
+ * over USB tethering and Wi-Fi. Scanning it with the stock camera also opens
+ * the app (the manifest registers the `tandem` scheme).
+ *
+ * [lastGoodHost] is the address that last connected. It is tried too, even
+ * after a newer QR of the same computer replaced [hosts], since QR addresses
+ * go stale (a new DHCP lease, a new USB-tether subnet). There is no network
+ * discovery: if every address is stale, the QR has to be scanned again.
  *
  * [pairingKey] (`k`) is required: the computer streams nothing to a phone
  * that can't prove it knows it (see [SecureChannel]). [certFingerprint] (`f`,
@@ -25,7 +30,12 @@ data class ConnectTarget(
     val name: String,
     val pairingKey: String,
     val certFingerprint: String = "",
+    val lastGoodHost: String = "",
 ) {
+
+    /** Every address worth trying, the one that last worked first. */
+    val candidateHosts: List<String>
+        get() = (listOf(lastGoodHost) + hosts).filter { it.isNotEmpty() }.distinct()
 
     /** "192.168.42.129 · 10.0.0.5" for display. */
     val addressLine: String get() = hosts.joinToString("  ·  ")
@@ -46,8 +56,14 @@ data class ConnectTarget(
             .putString(KEY_NAME, name)
             .putString(KEY_PAIRING, pairingKey)
             .putString(KEY_CERT, certFingerprint)
+            .putString(KEY_LAST_GOOD, lastGoodHost)
             .apply()
     }
+
+    /** Carry [previous]'s last working address over to this one, if it's the same computer. */
+    fun keepingLastGoodHostOf(previous: ConnectTarget?): ConnectTarget =
+        if (lastGoodHost.isEmpty() && sameComputerAs(previous) && previous != null)
+            copy(lastGoodHost = previous.lastGoodHost) else this
 
     /** Same computer, same credentials (addresses may differ). */
     fun sameComputerAs(other: ConnectTarget?) =
@@ -63,6 +79,7 @@ data class ConnectTarget(
         private const val KEY_NAME = "target_name"
         private const val KEY_PAIRING = "target_pairing_key"
         private const val KEY_CERT = "target_cert_fingerprint"
+        private const val KEY_LAST_GOOD = "target_last_good_host"
 
         fun load(p: SharedPreferences): ConnectTarget? {
             val hosts = p.getString(KEY_HOSTS, null)?.split(',')
@@ -70,7 +87,8 @@ data class ConnectTarget(
             if (hosts.isEmpty()) return null
             return ConnectTarget(hosts, p.getInt(KEY_PORT, DEFAULT_PORT),
                 p.getString(KEY_NAME, "") ?: "", p.getString(KEY_PAIRING, "") ?: "",
-                p.getString(KEY_CERT, "") ?: "")
+                p.getString(KEY_CERT, "") ?: "",
+                p.getString(KEY_LAST_GOOD, "") ?: "")
         }
 
         /** What a scanned QR / opened link turned out to be. */

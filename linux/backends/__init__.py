@@ -12,6 +12,16 @@ Backend interface (duck-typed):
     start_capture()      -> readable binary stream of Annex-B H.264
     apply_live(side, scale) -> re-place / re-scale without restarting
     stop_capture(), teardown()
+
+start_capture() / stop_capture() may be called again within one session
+(after the encoder exits, the daemon restarts capture without tearing down
+the virtual output); stop_capture() is idempotent.
+
+Optional:
+    request_keyframe()   -> True if an IDR will follow soon. Look it up with
+                            getattr(backend, "request_keyframe", None): the
+                            gst-launch based paths (gnome, xdph) can't take
+                            events from outside, so they don't have it.
 """
 
 import os

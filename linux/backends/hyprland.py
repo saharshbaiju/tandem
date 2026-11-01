@@ -12,21 +12,30 @@ memory, which costs Hyprland a GPU readback per frame on its render thread
 NVENC instead, all on the GPU; see xdph.py. wf-recorder stays the fallback.
 
 Touch input: a uinput touchscreen ("tandem-touch", see uinput_touch.py) that
-Hyprland maps onto EXT-1 with `hl.device({ name, output })`, so touches land on
-the phone's monitor and the mouse cursor stays where it is.
+Hyprland maps onto EXT-1, so touches land on the phone's monitor and the mouse
+cursor stays where it is.
 
-Hyprland 0.55 replaced hyprlang with a Lua config parser, so `hyprctl keyword`
-and `hyprctl dispatch` silently fail there. Everything that changes monitors or
-workspaces goes through `hyprctl eval '<lua>'` first and only falls back to the
-legacy keyword form for older Hyprland.
+Golden rule: Tandem only ever writes rules for its *own* output (and the one
+workspace it hosts). It never sends a monitor rule for the user's monitors:
+a runtime rule replaces the user's whole rule, so even a "position only" rule
+resets their mode, refresh, scale, transform, bit depth and VRR. Placement
+uses Hyprland's own `auto-<side>` instead, which is drift-free because the
+headless output is the last monitor Hyprland arranges (see place_output).
+
+Hyprland 0.55 replaced hyprlang with a Lua config, where `hyprctl keyword` and
+`hyprctl dispatch` no longer work. Every state change goes through hypr(),
+which detects the dialect once (dialect()) and sends either `hyprctl eval
+'<lua>'` or the legacy keyword/dispatch form.
 """
 
 import glob
 import json
 import os
+import re
 import select
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -36,117 +45,249 @@ import uinput_touch
 
 from . import gnome, xdph
 
-# Workspace split: the laptop keeps LAPTOP_WS, the phone hosts EXT_WS, so the
-# secondary monitor behaves as a true extension. Bound as rules *before* the
-# output is created, so Hyprland opens EXT on its default workspace (first of
-# EXT_WS) instead of grabbing the lowest free one.
-LAPTOP_WS = range(1, 11)     # workspaces 1..10 stay on the main display
-EXT_WS = range(11, 21)       # workspaces 11..20 live on the phone
+# The phone gets its own workspace (an id above every one the user has, so it
+# never takes over theirs); EXT opens on it because the rule is bound with
+# default=true *before* the output is created.
+FIRST_EXT_WORKSPACE = 11
+
+# How long to wait for Hyprland to apply a monitor rule. The Lua API only
+# schedules the reload for the next frame, so the layout is read back after.
+SETTLE_TIMEOUT = 1.5
 
 
 def log(*a):
     print("[tandemd]", *a, file=sys.stderr, flush=True)
 
 
+# --------------------------------------------------------------------------- #
+# hyprctl plumbing
+# --------------------------------------------------------------------------- #
+
+def _instance_dirs():
+    """Hyprland instance directories (runtime dir first, pre-0.40 /tmp last)."""
+    run = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    return glob.glob(f"{run}/hypr/*/") + glob.glob("/tmp/hypr/*/")
+
+
+_hypr_env = None
+
+
+def _listening(path):
+    """True if a Hyprland answers on this control socket. A crashed session
+    leaves its directory and socket file behind; those must not count."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            s.connect(path)
+        return True
+    except OSError:
+        return False
+
+
+def hypr_env():
+    """Environment for hyprctl: ours, plus the instance signature if missing.
+
+    Started over ssh, from cron or a systemd --user unit, the session's
+    HYPRLAND_INSTANCE_SIGNATURE is not inherited and every hyprctl call fails.
+    If exactly one Hyprland instance is running, talk to that one.
+    """
+    global _hypr_env
+    if _hypr_env is None:
+        env = dict(os.environ)
+        if not env.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            sigs = sorted({os.path.basename(d.rstrip("/"))
+                           for d in _instance_dirs()
+                           if _listening(d + ".socket.sock")})
+            if len(sigs) == 1:
+                env["HYPRLAND_INSTANCE_SIGNATURE"] = sigs[0]
+            elif sigs:
+                log("warning: several Hyprland sessions are running and "
+                    "HYPRLAND_INSTANCE_SIGNATURE is unset; run tandem inside "
+                    "the Hyprland session")
+        _hypr_env = env
+    return _hypr_env
+
+
 def hyprctl(*args):
     return subprocess.run(["hyprctl", *args], capture_output=True, text=True,
-                          timeout=5)
+                          timeout=5, env=hypr_env())
 
 
-def monitors():
+def _ok(r):
+    """hyprctl prints `ok` (or `error: ...` / `unknown request`) on success."""
+    out = (r.stdout or "").strip().lower()
+    return r.returncode == 0 and out.startswith("ok") and "error" not in out
+
+
+def query(*what):
+    """Parsed `hyprctl <what> -j`, or [] if Hyprland can't be read."""
     try:
-        return json.loads(hyprctl("monitors", "-j").stdout)
+        return json.loads(hyprctl(*what, "-j").stdout)
     except Exception:
         return []
 
 
-def logical_size(m):
-    """(width, height) of a monitor in logical pixels (physical / scale).
+def monitors():
+    return query("monitors")
 
-    Hyprland snaps fractional scales to keep logical pixels integer (scale 1.5
-    on a 3392px output becomes 1.6 -> 2120 logical), so we read the snapped
-    size back rather than trusting width/scale.
+
+_dialect = None
+
+
+def dialect():
+    """'lua' (Hyprland >= 0.55, `hyprctl eval`) or 'legacy' (keyword/dispatch).
+
+    Probed once with a no-op Lua chunk. Only a definite answer is cached, so a
+    Hyprland that is momentarily unreachable doesn't pin the wrong dialect.
+    """
+    global _dialect
+    if _dialect:
+        return _dialect
+    try:
+        if _ok(hyprctl("eval", "local _ = 1")):
+            _dialect = "lua"
+        elif query("version"):          # Hyprland answered: no eval -> legacy
+            _dialect = "legacy"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return _dialect or "legacy"
+
+
+def lua_str(s):
+    """A Lua string literal (JSON's escapes are valid Lua for these names)."""
+    return json.dumps(str(s), ensure_ascii=False)
+
+
+def hypr(lua, *legacy):
+    """Run one state change in the running Hyprland's dialect; True on success.
+
+    `lua` is a Lua chunk for `hyprctl eval`, `legacy` the hyprctl argv for
+    Hyprland < 0.55 (e.g. "keyword", "monitor", "..."). Failures are returned,
+    never raised: callers decide whether a failure matters.
+    """
+    try:
+        r = hyprctl("eval", lua) if dialect() == "lua" else hyprctl(*legacy)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return _ok(r)
+
+
+# --------------------------------------------------------------------------- #
+# Layout geometry (read-only)
+# --------------------------------------------------------------------------- #
+
+def logical_size(m):
+    """(width, height) of a monitor in layout (logical) pixels.
+
+    hyprctl reports the mode's pixel size *before* the transform, so a rotated
+    monitor (transform 1/3/5/7) is swapped. Hyprland snaps fractional scales
+    so the logical size is whole (1.5 on 3392 px becomes 1.6 -> 2120), so the
+    live scale is read back rather than trusting the requested one.
     """
     sc = m.get("scale", 1) or 1
-    return int(round(m["width"] / sc)), int(round(m["height"] / sc))
+    w, h = int(round(m["width"] / sc)), int(round(m["height"] / sc))
+    if int(m.get("transform", 0) or 0) % 2 == 1:
+        w, h = h, w
+    return w, h
+
+
+def rect(m):
+    """(x, y, w, h) of a monitor in the layout."""
+    w, h = logical_size(m)
+    return int(m.get("x", 0)), int(m.get("y", 0)), w, h
+
+
+def in_layout(m, own):
+    """True for monitors that take part in the layout, other than ours."""
+    mirror = str(m.get("mirrorOf", "none") or "none")
+    return (m.get("name") != own and not m.get("disabled")
+            and mirror in ("none", "", "-1"))
+
+
+def is_virtual(m):
+    """Headless/virtual outputs (ours, Sunshine's, wayvnc's) have no EDID."""
+    return (str(m.get("name", "")).startswith("HEADLESS-")
+            or not str(m.get("description", "")).strip())
 
 
 def primary_for(name):
-    """The main monitor to anchor against: focused non-EXT, else first non-EXT."""
-    mons = [m for m in monitors() if m.get("name") != name]
-    return (next((m for m in mons if m.get("focused")), None)
-            or (mons[0] if mons else None))
+    """The main monitor: deterministic, never "wherever the cursor is".
 
+    A physical, enabled, non-mirroring monitor; the one at the layout origin
+    if there is one, else the lowest id. Used as the focus target when EXT
+    goes away and for the hardware screen; placement doesn't need an anchor.
+    """
+    mons = [m for m in monitors() if in_layout(m, name)]
+    mons = [m for m in mons if not is_virtual(m)] or mons
+    if not mons:
+        return None
+    at_origin = [m for m in mons if (m.get("x"), m.get("y")) == (0, 0)]
+    return min(at_origin or mons, key=lambda m: m.get("id", 0))
+
+
+def _overlap(a0, a1, b0, b1):
+    return min(a1, b1) - max(a0, b0)
+
+
+def placement_problem(name, side, mons=None):
+    """Why EXT is badly placed on `side` (overlap / gap / wrong side), or "".
+
+    Correct = it touches no other monitor's area, sits beyond every monitor on
+    `side`, and shares an edge with at least one, so the cursor can cross.
+    """
+    mons = monitors() if mons is None else mons
+    me = next((m for m in mons if m.get("name") == name), None)
+    others = [rect(m) for m in mons if in_layout(m, name)]
+    if not me:
+        return f"{name} is missing"
+    if not others:
+        return ""
+    ex, ey, ew, eh = rect(me)
+    for x, y, w, h in others:
+        if _overlap(ex, ex + ew, x, x + w) > 0 and _overlap(ey, ey + eh, y, y + h) > 0:
+            return "overlaps another monitor"
+    # (edge of EXT that faces the layout, matching edge of each other monitor,
+    #  overlap along the shared edge) per side
+    if side == "left":
+        edges = [(ex + ew, x, _overlap(ey, ey + eh, y, y + h)) for x, y, w, h in others]
+        beyond = all(ex + ew <= x for x, *_ in others)
+    elif side == "up":
+        edges = [(ey + eh, y, _overlap(ex, ex + ew, x, x + w)) for x, y, w, h in others]
+        beyond = all(ey + eh <= y for _, y, _, _ in others)
+    elif side == "down":
+        edges = [(ey, y + h, _overlap(ex, ex + ew, x, x + w)) for x, y, w, h in others]
+        beyond = all(ey >= y + h for _, y, _, h in others)
+    else:
+        edges = [(ex, x + w, _overlap(ey, ey + eh, y, y + h)) for x, y, w, h in others]
+        beyond = all(ex >= x + w for x, _, w, _ in others)
+    if not beyond:
+        return f"not {side} of every monitor"
+    if not any(abs(a - b) <= 1 and span > 0 for a, b, span in edges):
+        return "does not touch any monitor"
+    return ""
+
+
+# --------------------------------------------------------------------------- #
+# Our own output: mode, placement, workspace, touch
+# --------------------------------------------------------------------------- #
 
 def set_monitor(name, mode, position, scale):
-    """Apply a monitor mode/position/scale at runtime, returns True on success.
+    """Apply a complete rule to *our* output; returns True on success.
 
-    Uses the Lua `hl.monitor()` API via `hyprctl eval` (Hyprland >= 0.55),
-    falling back to the legacy `keyword monitor` form for older versions.
-    `hyprctl eval` prints `ok` / `error: ...`, so we check stdout too.
+    Never call this for a user's monitor (see the module docstring).
     """
-    lua = (f'hl.monitor({{ output = "{name}", mode = "{mode}", '
-           f'position = "{position}", scale = {scale} }})')
-    r = hyprctl("eval", lua)
-    out = (r.stdout or "").lower()
-    if r.returncode == 0 and "ok" in out and "error" not in out:
-        return True
-    rule = f"{name},{mode},{position},{scale}"
-    return hyprctl("keyword", "monitor", rule).returncode == 0
-
-
-def pin_primary(primary):
-    """Pin the primary at its current position so Hyprland stops auto-placing it.
-
-    The primary is usually `monitor=,preferred,auto,auto`. With `auto`
-    placement Hyprland recomputes its position every time another output moves,
-    so the two monitors leapfrog and `side` never settles. Restored to auto on
-    teardown (see restore_primary).
-    """
-    if not primary:
-        return
-    x, y = int(primary.get("x", 0)), int(primary.get("y", 0))
-    hyprctl("eval", f'hl.monitor({{ output = "{primary["name"]}", '
-                    f'position = "{x}x{y}" }})')
-
-
-def restore_primary(name):
-    """Hand the primary back to Hyprland's auto placement (undo pin_primary)."""
-    pr = primary_for(name)
-    if pr:
-        hyprctl("eval", f'hl.monitor({{ output = "{pr["name"]}", '
-                        f'position = "auto" }})')
-
-
-def flush_position(name, side, fallback):
-    """Logical coords that butt `name` flush against the primary on `side`.
-
-    Uses the *live* logical sizes so scale snapping can't leave a gap/overlap at
-    the seam. Falls back to the caller's estimate if the layout can't be read.
-    """
-    me = next((m for m in monitors() if m.get("name") == name), None)
-    pr = primary_for(name)
-    if not me or not pr:
-        return fallback
-    px, py = int(pr.get("x", 0)), int(pr.get("y", 0))
-    pw, ph = logical_size(pr)
-    ew, eh = logical_size(me)
-    if side == "left":
-        return f"{px - ew}x{py}"
-    if side == "up":
-        return f"{px}x{py - eh}"
-    if side == "down":
-        return f"{px}x{py + ph}"
-    return f"{px + pw}x{py}"   # right (default)
+    lua = (f"hl.monitor({{ output = {lua_str(name)}, mode = {lua_str(mode)}, "
+           f"position = {lua_str(position)}, scale = {scale}, transform = 0 }})")
+    return hypr(lua, "keyword", "monitor",
+                f"{name},{mode},{position},{scale},transform,0")
 
 
 def valid_scale(width, height, scale):
     """Nearest scale Hyprland accepts for a width x height mode.
 
     Hyprland needs both logical dimensions to be whole pixels (it works in
-    1/120 steps); anything else pops an "invalid scale" error, gets replaced by
-    a guess, and our pre-computed position then overlaps the primary
-    ("Monitor EXT-1 overlaps ..."). 2772x1280 @ 1.5 -> 853.3 px tall, so 4/3.
+    1/120 steps); anything else pops an "invalid scale" error and gets replaced
+    by a guess. 2772x1280 @ 1.5 -> 853.3 px tall, so 4/3.
     """
     want = round(scale * 120)
     for d in range(0, 120):
@@ -156,49 +297,180 @@ def valid_scale(width, height, scale):
     return scale
 
 
-def estimate_position(name, side, width, height, scale):
-    """Pre-creation guess of the EXT position (before its snapped size exists)."""
-    pr = primary_for(name)
-    if not pr:
-        return f"auto-{side}"
-    px, py = int(pr.get("x", 0)), int(pr.get("y", 0))
-    pw, ph = logical_size(pr)
-    ew, eh = int(width / (scale or 1)), int(height / (scale or 1))
-    return {"left": f"{px - ew}x{py}", "up": f"{px}x{py - eh}",
-            "down": f"{px}x{py + ph}"}.get(side, f"{px + pw}x{py}")
+def _settled_problem(name, width, height, scale, side):
+    """Wait for Hyprland to apply our rule; returns placement_problem() then.
+
+    The Lua API applies rules on a later frame, not synchronously, so a quick
+    read can still show the *old* layout (two equal reads prove nothing: the
+    old layout is stable too). So poll until EXT shows the requested mode and
+    scale and sits correctly on `side`, and only judge the placement as bad
+    once SETTLE_TIMEOUT has passed. The good case returns at once; only a bad
+    placement costs the full timeout.
+    """
+    end = time.time() + SETTLE_TIMEOUT
+    while True:
+        time.sleep(0.05)
+        mons = monitors()
+        me = next((m for m in mons if m.get("name") == name), None)
+        applied = (me and (me.get("width"), me.get("height")) == (width, height)
+                   and abs(float(me.get("scale", 1) or 1) - scale) < 0.01)
+        problem = placement_problem(name, side, mons)
+        if (applied and not problem) or time.time() >= end:
+            return problem
 
 
-def set_workspace_rules(name, primary_name):
-    """Pin laptop workspaces to the primary monitor and EXT_WS to the phone."""
-    for i in LAPTOP_WS:
-        hyprctl("eval", f'hl.workspace_rule({{ workspace = "{i}", '
-                        f'monitor = "{primary_name}" }})')
-    for n, i in enumerate(EXT_WS):
-        default = ", default = true" if n == 0 else ""
-        hyprctl("eval", f'hl.workspace_rule({{ workspace = "{i}", '
-                        f'monitor = "{name}"{default} }})')
-    log(f"workspaces {LAPTOP_WS.start}-{LAPTOP_WS.stop - 1} -> {primary_name}, "
-        f"{EXT_WS.start}-{EXT_WS.stop - 1} -> {name}")
+def place_output(name, width, height, fps, scale, side):
+    """Give our output its mode/scale and put it on `side`; True on success.
+
+    Uses `auto-<side>`. Hyprland lays out explicitly positioned monitors
+    first, then the auto ones in creation order, each against the bounding
+    box of everything placed before it. The headless output is created after
+    the user's monitors, so it is placed last and can never push one of them
+    (an *explicit* EXT position did: the user's auto-placed monitors are
+    arranged after it and moved out of its way, then everything leapfrogged).
+    Negative coordinates (left/up) are fine for Hyprland.
+
+    `auto-<side>` aligns EXT with the layout's top/left edge, which in some
+    multi-monitor layouts leaves it touching no monitor; then
+    `auto-center-<side>` (Hyprland >= 0.51) is tried. Hyprland < 0.46 did not
+    count auto-right monitors when placing `auto-down`, so EXT can land on top
+    of the main screen there; it then goes to `auto-right` (correct on every
+    version) with a warning. Every attempt only moves EXT, and the result is
+    read back, never assumed.
+    """
+    mode = f"{width}x{height}@{fps}"
+    tried = []                                   # (position, problem)
+    for pos in (f"auto-{side}", f"auto-center-{side}"):
+        if not set_monitor(name, mode, pos, scale):
+            if not tried:
+                return False                     # the mode itself failed
+            continue                             # no center variant here
+        problem = _settled_problem(name, width, height, scale, side)
+        if not problem:
+            return True
+        tried.append((pos, problem))
+    usable = [pos for pos, problem in tried if "overlap" not in problem]
+    if usable:
+        pos = usable[0]
+        log(f"note: {name} at {pos} "
+            f"{dict(tried)[pos]}; your monitors were left as they are")
+    else:
+        pos = "auto-right"
+        log(f"warning: {name} {tried[0][1]} at auto-{side} (Hyprland older "
+            "than 0.46 cannot place it there without moving your monitors); "
+            "placing it to the right instead")
+    if pos != tried[-1][0]:
+        set_monitor(name, mode, pos, scale)
+        _settled_problem(name, width, height, scale,
+                         "right" if pos == "auto-right" else side)
+    return True
 
 
 def apply_live(name, width, height, fps, scale, side):
     """Re-apply mode/scale/side to an existing output (no stream restart)."""
-    mode = f"{width}x{height}@{fps}"
-    scale = valid_scale(width, height, scale)
-    est = estimate_position(name, side, width, height, scale)
-    ok = set_monitor(name, mode, est, scale)
-    set_monitor(name, mode, flush_position(name, side, est), scale)
+    return place_output(name, width, height, fps,
+                        valid_scale(width, height, scale), side)
+
+
+def pick_ext_workspace(name):
+    """The workspace id the phone hosts: the one it shows now, else a free id
+    above every workspace and numeric workspace rule the user has."""
+    # numeric workspaces the user's own rules bind to one of their monitors
+    user_ruled = set()
+    for r in query("workspacerules"):
+        ws = str(r.get("workspaceString", ""))
+        if ws.isdigit() and r.get("monitor") not in (None, "", name):
+            user_ruled.add(int(ws))
+    me = next((m for m in monitors() if m.get("name") == name), None)
+    if me:
+        ws = (me.get("activeWorkspace") or {}).get("id")
+        # Keep what EXT shows (reused output), unless it is a workspace the
+        # user's config binds elsewhere: our default rule would override it.
+        if isinstance(ws, int) and ws > 0 and ws not in user_ruled:
+            return ws
+    used = [w.get("id", 0) for w in query("workspaces")
+            if w.get("monitor") != name] + list(user_ruled)
+    return max([FIRST_EXT_WORKSPACE - 1] + [u for u in used if u > 0]) + 1
+
+
+def _ws_registry():
+    """Lua global keeping the workspace rule objects we created, so any
+    process (daemon or TUI) can disable them later. A config reload resets the
+    Lua state, and with it the rules, so a missing registry means "nothing
+    to undo"."""
+    return "_G.__tandem_ws_rules = _G.__tandem_ws_rules or {}"
+
+
+def bind_workspace(name, ws):
+    """Make workspace `ws` live on (and be the default of) our output only."""
+    lua = (f"{_ws_registry()}\n"
+           f"local key = {lua_str(name)}\n"
+           "local old = __tandem_ws_rules[key]\n"
+           "if old then pcall(function() old:set_enabled(false) end) end\n"
+           f"__tandem_ws_rules[key] = hl.workspace_rule({{ workspace = "
+           f"{lua_str(ws)}, monitor = key, default = true }})")
+    ok = hypr(lua, "keyword", "workspace", f"{ws},monitor:{name},default:true")
+    log(f"workspace {ws} -> {name}" + ("" if ok else " (could not bind)"))
     return ok
+
+
+def unbind_workspace(name):
+    """Disable the workspace rule bind_workspace made (Lua). Legacy Hyprland
+    has no rule removal; that rule names an output that no longer exists, so
+    it is inert, and gone at the next config reload."""
+    if dialect() != "lua":
+        return
+    hypr(f"{_ws_registry()}\n"
+         f"local old = __tandem_ws_rules[{lua_str(name)}]\n"
+         "if old then pcall(function() old:set_enabled(false) end) end\n"
+         f"__tandem_ws_rules[{lua_str(name)}] = nil")
 
 
 def map_touch_device(device, output):
     """Confine an absolute touch device to one monitor (instead of the whole
-    desktop layout). Re-applied on live changes: a config reload drops it."""
-    r = hyprctl("eval", f'hl.device({{ name = "{device}", output = "{output}" }})')
-    out = (r.stdout or "").lower()
-    if r.returncode == 0 and "ok" in out and "error" not in out:
-        return True
-    return hyprctl("keyword", f"device[{device}]:output", output).returncode == 0
+    desktop layout). Re-applied after config reloads, which drop it."""
+    return hypr(f"hl.device({{ name = {lua_str(device)}, "
+                f"output = {lua_str(output)} }})",
+                "keyword", f"device[{device}]:output", output)
+
+
+def focus_monitor(target):
+    hypr(f"hl.dispatch(hl.dsp.focus({{ monitor = {lua_str(target)} }}))",
+         "dispatch", "focusmonitor", target)
+
+
+def move_workspace(ws, target):
+    """Move a workspace (a `hyprctl workspaces` entry) to monitor `target`.
+
+    Named workspaces have negative ids, which no dispatcher accepts as a
+    number, so they are addressed as `name:<name>`.
+    """
+    sel = str(ws["id"]) if ws.get("id", 0) > 0 else f"name:{ws.get('name')}"
+    hypr(f"hl.dispatch(hl.dsp.workspace.move({{ workspace = "
+         f"{lua_str(sel)}, monitor = {lua_str(target)} }}))",
+         "dispatch", "moveworkspacetomonitor", sel, target)
+
+
+def create_output(name):
+    """`hyprctl output create headless <name>`, checked; raises on failure.
+
+    Waits for the output to really appear. If Hyprland made one under another
+    name (very old builds ignore the name), that stray HEADLESS-* is removed
+    again so it doesn't linger as an invisible monitor.
+    """
+    before = {m.get("name") for m in monitors()}
+    r = hyprctl("output", "create", "headless", name)
+    end = time.time() + 2.0
+    while time.time() < end:
+        names = {m.get("name") for m in monitors()}
+        if name in names:
+            return
+        time.sleep(0.1)
+    for stray in names - before:
+        if str(stray).startswith("HEADLESS-"):
+            hyprctl("output", "remove", stray)
+    reply = (r.stdout or r.stderr or "").strip() or f"exit {r.returncode}"
+    raise RuntimeError(f"Hyprland did not create the {name} output ({reply})")
 
 
 def remove_output(name):
@@ -206,32 +478,123 @@ def remove_output(name):
 
     1. stop anything still capturing it (a pending screencopy frame on a
        destroyed output can freeze the compositor),
-    2. move focus / the cursor to the primary (removing the focused monitor is
-       a crash path),
-    3. move its workspaces (and windows) to the primary,
-    4. remove it and hand the primary back to auto placement.
+    2. if it has focus, move focus to the main monitor (removing the focused
+       monitor is a crash path),
+    3. move its workspaces (and windows) to the main monitor,
+    4. remove it, and drop our workspace rule.
+    The user's monitors are never touched, so there is nothing to restore.
+    Safe to call when the output is already gone (cleans up the rule only).
     """
     xdph.close_leftover_session()
     kill_stale_capture(name)
-    if not any(m.get("name") == name for m in monitors()):
-        return
+    mons = monitors()
+    me = next((m for m in mons if m.get("name") == name), None)
     primary = primary_for(name)
-    if primary:
-        hyprctl("eval", f'hl.dispatch(hl.dsp.focus({{ '
-                        f'monitor = "{primary["name"]}" }}))')
-        try:
-            for w in json.loads(hyprctl("workspaces", "-j").stdout):
-                if w.get("monitor") == name:
-                    hyprctl("eval",
-                            f'hl.dispatch(hl.dsp.workspace.move({{ '
-                            f'workspace = "{w["id"]}", '
-                            f'monitor = "{primary["name"]}" }}))')
-        except Exception as e:
-            log(f"warning: could not reflow windows ({e})")
+    if me and primary:
+        if me.get("focused"):
+            focus_monitor(primary["name"])
+        for w in query("workspaces"):
+            # special workspaces follow the monitor's removal by themselves
+            if (w.get("monitor") == name
+                    and not str(w.get("name", "")).startswith("special:")):
+                move_workspace(w, primary["name"])
         time.sleep(0.1)             # let the moves render before the removal
-    hyprctl("output", "remove", name)
-    restore_primary(name)
-    log(f"removed headless output {name}")
+    if me:
+        hyprctl("output", "remove", name)
+        log(f"removed headless output {name}")
+    unbind_workspace(name)
+
+
+class EventWatcher:
+    """Follows Hyprland's event socket (socket2) and calls `on_change` when
+    our runtime rules may have been lost or the layout changed.
+
+    A config reload (autoreload fires on every save of hyprland.conf/.lua, and
+    display GUIs write the config) rebuilds all rules from the files: EXT
+    would fall back to the catch-all rule (other mode, size, position), the
+    touch mapping and our workspace rule would be gone. Monitor hotplug can
+    leave EXT off its side. Events are debounced: one burst, one re-apply.
+    """
+
+    EVENTS = ("configreloaded", "monitoradded", "monitoraddedv2",
+              "monitorremoved", "monitorremovedv2")
+
+    # Events that arrive this soon after our own re-apply are its echo, not a
+    # new change; ignoring them rules out a re-apply -> event -> re-apply loop.
+    ECHO_WINDOW = 1.0
+
+    def __init__(self, own, on_change, debounce=0.4):
+        self.own, self.on_change, self.debounce = own, on_change, debounce
+        self._stop = threading.Event()
+        self._thread = None
+        self._quiet_until = 0.0
+
+    def mute(self, seconds=ECHO_WINDOW):
+        """Ignore events for a moment (call after changing our own output)."""
+        self._quiet_until = time.time() + seconds
+
+    def _socket_path(self):
+        sig = hypr_env().get("HYPRLAND_INSTANCE_SIGNATURE", "")
+        run = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        for path in (f"{run}/hypr/{sig}/.socket2.sock",
+                     f"/tmp/hypr/{sig}/.socket2.sock"):
+            if sig and os.path.exists(path):
+                return path
+        return None
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _relevant(self, line):
+        event, _, data = line.partition(">>")
+        if event not in self.EVENTS:
+            return False
+        # our own output appearing/disappearing is not a reason to re-apply
+        return event == "configreloaded" or self.own not in data.split(",")
+
+    def _run(self):
+        while not self._stop.is_set():
+            path = self._socket_path()
+            if not path:
+                return                   # no event socket: nothing to follow
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.connect(path)
+                    s.settimeout(0.5)
+                    self._read(s)
+            except OSError:
+                pass
+            self._stop.wait(2.0)         # Hyprland restarting: retry later
+
+    def _read(self, s):
+        buf, due = b"", None
+        while not self._stop.is_set():
+            try:
+                chunk = s.recv(4096)
+                if not chunk:
+                    return
+                buf += chunk
+            except socket.timeout:
+                pass
+            *lines, buf = buf.split(b"\n")
+            if (time.time() >= self._quiet_until and
+                    any(self._relevant(l.decode("utf-8", "replace"))
+                        for l in lines)):
+                due = time.time() + self.debounce
+            if due and time.time() >= due and not self._stop.is_set():
+                due = None
+                try:
+                    self.on_change()
+                except Exception as e:
+                    log(f"warning: could not re-apply {self.own} ({e})")
+                self.mute()
 
 
 # --------------------------------------------------------------------------- #
@@ -287,8 +650,12 @@ def compositor_card():
     return None
 
 
-VA_DIRS = ("/usr/lib/dri", "/usr/lib64/dri", "/usr/lib/x86_64-linux-gnu/dri",
-           "/usr/lib/aarch64-linux-gnu/dri")
+# Where distros install VA-API drivers; LIBVA_DRIVERS_PATH (user override)
+# and /run/opengl-driver (NixOS) come first.
+VA_DIRS = tuple(
+    [d for d in os.environ.get("LIBVA_DRIVERS_PATH", "").split(":") if d]
+    + ["/run/opengl-driver/lib/dri", "/usr/lib/dri", "/usr/lib64/dri",
+       "/usr/lib/x86_64-linux-gnu/dri", "/usr/lib/aarch64-linux-gnu/dri"])
 
 
 def va_driver_for(node):
@@ -303,13 +670,40 @@ def va_installed(name):
     return any(os.path.exists(f"{d}/{name}_drv_video.so") for d in VA_DIRS)
 
 
+def software_encoders():
+    """CPU H.264 encoders the system's libavcodec has, best first.
+
+    wf-recorder links the same libavcodec as the ffmpeg binary, so
+    `ffmpeg -encoders` tells which exist. Fedora/openSUSE's ffmpeg-free has no
+    libx264 but does have libopenh264. Without the ffmpeg binary, both are
+    offered and the start check sorts it out.
+    """
+    wanted = ("libx264", "libopenh264")
+    if not shutil.which("ffmpeg"):
+        return list(wanted)
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return list(wanted)
+    have = {line.split()[1] for line in out.splitlines()
+            if len(line.split()) > 1}
+    return [e for e in wanted if e in have] or list(wanted)
+
+
+SOFTWARE_DESC = {"libx264": "x264 on the CPU",
+                 "libopenh264": "OpenH264 on the CPU"}
+
+
 def encoder_candidates(requested, device):
     """Encoders to try, best first: [(ffmpeg encoder, VA node, env, description)].
 
     auto: the hardware encoder of the GPU Hyprland renders on (zero-copy), then
-    libx264 on the CPU, which works on any machine (NVIDIA without NVENC,
-    nouveau, VMs, a VA driver without H.264 encode, ...).
+    a CPU encoder (x264, else OpenH264), which works on any machine (NVIDIA
+    without NVENC, nouveau, VMs, a VA driver without H.264 encode, ...).
     """
+    # HEVC is chosen per candidate later (start_capture); select by family.
+    requested = requested.replace("hevc_", "h264_").replace("libx265", "libx264")
     card = compositor_card()
     drv = gpu_driver(card) if card else None
     out = []
@@ -331,18 +725,21 @@ def encoder_candidates(requested, device):
     if requested == "h264_nvenc":
         out.append((requested, None, {}, f"NVENC on {card or 'NVIDIA'}"))
     elif requested == "h264_vaapi":
-        env = {}
         va = va_driver_for(device)
-        if va:
-            # NVIDIA Hyprland setups often export LIBVA_DRIVER_NAME=nvidia
-            # globally; that loads the decode-only driver on an AMD/Intel node.
-            env["LIBVA_DRIVER_NAME"] = va
-        out.append((requested, device, env,
+        # NVIDIA Hyprland setups often export LIBVA_DRIVER_NAME=nvidia
+        # globally; that loads the decode-only driver on an AMD/Intel node.
+        out.append((requested, device, {"LIBVA_DRIVER_NAME": va} if va else {},
                     f"VA-API on {device} ({va or 'default driver'})"))
-    if requested != "libx264":
-        out.append(("libx264", None, {}, "x264 on the CPU (fallback)"))
-    else:
-        out.append(("libx264", None, {}, "x264 on the CPU"))
+        if va == "iHD" and va_installed("i965"):
+            # iHD installed but the GPU predates it (Haswell/Ivy Bridge)
+            out.append((requested, device, {"LIBVA_DRIVER_NAME": "i965"},
+                        f"VA-API on {device} (i965)"))
+    soft = software_encoders()
+    if requested in soft:                 # explicitly asked for one: first
+        soft.remove(requested)
+        soft.insert(0, requested)
+    fallback = "" if requested in SOFTWARE_DESC else " (fallback)"
+    out += [(e, None, {}, SOFTWARE_DESC[e] + fallback) for e in soft]
     return out
 
 
@@ -354,17 +751,75 @@ def pick_encoder(requested, device):
     return encoder_candidates(requested, device)[0]
 
 
+def bitrate_bps(bitrate):
+    """'12M' / '8000k' / '5000000' -> bits per second."""
+    s = str(bitrate).strip().lower()
+    mult = {"k": 1_000, "m": 1_000_000, "g": 1_000_000_000}.get(s[-1:], 1)
+    return int(float(s.rstrip("kmg") or 0) * mult)
+
+
+# Rate-control buffer in frames. A VBV of ~2 frames keeps every frame, IDRs
+# included, close to the average size, so no frame needs many times the
+# link's per-frame budget (a 1 s VBV let IDRs grow to several hundred KB and
+# stall the link for the frames behind them). Trade-off: IDRs are softer and
+# sharpen over the next frames.
+VBV_FRAMES = 2
+
+
+def keyframe_interval(a):
+    """GOP length in frames: the configured one, but at least 1 s of frames.
+
+    Capture is damage-driven, so frames (and IDRs) only flow while something
+    changes; a short frame-based GOP meant 2-4 IDR bursts per second of
+    motion. Recovery doesn't need them: a phone that loses a frame asks for a
+    keyframe (KEYQ) and gets the cached GOP replayed. ~1 s keeps the cached
+    GOP well under the per-client queue limit for that replay.
+    """
+    return max(int(a.gop), int(a.fps))
+
+
 def encoder_params(encoder, a):
     """wf-recorder -p options for minimum latency on each encoder."""
-    common = [f"g={a.gop}", "bf=0", f"b={a.bitrate}"]
+    bps = bitrate_bps(a.bitrate)
+    vbv = max(bps * VBV_FRAMES // max(int(a.fps), 1), 1)
+    common = [f"g={keyframe_interval(a)}", "bf=0", f"b={bps}",
+              f"maxrate={bps}", f"bufsize={vbv}"]
     if encoder.endswith("_nvenc"):
         return common + ["preset=p1", "tune=ull", "zerolatency=1",
                          "rc=cbr", "delay=0", "forced-idr=1"]
     if encoder.endswith("_vaapi"):
         return common + ["rc_mode=CBR", "async_depth=1"]
-    # libx264: one slice-threaded frame in, one out
+    if encoder == "libopenh264":
+        # one slice per frame (the phone feeds one buffer per access unit),
+        # never drop frames to meet the bitrate
+        return common + ["rc_mode=bitrate", "allow_skip_frames=0", "slices=1"]
+    # libx264/libx265. tune=zerolatency turns on sliced threads, i.e. one
+    # slice per thread, so a frame arrives as many NALs that strict phone
+    # decoders take for many frames. One slice per frame instead; frame
+    # threads add a frame of delay each, so use one thread unless the pixel
+    # rate is above 1080p60 (ultrafast keeps up with that on one core).
+    threads = 1 if a.width * a.height * a.fps <= 1920 * 1080 * 60 else 2
+    params = (["x264-params=sliced-threads=0:slices=1"]
+              if encoder == "libx264" else [])
     return common + ["preset=ultrafast", "tune=zerolatency",
-                     f"maxrate={a.bitrate}", f"bufsize={a.bitrate}"]
+                     f"threads={threads}"] + params
+
+
+_wf_flags = None
+
+
+def wf_recorder_flags():
+    """Long options this wf-recorder supports (from --help), cached."""
+    global _wf_flags
+    if _wf_flags is None:
+        try:
+            r = subprocess.run(["wf-recorder", "--help"], capture_output=True,
+                               text=True, timeout=5)
+            _wf_flags = set(re.findall(r"--([a-z][a-z-]+)",
+                                       (r.stdout or "") + (r.stderr or "")))
+        except (OSError, subprocess.SubprocessError):
+            _wf_flags = set()
+    return _wf_flags
 
 
 def capture_pids(output):
@@ -435,56 +890,113 @@ class HyprlandBackend:
         self.proc = None
         self.stream = None          # readable Annex-B byte stream
         self.session = None         # xdph.ScreenCastSession while capturing
+        self.workspace = None       # the workspace id the phone hosts
+        self._working = None        # encoder candidate that started last time
+        self._touch_mapped = False
+        # live changes (SIGHUP) and config-reload re-applies come from
+        # different threads; one layout change at a time
+        self._layout_lock = threading.Lock()
+        self._torn_down = False
+        self._watcher = EventWatcher(args.output, self._reapply)
 
     @staticmethod
     def missing():
         return [t for t in ("hyprctl", "wf-recorder") if not shutil.which(t)]
 
     def setup(self):
-        """Create the headless output (or reuse one) and place it on `side`."""
+        """Create the headless output (or reuse one) and place it on `side`.
+
+        Only our own output and its workspace rule are written; the user's
+        monitors and workspaces are left exactly as they are.
+        """
         a = self.a
         kill_stale_capture(a.output)
-        if any(m.get("name") == a.output for m in monitors()):
+        reuse = any(m.get("name") == a.output for m in monitors())
+        log(f"Hyprland config dialect: {dialect()}")
+        # Bound before the output exists, so Hyprland opens EXT on this
+        # workspace instead of grabbing the lowest free one.
+        self.workspace = pick_ext_workspace(a.output)
+        bind_workspace(a.output, self.workspace)
+        if reuse:
             log(f"reusing existing headless output {a.output}")
         else:
-            primary = primary_for(a.output)
-            if primary:
-                set_workspace_rules(a.output, primary["name"])   # before create
-                pin_primary(primary)                             # stop drift
             log(f"creating headless output {a.output}")
-            hyprctl("output", "create", "headless", a.output)
-            time.sleep(0.5)
-        mode = f"{a.width}x{a.height}@{a.fps}"
+            try:
+                create_output(a.output)
+            except Exception:
+                unbind_workspace(a.output)
+                raise
         scale = valid_scale(a.width, a.height, a.scale)
         if scale != a.scale:
             log(f"scale {a.scale} gives fractional pixels at {a.width}x"
                 f"{a.height}; using {scale:g}")
-        est = estimate_position(a.output, a.side, a.width, a.height, scale)
-        if not set_monitor(a.output, mode, est, scale):
-            log(f"warning: could not apply mode {mode}")
-        # Reposition flush now that the (possibly snapped) logical size is set.
-        pos = flush_position(a.output, a.side, est)
-        set_monitor(a.output, mode, pos, scale)
-        log(f"output {a.output} ready ({mode}, scale {scale:g}, pos {pos})")
+        with self._layout_lock:
+            if not place_output(a.output, a.width, a.height, a.fps, scale,
+                                a.side):
+                log(f"warning: could not apply mode {a.width}x{a.height}")
+        me = next((m for m in monitors() if m.get("name") == a.output), {})
+        log(f"output {a.output} ready ({a.width}x{a.height}@{a.fps}, scale "
+            f"{scale:g}, at {me.get('x', '?')}x{me.get('y', '?')}, "
+            f"side {a.side})")
+        self._watcher.start()
+
+    def _reapply(self):
+        """After a config reload or a monitor hotplug: put back what is ours
+        (mode/scale/side, the workspace rule, the touch mapping)."""
+        a = self.a
+        if not any(m.get("name") == a.output for m in monitors()):
+            return                      # output gone: nothing of ours to fix
+        with self._layout_lock:
+            if self._torn_down:         # teardown won the lock: don't rebind
+                return
+            if self.workspace:
+                bind_workspace(a.output, self.workspace)
+            place_output(a.output, a.width, a.height, a.fps,
+                         valid_scale(a.width, a.height, a.scale), a.side)
+            if self._touch_mapped:
+                map_touch_device(uinput_touch.DEVICE_NAME, a.output)
+        log(f"re-applied {a.output} settings after a Hyprland config reload "
+            "or monitor change")
+
+    def _candidates(self):
+        """Encoder candidates for this run, the one that worked last first
+        (a capture restart mid-session shouldn't wait out failing ones)."""
+        a = self.a
+        req = (a.encoder if a.encoder.startswith(("h264_", "hevc_", "libx26",
+                                                  "libopenh264"))
+               else "auto")
+        cands = encoder_candidates(req, a.device)
+        if a.codec == "hevc":            # H.264-only pipelines
+            cands = [c for c in cands if c[0] not in (XDPH_NVENC, "libopenh264")]
+        if self._working:
+            cands.sort(key=lambda c: self._key(c) != self._working)
+        return cands
+
+    @staticmethod
+    def _key(cand):
+        encoder, device, env, _ = cand
+        return encoder, device, tuple(sorted(env.items()))
 
     def start_capture(self):
-        """Launch wf-recorder; returns the readable Annex-B byte stream.
+        """Launch the encoder; returns the readable Annex-B byte stream.
 
         Tries each encoder candidate in turn: one that can't initialise either
         exits within a moment (wrong GPU, missing driver/NVENC) or hangs without
         output (some Intel VA-API drivers), so we move on to the next instead of
-        leaving the phone with a black screen.
+        leaving the phone with a black screen. Raises RuntimeError when none
+        works. Safe to call again mid-session (after stop_capture, or after
+        the encoder died): the output and its placement are untouched.
         """
+        self.stop_capture()
         a = self.a
-        req = (a.encoder if a.encoder.startswith(("h264_", "hevc_", "libx26"))
-               else "auto")
-        cands = encoder_candidates(req, a.device)
-        if a.codec == "hevc":
-            cands = [c for c in cands if c[0] != XDPH_NVENC]   # H.264 only
-        for i, (encoder, device, env, desc) in enumerate(cands):
+        cands = self._candidates()
+        tried = []
+        for i, cand in enumerate(cands):
+            encoder, device, env, desc = cand
             if a.codec == "hevc":
                 encoder = encoder.replace("h264_", "hevc_").replace("264", "265")
             log(f"encoder: {desc}")
+            tried.append(desc)
             try:
                 if encoder == XDPH_NVENC:
                     self._spawn_xdph()
@@ -494,11 +1006,20 @@ class HyprlandBackend:
                 log(f"encoder {encoder} could not start ({e}); trying the next one")
                 self.stop_capture()
                 continue
-            if i == len(cands) - 1 or not self._fails_to_start():
+            problem = self._fails_to_start()
+            # Silent but alive is kept for the last resort, and for the
+            # encoder that already worked in this session: on a restart a
+            # still screen may simply have nothing new to send, and dropping
+            # to a CPU encoder for that would be a lasting downgrade.
+            proven = self._key(cand) == self._working
+            if not problem or (problem == "silent"
+                               and (proven or i == len(cands) - 1)):
+                self._working = self._key(cand)
                 return self.stream
             self.stop_capture()
             log(f"encoder {encoder} failed to start; trying the next one")
-        return self.stream
+        raise RuntimeError(f"no working {a.codec.upper()} encoder (tried: "
+                           f"{'; '.join(tried) or 'none'})")
 
     def _spawn_xdph(self):
         """Zero-copy NVIDIA capture: an xdph screencast into GStreamer NVENC."""
@@ -506,7 +1027,8 @@ class HyprlandBackend:
         self.session = xdph.ScreenCastSession(a.output)
         rfd, wfd = os.pipe()
         cmd = xdph.build_pipeline(self.session.node,
-                                  gnome.bitrate_kbps(a.bitrate), a.gop, wfd)
+                                  gnome.bitrate_kbps(a.bitrate),
+                                  keyframe_interval(a), wfd, fps=a.fps)
         log("capture cmd: " + " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL,
@@ -527,14 +1049,20 @@ class HyprlandBackend:
         # no B-frames (no reorder delay), CBR, minimal encoder pipelining
         for p in encoder_params(encoder, a):
             cmd += ["-p", p]
-        cmd += ["-r", str(a.fps),
-                f"--muxer={'hevc' if a.codec == 'hevc' else 'h264'}",
+        # Never `-r`: it adds an ffmpeg fps filter that holds the newest frame
+        # until the next one arrives and, after an idle gap, emits idle_s*fps
+        # duplicates (with IDRs) in one burst: the "freezes when I drag a
+        # window onto it" bug. Capture stays damage-driven (variable rate);
+        # -B only tells the encoder's rate control the expected rate.
+        if "buffrate" in wf_recorder_flags():
+            cmd += ["-B", str(a.fps)]
+        cmd += [f"--muxer={'hevc' if a.codec == 'hevc' else 'h264'}",
                 "-f", "/dev/stdout"]
         log("capture cmd: " + " ".join(cmd))
         # stdin=DEVNULL: wf-recorder otherwise prompts "/dev/stdout exists.
         # Overwrite? Y/n" and blocks forever (or eats the TUI's keystrokes).
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                                     env={**os.environ, **env},
+                                     env={**hypr_env(), **env},
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, bufsize=0,
                                      preexec_fn=_die_with_parent)
@@ -543,7 +1071,7 @@ class HyprlandBackend:
                          daemon=True).start()
 
     def _fails_to_start(self, grace=4.0):
-        """True if wf-recorder exits, or produces nothing, within `grace` s.
+        """None if the encoder works, else "exited" or "silent".
 
         A working encoder emits its first access unit in ~0.1 s; one still
         silent after seconds is stuck (seen with VA-API on Intel) and would
@@ -553,13 +1081,13 @@ class HyprlandBackend:
         end = time.time() + grace
         while time.time() < end:
             if p.poll() is not None:
-                return True
+                return "exited"
             r, _, _ = select.select([self.stream], [], [], 0.1)
             if r:      # bytes waiting (or EOF): alive a moment later = works
                 time.sleep(0.2)
-                return p.poll() is not None
+                return "exited" if p.poll() is not None else None
         log(f"no output after {grace:g}s")
-        return True
+        return "silent"
 
     def _wf_log(self, proc):
         """Forward the encoder's diagnostics (they explain why capture died)."""
@@ -577,6 +1105,7 @@ class HyprlandBackend:
             raise RuntimeError(f"{problem}; run tandem on the computer and "
                                "press t to set up touch")
         screen = uinput_touch.VirtualTouchscreen(self.a.width, self.a.height)
+        self._touch_mapped = True        # re-mapped after config reloads
         if not map_touch_device(uinput_touch.DEVICE_NAME, self.a.output):
             log("warning: could not map the touch device to "
                 f"{self.a.output}; touches may land on the wrong monitor")
@@ -585,14 +1114,20 @@ class HyprlandBackend:
 
     def apply_live(self, side, scale):
         a = self.a
-        map_touch_device(uinput_touch.DEVICE_NAME, a.output)
-        ok = apply_live(a.output, a.width, a.height, a.fps, scale, side)
+        with self._layout_lock:
+            if self._touch_mapped:
+                map_touch_device(uinput_touch.DEVICE_NAME, a.output)
+            ok = apply_live(a.output, a.width, a.height, a.fps, scale, side)
+        self._watcher.mute()            # our own change, not the user's
         log(f"moved {a.output} side={side} scale={scale}")
         return ok
 
     def stop_capture(self):
-        """Stop the encoder, then end the screencast (before any removal)."""
-        p = self.proc
+        """Stop the encoder, then end the screencast (before any removal).
+
+        Idempotent; the output stays, so start_capture can run again.
+        """
+        p, self.proc = self.proc, None
         if p and p.poll() is None:
             p.terminate()
             try:
@@ -600,12 +1135,22 @@ class HyprlandBackend:
             except subprocess.TimeoutExpired:
                 p.kill()
                 p.wait()
+        if p and p.stdout:
+            p.stdout.close()            # don't leak a pipe per restart
         if self.stream and self.stream is not getattr(p, "stdout", None):
-            self.stream.close()     # our end of the GStreamer pipe
+            try:
+                self.stream.close()     # our end of the GStreamer pipe
+            except OSError:
+                pass
         self.stream = None
         if self.session:
             self.session.close()
             self.session = None
 
     def teardown(self):
-        remove_output(self.a.output)
+        self._watcher.stop()
+        # Under the layout lock: a re-apply already running would otherwise
+        # re-bind the workspace rule after remove_output dropped it.
+        with self._layout_lock:
+            self._torn_down = True
+            remove_output(self.a.output)

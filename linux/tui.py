@@ -20,6 +20,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 from collections import deque
@@ -98,7 +99,7 @@ def run_shell(win, cmd, prompt="press Enter to return"):
 
 # Config keys that change the capture/encode pipeline: changing any of these
 # needs the daemon restarted. side/scale are applied live by the daemon itself
-# (SIGHUP -> backend.apply_live); transport only changes the QR's host order.
+# (SIGUSR1 -> backend.apply_live); transport only changes the QR's host order.
 RESTART_KEYS = ("backend", "output", "width", "height", "fps", "quality",
                 "codec", "gop", "port", "touch")
 LIVE_KEYS = ("side", "scale")
@@ -119,7 +120,12 @@ class Stream:
         self.state = {"live": 0, "ever": False}
         self.error = None
         self.touch_status = ""          # daemon's "touch input: ..." verdict
+        self.notice = ""                # e.g. "port 5000 is used by …"
         self.stop = threading.Event()
+        # True from start() until disconnect() removed the monitor. A daemon
+        # that died (--keep-output) leaves the monitor behind, so "is the
+        # daemon running" is not the same as "is there anything to clean up".
+        self.needs_teardown = False
 
     def running(self):
         return self.proc is not None and self.proc.poll() is None
@@ -129,18 +135,63 @@ class Stream:
         # debugging): the daemon binds 0.0.0.0, so it already listens on the
         # tether link — nothing to set up here. The phone connects to this PC's
         # tether IP; the pairing QR lists every reachable address.
+        # Another program on our port: move to a free one (saved in cfg)
+        # rather than failing with "port still in use".
+        self.notice = core.choose_port(self.cfg)
         core.write_banner_file(self.cfg)        # settings shown on the phone
         args = self.cfg.tandemd_args()
         self.error = None
+        # --parent-pid: if this TUI is killed outright, the daemon stops and
+        # removes the monitor itself (it can't see our terminal's signals).
         cmd = [sys.executable, DAEMON, "--keep-output",
+               "--parent-pid", str(os.getpid()),
                "--banner-file", core.BANNER_PATH] + args
         # stdin=DEVNULL is essential: otherwise the daemon's wf-recorder child
         # inherits this terminal's stdin and swallows our keystrokes.
+        # start_new_session: terminal signals (Ctrl+C, the hangup when the
+        # window closes) must not reach the daemon's encoder directly — it
+        # would die while the daemon lives on. The TUI stops the daemon itself
+        # (see main()), which then stops its encoder cleanly.
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.PIPE, text=True, bufsize=1)
+                                     stderr=subprocess.PIPE, text=True, bufsize=1,
+                                     start_new_session=True)
+        self.needs_teardown = True
         self.stop.clear()
         threading.Thread(target=self._reader, daemon=True).start()
+        threading.Thread(target=self._keep_adb_reverse, args=(self.proc,),
+                         daemon=True).start()
+
+    def _keep_adb_reverse(self, proc, every=2.0, refresh=30.0):
+        """Re-apply `adb reverse` whenever the set of USB-debugging phones
+        changes (replug), and every `refresh` seconds anyway (an adb server
+        restart drops the mappings without changing the list), whatever
+        screen is showing, for as long as `proc` (this daemon) runs.
+
+        The mapping is per device connection and vanishes on a replug; only
+        the live screen used to refresh it, so a phone reconnecting via
+        127.0.0.1 while the menu was open was refused.
+        """
+        if not shutil.which("adb"):
+            return
+        seen, applied = None, 0.0
+        # Follows `proc`, not self.stop: on a restart the old reader sets
+        # self.stop at EOF, possibly after the new start() cleared it.
+        while proc.poll() is None:
+            time.sleep(every)
+            try:
+                r = subprocess.run(["adb", "devices"], capture_output=True,
+                                   text=True, timeout=5)
+                serials = frozenset(
+                    l.split()[0] for l in r.stdout.splitlines()[1:]
+                    if l.strip().endswith("device"))
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if serials != seen or time.monotonic() - applied > refresh:
+                seen, applied = serials, time.monotonic()
+                if serials:
+                    core._adb_reverse_cache.pop(self.cfg.port, None)
+                    core.adb_reverse(self.cfg.port)
 
     def _reader(self):
         for line in self.proc.stderr:
@@ -201,14 +252,18 @@ class Stream:
         if win is not None:
             show_busy(win, f"Disconnecting… removing {self.cfg.output}")
         core.remove_virtual_output(self.cfg)
+        self.needs_teardown = False
 
     def push_banner(self):
         """Rewrite the banner file and tell the running daemon to re-send it,
-        so connected phones immediately show the new settings."""
+        so connected phones immediately show the new settings.
+
+        SIGUSR1, not SIGHUP: the daemon treats SIGHUP as "the terminal went
+        away" and stops."""
         core.write_banner_file(self.cfg)
         if self.running():
             try:
-                self.proc.send_signal(signal.SIGHUP)
+                self.proc.send_signal(signal.SIGUSR1)
             except Exception:
                 pass
 
@@ -221,7 +276,7 @@ def apply_config(stream, new_cfg):
         return "restart"
     geom_changed = any(getattr(new_cfg, k) != getattr(old, k) for k in LIVE_KEYS)
     stream.cfg = new_cfg
-    # The daemon re-reads the banner on SIGHUP, moves/rescales the monitor if
+    # The daemon re-reads the banner on SIGUSR1, moves/rescales the monitor if
     # side/scale changed (no stream interruption) and pushes it to the phone.
     stream.push_banner()
     return "live" if geom_changed else "none"
@@ -630,7 +685,9 @@ def live_screen(win, stream):
     disconnect = False
     uri, ips, pairing_code, refreshed = "", [], "", 0.0
     qr_uri, qr_lines = None, []      # QR encoding is pure Python: redo on change
-    fw, usb, checked, fw_fixed = None, ("…", "hint", None), 0.0, False
+    # fw_fixed_port: the port the user opened the firewall for. A restart can
+    # move the daemon to another port (core.choose_port), which needs its own.
+    fw, usb, checked, fw_fixed_port = None, ("…", "hint", None), 0.0, None
     touch_setup = None
     win.nodelay(True)
     try:
@@ -644,7 +701,8 @@ def live_screen(win, stream):
                 pairing_code = core.pairing_code()
                 refreshed = time.monotonic()
             if time.monotonic() - checked > 5:
-                fw = None if fw_fixed else core.firewall_check(cfg.port)
+                fw = (None if fw_fixed_port == cfg.port
+                      else core.firewall_check(cfg.port))
                 usb = core.usb_state(cfg.port)
                 touch_setup = core.touch_setup_check(cfg)
                 checked = time.monotonic()
@@ -711,6 +769,9 @@ def live_screen(win, stream):
             if not live and not exited:
                 y = draw_checks(win, y, left_w, fw, usb) + 1
 
+            for line in textwrap.wrap(stream.notice, max(20, left_w)):
+                addstr(win, y, 2, line, curses.color_pair(5))
+                y += 1
             if exited and stream.error:
                 addstr(win, y, 2, f"error: {stream.error}", curses.color_pair(4))
                 y += 1
@@ -734,7 +795,8 @@ def live_screen(win, stream):
                 break
             if c in (ord("f"), ord("F")) and fw:
                 if run_shell(win, fw["fix"]) == 0:
-                    fw_fixed, fw = True, None     # nft/iptables: not re-detectable
+                    # nft/iptables: not re-detectable, so remember it
+                    fw_fixed_port, fw = cfg.port, None
                 continue
             if c in (ord("t"), ord("T")) and touch_setup:
                 if run_shell(win, touch_setup["fix"]) == 0:
@@ -760,6 +822,19 @@ def live_screen(win, stream):
 # entry
 # --------------------------------------------------------------------------- #
 
+class TerminalGone(Exception):
+    """SIGHUP / SIGTERM: the terminal closed or someone stopped the TUI."""
+
+
+def _raise_terminal_gone(*_):
+    _active["gone"] = True
+    raise TerminalGone()
+
+
+# The running stream, so main() can stop it however app() exits.
+_active = {"stream": None, "gone": False}
+
+
 def app(stdscr):
     curses.curs_set(0)
     curses.set_escdelay(25)        # snappy, unambiguous ESC vs. arrow keys
@@ -775,8 +850,11 @@ def app(stdscr):
     while True:
         choice = main_menu(stdscr, cfg, stream)
         if choice == "quit":
-            if stream and stream.running():
-                stream.disconnect(stdscr)
+            # Also after the daemon died: its monitor (--keep-output) is
+            # still there. `stream` is None by then; _active still has it.
+            last = _active["stream"]
+            if last is not None and last.needs_teardown:
+                last.disconnect(stdscr)
             break
         elif choice == "configure":
             running = stream is not None and stream.running()
@@ -793,7 +871,14 @@ def app(stdscr):
             if stream is None or not stream.running():
                 if not preflight(stdscr, cfg):
                     continue
+                prev = _active["stream"]
+                if (prev is not None and prev.needs_teardown
+                        and prev.cfg.output != cfg.output):
+                    # A dead daemon's monitor under the old name: the new
+                    # daemon won't reuse it, so nothing else would remove it.
+                    prev.disconnect(stdscr)
                 stream = Stream(cfg)
+                _active["stream"] = stream
                 stream.start()
             live_screen(stdscr, stream)
             if not stream.running():        # disconnected / died
@@ -840,10 +925,26 @@ def main():
         print(f"{about.CREDIT}\n{about.LICENSE}")   # the credit NOTICE asks forks to keep
         return
     setup_terminal()
+    # The daemon runs in its own session (no terminal signals reach it), so
+    # a closed terminal, a SIGTERM or Ctrl+C must stop it here — otherwise it
+    # would keep streaming with nobody left to remove the virtual monitor.
+    signal.signal(signal.SIGHUP, _raise_terminal_gone)
+    signal.signal(signal.SIGTERM, _raise_terminal_gone)
     try:
         curses.wrapper(app)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, TerminalGone):
         pass
+    except curses.error:
+        if not _active["gone"]:
+            raise
+        # else: curses failed restoring a terminal that hung up
+    finally:
+        # Don't let a second signal interrupt the cleanup itself.
+        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, signal.SIG_IGN)
+        stream = _active["stream"]
+        if stream is not None and stream.needs_teardown:
+            stream.disconnect()          # no window: the terminal may be gone
 
 
 if __name__ == "__main__":
