@@ -507,6 +507,11 @@ main, footer { position: relative; z-index: 1; }
 .cmd .prompt { color: var(--gray-1); user-select: none; }
 /* The hero's copy of the command, small, under the buttons. */
 .hero-cmd { margin-top: 28px; max-width: 40em; }
+/* Total downloads under the hero buttons: small, counts up from 0. */
+.dl-count { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 15px; color: var(--gray-1); }
+.dl-count[hidden] { display: none; }
+.dl-count svg { width: 15px; height: 15px; flex: none; }
+.dl-count b { color: var(--white); font-weight: 600; font-variant-numeric: tabular-nums; }
 .hero-cmd p { font-size: 15px; color: var(--gray-1); }
 .hero-cmd .cmd { margin-top: 10px; }
 /* One line, like a terminal; scroll it sideways, the fade says there's more. */
@@ -568,16 +573,6 @@ main, footer { position: relative; z-index: 1; }
 .oss { padding: clamp(72px, 12vh, 140px) 0; }
 .oss-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px clamp(32px, 5vw, 96px); align-items: end; }
 .oss .lede { margin-top: 24px; }
-/* Live tally: total downloads and people who viewed the page. Hidden until
-   a number arrives, so nothing ever shows a placeholder 0. */
-.tally { display: flex; flex-wrap: wrap; gap: 24px clamp(40px, 8vw, 140px); margin-bottom: clamp(56px, 10vh, 112px); }
-.tally[hidden] { display: none; }
-.tally > div[hidden] { display: none; }
-.tally b {
-  display: block; font: 900 clamp(64px, 12vw, 200px)/.86 var(--display);
-  font-variation-settings: "wdth" 112; letter-spacing: -.03em; font-variant-numeric: tabular-nums;
-}
-.tally span { display: block; margin-top: 14px; font-size: clamp(16px, 1.4vw, 19px); color: var(--gray-1); }
 .btn svg { width: 15px; height: 15px; margin-right: 9px; flex: none; }
 /*
  * The ask: "star" in the lede gets the hero's red wipe when the section
@@ -792,6 +787,7 @@ footer { background: var(--black); }
         <a class="btn solid" href="#install">Install on Linux</a>
         <a class="btn" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK<span class="count" data-version hidden></span></a>
       </div>
+      <p class="dl-count" data-downloads hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v9M4 7l4 4 4-4M2 14.5h12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b data-downloads-n>0</b> downloads</span></p>
       <div class="hero-cmd intro" style="--i:5">
         <p>Install with one command on Ubuntu, Fedora or Arch:</p>
         <div class="cmd"><code><span class="prompt" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash</code><button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash">Copy</button></div>
@@ -949,10 +945,6 @@ footer { background: var(--black); }
 <div class="signal" aria-hidden="true"><canvas></canvas></div>
 
 <section class="oss" id="oss" aria-labelledby="ossTitle">
-  <div class="wrap tally" data-tally hidden>
-    <div data-tally-item="downloads" hidden><b data-count="downloads">0</b><span>downloads, all releases</span></div>
-    <div data-tally-item="views" hidden><b data-count="views">0</b><span>people have seen this page</span></div>
-  </div>
   <div class="wrap oss-grid">
     <div data-rv="ask">
       <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
@@ -2317,42 +2309,35 @@ const Footer = (() => {
   } catch { /* offline: the buttons work without it */ }
 })();
 
-/* Live tally ---------------------------------------------------------------
-   Downloads: every APK and Linux tarball across all GitHub releases (the
-   checksum files don't count), re-read every 90 s while the tab is visible;
-   that stays well inside GitHub's 60 requests/hour for anonymous visitors.
-   Views: an Abacus counter (abacus.jasoncameron.dev, no cookies, no account).
-   Each browser counts once (localStorage), then the page listens to the
-   counter's event stream, so the number moves the moment someone arrives. */
+/* Total downloads: every APK and Linux tarball across all GitHub releases
+   (checksum files don't count). Counts up from 0 on load, then re-reads
+   every 90 s while the tab is visible, easing to the new total; that stays
+   well inside GitHub's 60 requests/hour for anonymous visitors. */
 (() => {
-  const box = document.querySelector("[data-tally]");
+  const box = document.querySelector("[data-downloads]");
   if (!box) return;
-  const COUNTER = "https://abacus.jasoncameron.dev";
-  const NS = "saharshbaiju-tandem", KEY = "views";
+  const num = box.querySelector("[data-downloads-n]");
   const fmt = new Intl.NumberFormat("en");
-  const shown = {};
+  let shown = 0, target = 0;
 
-  // Ease the number from what's on screen to the new value.
-  function show(name, value) {
-    if (!Number.isFinite(value)) return;
-    const el = box.querySelector(`[data-count="${name}"]`);
-    box.querySelector(`[data-tally-item="${name}"]`).hidden = false;
-    box.hidden = false;
-    const from = shown[name] ?? 0;
-    shown[name] = value;
-    if (from === value || matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      el.textContent = fmt.format(value); return;
+  function countTo(value) {
+    const from = shown;
+    target = value;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      shown = value; num.textContent = fmt.format(value); return;
     }
-    const t0 = performance.now(), dur = from === 0 ? 1400 : 700;
+    const t0 = performance.now(), dur = from === 0 ? 1600 : 800;
     const step = now => {
+      if (target !== value) return;                 // a newer total took over
       const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
-      el.textContent = fmt.format(Math.round(from + (value - from) * e));
-      if (k < 1 && shown[name] === value) requestAnimationFrame(step);
+      shown = Math.round(from + (value - from) * e);
+      num.textContent = fmt.format(shown);
+      if (k < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   }
 
-  async function downloads() {
+  async function refresh() {
     if (document.hidden) return;
     try {
       const res = await fetch("https://api.github.com/repos/saharshbaiju/tandem/releases?per_page=100");
@@ -2361,31 +2346,14 @@ const Footer = (() => {
       for (const r of await res.json())
         for (const a of r.assets || [])
           if (/\.(apk|tar\.gz)$/.test(a.name)) n += a.download_count;
-      show("downloads", n);
-    } catch { /* offline: the tally just stays hidden */ }
+      if (!n || n === target) return;
+      box.hidden = false;
+      countTo(n);
+    } catch { /* offline: the line just stays hidden */ }
   }
-  downloads();
-  setInterval(downloads, 90000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) downloads(); });
-
-  async function views() {
-    // Local previews (file://, localhost) read the counter but never add to it.
-    let counted = location.protocol === "file:" || /^(localhost|127\.|\[::1\])/.test(location.hostname);
-    try { counted = counted || localStorage.getItem("tandem-viewed") === "1"; } catch {}
-    try {
-      const res = await fetch(`${COUNTER}/${counted ? "get" : "hit"}/${NS}/${KEY}`);
-      if (res.ok) {
-        show("views", (await res.json()).value);
-        if (!counted) try { localStorage.setItem("tandem-viewed", "1"); } catch {}
-      }
-    } catch { return; }
-    if (!("EventSource" in window)) return;
-    try {
-      const live = new EventSource(`${COUNTER}/stream/${NS}/${KEY}`);
-      live.onmessage = e => { try { show("views", JSON.parse(e.data).value); } catch {} };
-    } catch { /* no stream: the first number stays */ }
-  }
-  views();
+  refresh();
+  setInterval(refresh, 90000);
+  document.addEventListener("visibilitychange", refresh);
 })();
 
 /* Live star count. */
