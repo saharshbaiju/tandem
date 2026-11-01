@@ -188,7 +188,7 @@ class StreamSession(
     // ------------------------------------------------------------------ reader
 
     override fun run() {
-        setPriority(Process.THREAD_PRIORITY_DISPLAY)
+        raiseThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
         var outcome = Outcome(null, false)
         try {
             val conn = connectAny()
@@ -542,7 +542,7 @@ class StreamSession(
         }
 
         override fun run() {
-            setPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
+            raiseThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
             decoder = VideoDecoder(surface, object : VideoDecoder.Events {
                 override fun onFrameRendered() {
                     if (!firstFrameShown) {
@@ -835,7 +835,9 @@ class StreamSession(
         const val TOUCH_UP = 2
         const val TOUCH_CANCEL = 3
 
-        private fun setPriority(priority: Int) {
+        // Not named setPriority: inside a Thread subclass that name resolves to
+        // Thread.setPriority (Java range 1-10), which throws on these Linux nice values.
+        private fun raiseThreadPriority(priority: Int) {
             try { Process.setThreadPriority(priority) } catch (e: Exception) {
                 Log.i(TAG, "couldn't raise thread priority", e)
             }
