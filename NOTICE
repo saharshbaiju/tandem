@@ -38,3 +38,13 @@ Additional terms (GNU GPL version 3, section 7)
    follow the GNU GPL for all of the code other than those libraries. If you
    modify this program, you may extend this exception to your version, but
    you are not obliged to; delete this paragraph if you don't.
+
+
+Third-party fonts
+-----------------
+
+The Android app bundles subsets of two fonts, each under the SIL Open Font
+License 1.1 (not the GPL); see android/fonts/ for the licence texts:
+
+  Geist Mono     Copyright 2024 The Geist Project Authors
+  Archivo Black  Copyright 2017 The Archivo Black Project Authors

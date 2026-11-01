@@ -39,7 +39,7 @@ class AsciiSplashView @JvmOverloads constructor(
 
     private val density = resources.displayMetrics.density
 
-    private val textPaint = AsciiType.glyphPaint(Color.WHITE)
+    private val textPaint = AsciiType.glyphPaint(context, Color.WHITE)
     private val bgPaint = Paint().apply { color = Color.BLACK }
     private val hole = Path().apply { fillType = Path.FillType.EVEN_ODD }
 
@@ -92,7 +92,7 @@ class AsciiSplashView @JvmOverloads constructor(
         line = CharArray(cols)
 
         // The wordmark at one pixel per cell, like the website's offscreen canvas.
-        val p = AsciiType.wordPaint().apply { textSize = min(w * 0.26f, h * 0.32f) }
+        val p = AsciiType.wordPaint(context).apply { textSize = min(w * 0.26f, h * 0.32f) }
         p.textSize *= min(1f, w * (if (phone) 0.88f else 0.78f) / p.measureText(AsciiType.WORD))
         val baseline = h / 2f - p.textSize * 0.1f - (p.ascent() + p.descent()) / 2f
         word = AsciiType.rasterize(cols, rows, cellW, cellH) {

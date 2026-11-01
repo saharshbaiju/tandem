@@ -154,7 +154,7 @@ img, svg, canvas { display: block; }
 :focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
 ::selection { background: var(--white); color: var(--black); }
 
-main, footer, .nav { position: relative; z-index: 1; }
+main, footer { position: relative; z-index: 1; }
 
 /* Shared type ---------------------------------------------------------- */
 .mega { font-weight: 900; line-height: .86; letter-spacing: -.02em; font-variation-settings: "wdth" 125; }
@@ -196,23 +196,31 @@ main, footer, .nav { position: relative; z-index: 1; }
   touch-action: none;
 }
 
-/* Nav ------------------------------------------------------------------- */
+/* Nav -------------------------------------------------------------------
+ * No rule under it: the nav is the same colour as the section beneath, so
+ * it has no visible edge. It stays at the top, slides away while you read
+ * down and comes back as soon as you scroll up. Over the inverted security
+ * section it inverts too ("inv"). */
 .nav {
+  position: sticky; top: 0; z-index: 50;
   display: flex; justify-content: space-between; align-items: center;
   padding: 20px var(--gutter);
-  border-bottom: 1px solid var(--gray-2);
-  background: var(--black);
+  --nav-bg: var(--black); --nav-ink: var(--white);
+  background: var(--nav-bg); color: var(--nav-ink);
+  transition: transform .45s var(--ease), background-color .25s, color .25s;
 }
+.nav.inv { --nav-bg: var(--white); --nav-ink: var(--black); }
+.nav.away { transform: translateY(-100%); }
 .wordmark { font: 800 20px/1 var(--display); font-variation-settings: "wdth" 110; letter-spacing: -.01em; text-decoration: none; }
 .nav ul { display: flex; gap: clamp(16px, 3vw, 36px); list-style: none; font: 500 15px var(--text); letter-spacing: -.01em; }
-.nav ul a { text-decoration: none; color: var(--gray-1); transition: color .15s; }
-.nav ul a:hover { color: var(--white); }
+.nav ul a { text-decoration: none; color: color-mix(in srgb, var(--nav-ink) 62%, var(--nav-bg)); transition: color .15s; }
+.nav ul a:hover { color: var(--nav-ink); }
 .nav ul { align-items: center; }
 .nav-chai { display: flex; align-items: center; gap: 7px; }
 .nav-chai svg { width: 17px; height: 17px; flex: none; }
 .nav-chai:hover .steam { transform: translateY(-1.2px); opacity: .55; }
-.theme-btn { font: 500 14px var(--text); color: var(--white); background: transparent; border: 1px solid var(--gray-2); padding: 6px 10px; cursor: pointer; }
-.theme-btn:hover { border-color: var(--white); }
+.theme-btn { font: 500 14px var(--text); color: inherit; background: transparent; border: 1px solid color-mix(in srgb, var(--nav-ink) 35%, var(--nav-bg)); padding: 6px 10px; cursor: pointer; }
+.theme-btn:hover { border-color: var(--nav-ink); }
 
 /* Hero ------------------------------------------------------------------- */
 .hero { min-height: calc(100vh - 61px); min-height: calc(100dvh - 61px); display: flex; flex-direction: column; }
@@ -250,15 +258,14 @@ main, footer, .nav { position: relative; z-index: 1; }
 .intro { opacity: 0; transform: translateY(8px); }
 .in .intro { opacity: 1; transform: none; transition: opacity .35s ease-out, transform .35s var(--ease); transition-delay: calc(var(--i, 0) * 60ms); }
 
-.facts { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--gray-2); }
-.facts > div { padding: 20px 20px 26px; }
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); }
+.facts > div { padding: 24px 20px 30px; }
 .facts > div:first-child { padding-left: var(--gutter); }
-.facts > div + div { border-left: 1px solid var(--gray-2); }
 .facts b { display: block; font: 600 16px var(--text); letter-spacing: -.02em; margin-bottom: 6px; }
 .facts span { color: var(--gray-1); font-size: 16px; }
 
 /* ASCII field band ------------------------------------------------------- */
-.field { height: clamp(140px, 26vh, 260px); border-block: 1px solid var(--gray-2); background: var(--black); }
+.field { height: clamp(140px, 26vh, 260px); background: var(--black); }
 .field canvas { width: 100%; height: 100%; }
 
 /* Statement: the words widen as you scroll ------------------------------- */
@@ -426,12 +433,12 @@ main, footer, .nav { position: relative; z-index: 1; }
 .steps i.on { background: var(--white); }
 /* The stage is scaled to fit, so clipping only stops its unscaled layout box from widening the page. */
 .stage-box { position: relative; min-height: 0; overflow: hidden; contain: paint; }   /* the 3D rig must not widen the page */
-.label-row { display: flex; justify-content: space-between; align-items: end; gap: 16px; border-top: 1px solid var(--gray-2); padding-top: 12px; font: 500 14px var(--text); }
+.label-row { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding-top: 12px; font: 500 14px var(--text); }
 .dev-label { color: var(--white); }
 .dev-hint { color: var(--gray-1); }
 
 /* Pipeline --------------------------------------------------------------- */
-.pipe { padding: clamp(72px, 12vh, 140px) 0 clamp(64px, 10vh, 120px); border-top: 1px solid var(--gray-2); }
+.pipe { padding: clamp(72px, 12vh, 140px) 0 clamp(64px, 10vh, 120px); }
 .ms { font-size: clamp(110px, 22vw, 380px); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ms small { font-size: .3em; font-variation-settings: "wdth" 62; letter-spacing: 0; margin-left: .1em; }
 .pipe .lede { margin-top: 24px; }
@@ -442,7 +449,7 @@ main, footer, .nav { position: relative; z-index: 1; }
 .rail { --lap: clamp(96px, 15%, 230px); --ph: clamp(56px, 8%, 120px); position: relative; margin-top: clamp(48px, 8vh, 96px); }
 #pipeArt { display: block; width: 100%; height: clamp(150px, 20vw, 230px); }
 .stages { display: grid; grid-template-columns: repeat(6, 1fr); margin: 0 var(--ph) 0 var(--lap); }
-.stage-col { padding: 18px 14px 22px; border-left: 1px solid var(--gray-2); }
+.stage-col { padding: 18px 14px 22px; }
 .stage-col .n { font: 500 13px var(--text); font-variant-numeric: tabular-nums; color: var(--gray-1); transition: color .2s; }
 .stage-col h3 { font-size: clamp(18px, 1.8vw, 30px); font-weight: 600; letter-spacing: -.035em; margin: 8px 0 6px; transition: color .2s; }
 .stage-col p { font-size: 15px; color: var(--gray-1); }
@@ -451,12 +458,17 @@ main, footer, .nav { position: relative; z-index: 1; }
 .stage-col.past h3, .stage-col.on h3 { color: var(--white); }
 .stage-col h3 { color: var(--gray-1); }
 
+/* Signal bands: the breaks between sections, instead of rule lines -------- */
+.signal { height: clamp(72px, 12vh, 112px); }
+.signal canvas { width: 100%; height: 100%; }
+.signal + section { padding-top: clamp(28px, 5vh, 56px); }
+
 /* Ways in ------------------------------------------------------------------ */
-.ways { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
-.ways-list { margin-top: clamp(32px, 6vh, 64px); border-top: 1px solid var(--white); }
+.ways { padding: clamp(72px, 12vh, 140px) 0; }
+.ways-list { margin-top: clamp(32px, 6vh, 64px); }
 .way {
   display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px 48px;
-  padding: 28px 0; border-bottom: 1px solid var(--gray-2);
+  padding: 32px 0;
   align-items: center;
 }
 .way h3 {
@@ -469,11 +481,11 @@ main, footer, .nav { position: relative; z-index: 1; }
 .way .speed { display: block; font: 500 14px var(--text); color: var(--white); margin-top: 10px; }
 
 /* Install ----------------------------------------------------------------- */
-.install { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
+.install { padding: clamp(72px, 12vh, 140px) 0; }
 .install-steps { list-style: none; margin-top: clamp(40px, 7vh, 80px); counter-reset: s; }
 .install-steps > li {
   display: grid; grid-template-columns: clamp(64px, 10vw, 170px) minmax(0, 1fr) minmax(0, 1fr); gap: 24px 40px;
-  padding: 36px 0; border-top: 1px solid var(--gray-2);
+  padding: 40px 0;
 }
 .install-steps > li > * { min-width: 0; }
 .install-steps > li::before {
@@ -536,27 +548,24 @@ main, footer, .nav { position: relative; z-index: 1; }
 .vendor ol { padding-left: 1.3em; color: var(--gray-1); font-size: 16px; }
 .vendor ol li + li { margin-top: 4px; }
 .vendor.swap { animation: swap .25s ease-out; }
-.note { border-left: 2px solid var(--white); padding: 4px 0 4px 16px; margin-top: 22px; font-size: 16px; color: var(--gray-1); max-width: 40em; }
 
 /* Security: the one inverted section --------------------------------------- */
 .secure { background: var(--white); color: var(--black); padding: clamp(72px, 12vh, 140px) 0; position: relative; }
 .secure .h2 { max-width: 9em; }
-.secure-grid { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: clamp(40px, 7vh, 80px); border-top: 1px solid var(--black); }
-.secure-grid > div { padding: 24px 24px 0 0; }
-.secure-grid > div + div { border-left: 1px solid var(--black); padding-left: 24px; }
+.secure-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px clamp(24px, 4vw, 64px); margin-top: clamp(40px, 7vh, 80px); }
+.secure-grid > div { padding-top: 8px; }
 .secure-grid h3 { font-size: 22px; font-weight: 600; letter-spacing: -.025em; margin-bottom: 8px; }
 .secure-grid p { opacity: .72; }
 
 /* Desktops ------------------------------------------------------------------ */
 .desktops { padding: clamp(72px, 12vh, 140px) 0; }
 .desk-table { width: 100%; border-collapse: collapse; margin-top: clamp(32px, 6vh, 64px); }
-.desk-table th, .desk-table td { text-align: left; padding: 20px 24px 20px 0; border-top: 1px solid var(--gray-2); vertical-align: top; }
+.desk-table th, .desk-table td { text-align: left; padding: 24px 24px 24px 0; vertical-align: top; }
 .desk-table th { font-size: clamp(26px, 3vw, 46px); font-weight: 600; line-height: 1.05; letter-spacing: -.04em; width: 34%; }
 .desk-table td { font-size: 17px; color: var(--gray-1); }
-.desk-table tr:last-child th, .desk-table tr:last-child td { border-bottom: 1px solid var(--gray-2); }
 
 /* Open source: repo, stars, maker, chai -------------------------------------- */
-.oss { padding: clamp(72px, 12vh, 140px) 0; border-top: 1px solid var(--gray-2); }
+.oss { padding: clamp(72px, 12vh, 140px) 0; }
 .oss-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px clamp(32px, 5vw, 96px); align-items: end; }
 .oss .lede { margin-top: 24px; }
 .btn svg { width: 15px; height: 15px; margin-right: 9px; flex: none; }
@@ -584,7 +593,7 @@ main, footer, .nav { position: relative; z-index: 1; }
 .chai-glass .steam { transition: transform .4s var(--ease), opacity .4s; }
 .btn:hover .chai-glass .steam { transform: translateY(-1.2px); opacity: .55; }
 .btn .count { border-left: 1px solid currentColor; padding-left: 12px; margin-left: 12px; font-variant-numeric: tabular-nums; }
-.maker { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; text-decoration: none; border-top: 1px solid var(--white); padding-top: 24px; }
+.maker { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; text-decoration: none; padding-top: 24px; }
 .maker img { width: clamp(112px, 11vw, 160px); height: auto; aspect-ratio: 1; display: block; filter: grayscale(1); background: var(--gray-3); transition: filter .3s; }
 .maker:hover img { filter: none; }
 .maker a { color: inherit; }
@@ -608,16 +617,16 @@ main, footer, .nav { position: relative; z-index: 1; }
 .chai h2 { font-size: 30px; font-weight: 600; letter-spacing: -.03em; }
 .chai p { margin-top: 8px; color: var(--gray-1); font-size: 15px; }
 .chai img { display: block; width: 100%; height: auto; margin-top: 20px; background: #fff; }
-.chai-id { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-2); }
+.chai-id { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
 .chai-id code { font: 500 16px var(--mono); }
 .chai-id .copy { border: 1px solid var(--white); background: var(--white); color: var(--black); padding: 8px 16px; font: 500 15px var(--text); cursor: pointer; }
 .chai-id .copy:hover { background: var(--black); color: var(--white); }
 .chai .btn { margin-top: 20px; width: 100%; justify-content: center; }
 
 /* Footer --------------------------------------------------------------------- */
-footer { border-top: 1px solid var(--gray-2); background: var(--black); }
+footer { background: var(--black); }
 .foot-word { padding: 4vw var(--gutter) 0; white-space: nowrap; user-select: none; font-size: 22vw; }
-.foot-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 28px var(--gutter) 36px; border-top: 1px solid var(--gray-2); margin-top: 3vw; font: 400 15px var(--text); color: var(--gray-1); }
+.foot-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 28px var(--gutter) 36px; margin-top: 3vw; font: 400 15px var(--text); color: var(--gray-1); }
 .foot-row ul { display: flex; flex-wrap: wrap; gap: 24px; list-style: none; }
 .foot-row a { text-decoration: none; color: var(--white); }
 .foot-row a:hover { text-decoration: underline; }
@@ -627,8 +636,6 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   .hero-main { grid-template-columns: minmax(0, 1fr); }   /* minmax: the one-line command mustn't widen the column */
   .facts { grid-template-columns: 1fr 1fr; }
   .facts > div, .facts > div:first-child { padding: 16px var(--gutter); }
-  .facts > div:nth-child(odd) { border-left: 0; }
-  .facts > div:nth-child(n+3) { border-top: 1px solid var(--gray-2); }
   /* Small screens: the section pins while you scroll, and the scroll slides
      the stages sideways (the packet and the count follow), then lets go. */
   .pipe { height: 340vh; padding: 0; }
@@ -640,9 +647,8 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   .pipe .lede { margin-top: 12px; font-size: 17px; }
   .rail { overflow: hidden; margin: 20px calc(-1 * var(--gutter)) 0; }   /* full bleed: cards slide off the screen edge */
   #pipeArt { height: 120px; width: calc(100% - 2 * var(--gutter)); margin: 0 var(--gutter); }   /* only the card strip bleeds */
-  .stages { display: flex; margin: 0; padding: 0 var(--gutter); will-change: transform; border-top: 1px solid var(--gray-2); border-bottom: 1px solid var(--gray-2); }
+  .stages { display: flex; margin: 0; padding: 0 var(--gutter); will-change: transform; }
   .stage-col { flex: 0 0 72%; }
-  .stage-col:first-child { border-left: 0; }
   .way { grid-template-columns: 1fr; }
   .install-steps > li { grid-template-columns: 1fr; }
   /* One line that you swipe; the fade at the right edge says there's more. */
@@ -656,9 +662,8 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   .vendor { grid-template-columns: 1fr; }
   .secure-grid { grid-template-columns: 1fr; }
   .oss-grid { grid-template-columns: 1fr; }
-  .secure-grid > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--black); margin-top: 24px; }
   .desk-table th, .desk-table td { display: block; width: 100%; padding-right: 0; }
-  .desk-table td { border-top: 0; padding-top: 0; }
+  .desk-table td { padding-top: 0; }
   .nav ul li.opt { display: none; }
   .nav-chai span { display: none; }   /* just the glass; the label is its aria-label */
   .demo-head { grid-template-columns: 1fr; }
@@ -700,7 +705,6 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   .typed { min-height: 150px; font-size: 12px; }
   .qr { width: 160px; height: 160px; }
   .secure-grid > div { padding-top: 18px; }
-  .secure-grid > div + div { margin-top: 18px; }
   .desk-table th { padding: 16px 0 6px; }
   .desk-table td { padding: 0 0 16px; }
   .oss-grid { gap: 32px; }
@@ -831,25 +835,29 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   </div>
 </section>
 
+<div class="signal" aria-hidden="true"><canvas></canvas></div>
+
 <section class="ways" aria-labelledby="waysTitle">
   <div class="wrap">
     <h2 class="h2" id="waysTitle" data-rv="head">Three ways to plug in</h2>
     <div class="ways-list">
       <div class="way" data-rv="row">
-        <h3>USB cable</h3>
-        <p>The fastest. Turn on USB debugging once and plug in; Tandem sets up the link by itself. Works even when the phone is on mobile data.<span class="speed">lowest latency</span></p>
-      </div>
-      <div class="way" data-rv="row">
         <h3>USB tethering</h3>
-        <p>Same cable, no developer options. Switch on USB tethering in the phone's hotspot settings and the computer finds it.<span class="speed">no setup on the phone</span></p>
+        <p>Just a USB cable, no developer options. Switch on USB tethering in the phone's hotspot settings and the computer finds it.<span class="speed">no setup on the phone</span></p>
       </div>
       <div class="way" data-rv="row">
         <h3>Wi-Fi</h3>
-        <p>No cable at all. Put both on the same network. If a firewall blocks the phone, the live view tells you and opens port 5000 when you press f.<span class="speed">cable-free</span></p>
+        <p>No cable at all. Put both on the same network. If a firewall blocks the phone, the live view tells you and opens the port when you press f.<span class="speed">cable-free</span></p>
+      </div>
+      <div class="way" data-rv="row">
+        <h3>USB cable</h3>
+        <p>The fastest. Turn on USB debugging once and plug in; Tandem sets up the link by itself. Works even when the phone is on mobile data.</p>
       </div>
     </div>
   </div>
 </section>
+
+<div class="signal" aria-hidden="true"><canvas></canvas></div>
 
 <section class="install" id="install" aria-labelledby="installTitle">
   <div class="wrap">
@@ -886,7 +894,6 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
           <h3>Install the app on the phone</h3>
           <p>On the phone, open the latest release, tap <b>Tandem.apk</b> and open the download. Android 8 or newer. Each phone maker words the permission a little differently:</p>
           <a class="btn" style="margin-top:18px" href="https://github.com/saharshbaiju/tandem/releases/latest">Download the APK<span class="count" data-version hidden></span></a>
-          <p class="note">Had it before as Screen Extender? Tandem installs as a separate app, so uninstall the old one.</p>
         </div>
         <div>
           <div class="tabs" role="tablist" id="tabs"></div>
@@ -898,7 +905,6 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
           <h3>Scan and connect</h3>
           <p>In the app tap Scan QR code, point it at the terminal and tap Connect. Ripples spread from your finger, then the screen dissolves into your extended desktop.</p>
           <p>The phone's own camera app works too: the code opens Tandem and asks you to confirm the computer.</p>
-          <button class="btn" style="margin-top:20px" type="button" id="replay">Replay the connect ripple</button>
         </div>
         <div>
           <p>Touch the phone's screen to use it. On GNOME there's nothing to set up. On Hyprland, touch needs a one-time permission: the installer offers it, or press t in the live view.</p>
@@ -930,6 +936,8 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   </div>
 </section>
 
+<div class="signal" aria-hidden="true"><canvas></canvas></div>
+
 <section class="oss" id="oss" aria-labelledby="ossTitle">
   <div class="wrap oss-grid">
     <div data-rv="ask">
@@ -952,6 +960,8 @@ footer { border-top: 1px solid var(--gray-2); background: var(--black); }
   </div>
 </section>
 </main>
+
+<div class="signal" aria-hidden="true"><canvas></canvas></div>
 
 <footer>
   <div class="foot-word mega" id="footWord" aria-hidden="true">Tandem</div>
@@ -2065,7 +2075,6 @@ const Demo = (() => {
   });
   select(0);
 
-  document.getElementById("replay").addEventListener("click", () => Splash.run());
 })();
 
 /* Footer word: width follows the pointer across it. */
@@ -2136,6 +2145,92 @@ const Footer = (() => {
     new IntersectionObserver(([e]) => { if (e.isIntersecting) ripple((letters.length - 1) / 2); }, { threshold: .6 }).observe(el);
   }
   return { fit: () => fitWidest(el) };
+})();
+
+/* ===================================================================
+ * Signal bands: the breaks between sections, in place of rule lines.
+ * A sparse haze of characters along a slow wave. When a band scrolls into
+ * view, a packet runs along it and lays the haze down behind it; after
+ * that the band is static (no animation loop at rest).
+ * =================================================================== */
+(() => {
+  const RUN_MS = 1500;
+  const runEase = bezier(.45, 0, .2, 1);
+  /** Stable pseudo-random 0..1 per cell, so redraws don't shimmer. */
+  const hash = (x, y, seed) => { const h = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453; return h - Math.floor(h); };
+  // head: where the packet is (0..1); -1 = not run yet, 2 = done
+  const bands = [...document.querySelectorAll(".signal canvas")].map((canvas, i) => (
+    { canvas, A: createAscii(canvas, 9, 16), seed: 1 + i * 3.7, head: reduceMotion ? 2 : -1 }));
+
+  function draw(band) {
+    const { A, seed, head } = band;
+    A.begin(false);
+    if (head < 0) return;
+    const knotX = head <= 1 ? head * (A.cols + 16) - 8 : Infinity;   // in cells
+    const knots = [];
+    A.g.fillStyle = Theme.dim;
+    for (let r = 0; r < A.rows; r++) {
+      for (let c = 0; c < A.cols; c++) {
+        if (c > knotX) continue;                           // not laid down yet
+        const u = c / A.cols, v = (r + .5) / A.rows;
+        const y = .5 + .2 * Math.sin(u * Math.PI * 1.6 + seed) * Math.sin(u * Math.PI);
+        const near = Math.exp(-((v - y) ** 2) / .03);      // closeness to the wave
+        const edge = Math.min(1, u * 10, (1 - u) * 10);    // thin out at the page edges
+        if (hash(c, r, seed) > near * edge * .55) continue; // sparse: most cells stay empty
+        A.cell(c, r, .12 + .3 * near * hash(r, c, seed + 5));
+        if (head <= 1) {
+          const k = Math.exp(-((c - knotX) ** 2) / 10) * near;
+          if (k > .25) knots.push([c, r, .5 + .5 * k]);
+        }
+      }
+    }
+    A.g.fillStyle = Theme.fg;                              // the packet, bright
+    for (const [c, r, b] of knots) A.cell(c, r, b);
+  }
+
+  function run(band) {
+    const t0 = performance.now();
+    const step = now => {
+      const p = clamp((now - t0) / RUN_MS, 0, 1);
+      band.head = p < 1 ? runEase(p) : 2;
+      draw(band);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  if (reduceMotion || !("IntersectionObserver" in window)) {
+    bands.forEach(b => { b.head = 2; draw(b); });
+  } else {
+    const io = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        io.unobserve(e.target);
+        run(bands.find(b => b.canvas === e.target));
+      }
+    }, { threshold: .9 });
+    bands.forEach(b => io.observe(b.canvas));
+  }
+  addEventListener("resize", () => bands.forEach(b => { b.A.resize(); draw(b); }));
+  const previous = Theme.onChange;
+  Theme.onChange = () => { previous?.(); bands.forEach(draw); };
+})();
+
+/* Nav: out of the way while you read down, back as soon as you scroll up;
+   inverted while it sits over the inverted security section. */
+(() => {
+  const nav = document.querySelector(".nav");
+  const secure = document.querySelector(".secure");
+  let lastY = scrollY;
+  addEventListener("scroll", () => {
+    const y = scrollY;
+    const r = secure.getBoundingClientRect(), h = nav.offsetHeight;
+    nav.classList.toggle("inv", r.top < h / 2 && r.bottom > h / 2);
+    if (Math.abs(y - lastY) < 6) return;                   // ignore jitter
+    nav.classList.toggle("away", y > lastY && y > h);
+    lastY = y;
+  }, { passive: true });
+  nav.addEventListener("focusin", () => nav.classList.remove("away"));   // keyboard users
 })();
 
 /* Scroll reveals for the sections after the demo (styles: "Scroll reveals"). */

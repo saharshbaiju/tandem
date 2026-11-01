@@ -23,11 +23,12 @@ class AsciiWordmarkView @JvmOverloads constructor(
 
     private val density = resources.displayMetrics.density
     private val glyphs = AsciiType.glyphPaint(
+        context,
         MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface),
     ).apply { textSize = GLYPH_DP * density }
     private val cellW = glyphs.measureText("M")
     private val cellH = glyphs.textSize * 1.12f
-    private val word = AsciiType.wordPaint()
+    private val word = AsciiType.wordPaint(context)
     private val bounds = Rect()
 
     private var cols = 0
