@@ -2093,6 +2093,36 @@ const Footer = (() => {
     return span;
   });
   el.replaceChildren(...letters);
+  /*
+   * Kerning, baked in. The browser kerns two letters (the "Ta" pair pulls in
+   * by ~7% of the size) only while both have the same weight; during the
+   * ripple they don't, so the word grew and then snapped narrower the moment
+   * the last letter settled. Instead: automatic kerning off, and each pair's
+   * kern from the font measured once and kept as a margin, in em so it
+   * scales with the fitted size. The spacing is then identical mid-ripple
+   * and at rest.
+   */
+  function bakeKerning() {
+    letters.forEach(l => { l.style.marginRight = ""; });
+    el.style.fontKerning = "none";
+    const probe = document.createElement("span");
+    Object.assign(probe.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", fontSize: "200px" });
+    el.appendChild(probe);
+    const width = (text, kerning) => {
+      probe.style.fontKerning = kerning;
+      probe.textContent = text;
+      return probe.getBoundingClientRect().width;
+    };
+    letters.forEach((l, i) => {
+      const next = letters[i + 1];
+      if (!next) return;
+      const pair = l.textContent + next.textContent;
+      const kern = width(pair, "normal") - width(pair, "none");   // negative: pulls in
+      if (Math.abs(kern) > .01) l.style.marginRight = (kern / 200).toFixed(4) + "em";
+    });
+    probe.remove();
+  }
+  bakeKerning();
   let w = 125, target = 125, shownW = -1, rippleAt = -1e9, rippleFrom = 0;
   let visible = false, running = false, last = 0;
   const dipping = new Set();   // letters with inline styles to clear when they settle
@@ -2150,7 +2180,8 @@ const Footer = (() => {
     new IntersectionObserver(([e]) => { visible = e.isIntersecting; wake(); }).observe(el);
     new IntersectionObserver(([e]) => { if (e.isIntersecting) ripple((letters.length - 1) / 2); }, { threshold: .6 }).observe(el);
   }
-  return { fit: () => fitWidest(el) };
+  // Fonts landing change the kerning too: re-measure, then fit the width.
+  return { fit: () => { bakeKerning(); fitWidest(el); } };
 })();
 
 /* ===================================================================
