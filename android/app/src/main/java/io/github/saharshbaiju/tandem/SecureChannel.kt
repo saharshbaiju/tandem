@@ -172,7 +172,8 @@ object SecureChannel {
      * word when busy or restarting, and that is worth retrying.
      */
     private fun readHandshakeFrame(reader: FrameReader, expectOk: Boolean = false): JSONObject {
-        val f = reader.next() ?: throw IOException("the computer closed the connection while pairing")
+        val f = reader.next(MAX_HANDSHAKE_FRAME)
+            ?: throw IOException("the computer closed the connection while pairing")
         val body = try {
             JSONObject(String(f.body, Charsets.UTF_8))
         } catch (_: Exception) {
@@ -220,4 +221,7 @@ object SecureChannel {
     }
 
     const val CERT_MISMATCH = "certificate fingerprint mismatch"
+
+    /** Largest frame accepted before the computer has proved itself (the daemon's own cap is 1 KB). */
+    private const val MAX_HANDSHAKE_FRAME = 4096
 }

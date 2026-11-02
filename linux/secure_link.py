@@ -50,6 +50,7 @@ the Android app's SecureChannel.kt.
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -83,6 +84,9 @@ FRAME_DENY = b"DENY"
 
 NONCE_BYTES = 32
 HANDSHAKE_TIMEOUT = 6.0          # TLS + pairing proof, whole thing
+FIRST_BYTE_TIMEOUT = 2.0         # a real phone sends its TLS hello at once; a
+#                                  socket that stays silent is only holding a
+#                                  handshake slot
 MAX_HANDSHAKE_FRAME = 1024       # nothing in the handshake is bigger
 
 # Crockford base32: no i, l, o, u, so nothing reads as another character.
@@ -256,45 +260,156 @@ def server_proof(key, fingerprint, client_nonce, server_nonce):
 # Lock-out for addresses that keep failing
 # --------------------------------------------------------------------------- #
 
+# Where `adb reverse` connections come from. Every phone on the USB-debugging
+# path looks like this, so one address stands for many phones (and for any
+# other local program): it is never locked out, and gets a larger share.
+LOCAL_ADDRS = ("127.0.0.1", "::1")
+
+
+def ip_key(ip: str) -> str:
+    """The unit limits are counted per. An IPv6 host owns a whole /64, so
+    rotating addresses inside its own prefix doesn't get around them."""
+    if ":" in ip:
+        try:
+            return str(ipaddress.ip_network(f"{ip.split('%')[0]}/64",
+                                            strict=False))
+        except ValueError:
+            pass
+    return ip
+
+
 class FailureThrottle:
     """After `limit` failed handshakes from one address within `window`
     seconds, refuse that address for `lockout` seconds. The key is far too
     long to guess; this keeps a misbehaving device from filling the log and
-    tying up handshake slots."""
+    tying up handshake slots. LOCAL_ADDRS are exempt: they stand for several
+    phones at once, and a local program must not be able to lock the USB
+    phone out."""
+
+    MAX_TRACKED = 1024              # addresses remembered at once
 
     def __init__(self, limit=5, window=60.0, lockout=60.0):
         self.limit, self.window, self.lockout = limit, window, lockout
-        self._failures = {}             # ip -> deque of timestamps
-        self._locked_until = {}         # ip -> time
+        self._failures = {}             # key -> deque of timestamps
+        self._locked_until = {}         # key -> time
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _key(ip):
+        return None if ip in LOCAL_ADDRS else ip_key(ip)
+
     def blocked(self, ip) -> bool:
+        key = self._key(ip)
+        if key is None:
+            return False
         with self._lock:
-            until = self._locked_until.get(ip)
+            until = self._locked_until.get(key)
             if until is None:
                 return False
             if time.monotonic() < until:
                 return True
-            del self._locked_until[ip]
+            del self._locked_until[key]
             return False
 
     def failed(self, ip) -> bool:
         """Record a failure; True if `ip` is now locked out."""
+        key = self._key(ip)
+        if key is None:
+            return False
         now = time.monotonic()
         with self._lock:
-            times = self._failures.setdefault(ip, deque())
+            if len(self._failures) >= self.MAX_TRACKED:
+                self._prune_locked(now)
+            times = self._failures.setdefault(key, deque())
             times.append(now)
             while times and now - times[0] > self.window:
                 times.popleft()
             if len(times) >= self.limit:
                 times.clear()
-                self._locked_until[ip] = now + self.lockout
+                self._locked_until[key] = now + self.lockout
                 return True
             return False
 
     def succeeded(self, ip):
+        key = self._key(ip)
+        if key is not None:
+            with self._lock:
+                self._failures.pop(key, None)
+
+    def _prune_locked(self, now):
+        for table, dead in ((self._failures,
+                             lambda v: not v or now - v[-1] > self.window),
+                            (self._locked_until, lambda v: now >= v)):
+            for k in [k for k, v in table.items() if dead(v)]:
+                del table[k]
+
+
+class HandshakeSlots:
+    """Bounds the connections that are still proving who they are.
+
+    Unauthenticated sockets cost a thread each, so they are capped. The cap is
+    per host (one machine can't take the whole pool), with a global total, and
+    a small reserve that only addresses which completed a pairing recently may
+    use: a phone that has connected before can still get back in while a flood
+    from many addresses has filled the general pool. (A flood can't pose as
+    such an address: it would need a completed TCP connection from it, and
+    the address must have passed the pairing proof.)
+    """
+
+    def __init__(self, total=32, per_host=4, local_per_host=8, reserve=8,
+                 known_ttl=3600.0, known_max=64):
+        self.total, self.per_host = total, per_host
+        self.local_per_host, self.reserve = local_per_host, reserve
+        self.known_ttl, self.known_max = known_ttl, known_max
+        self._lock = threading.Lock()
+        self._used = 0
+        self._reserve_used = 0
+        self._by_host = {}
+        self._known = {}                # host key -> time of its last pairing
+
+    def acquire(self, ip):
+        """A slot token for a new connection from `ip`, or None if full."""
+        key = ip_key(ip)
+        cap = self.local_per_host if ip in LOCAL_ADDRS else self.per_host
+        now = time.monotonic()
         with self._lock:
-            self._failures.pop(ip, None)
+            if self._by_host.get(key, 0) >= cap:
+                return None
+            if self._used < self.total:
+                kind = "general"
+                self._used += 1
+            elif self._reserve_used < self.reserve and self._known_locked(key, now):
+                kind = "reserve"
+                self._reserve_used += 1
+            else:
+                return None
+            self._by_host[key] = self._by_host.get(key, 0) + 1
+        return (key, kind)
+
+    def release(self, slot):
+        key, kind = slot
+        with self._lock:
+            if kind == "general":
+                self._used -= 1
+            else:
+                self._reserve_used -= 1
+            left = self._by_host.get(key, 0) - 1
+            if left > 0:
+                self._by_host[key] = left
+            else:
+                self._by_host.pop(key, None)
+
+    def mark_known(self, ip):
+        """`ip` just passed the pairing proof."""
+        key, now = ip_key(ip), time.monotonic()
+        with self._lock:
+            self._known[key] = now
+            while len(self._known) > self.known_max:
+                del self._known[min(self._known, key=self._known.get)]
+
+    def _known_locked(self, key, now):
+        seen = self._known.get(key)
+        return seen is not None and now - seen < self.known_ttl
 
 
 # --------------------------------------------------------------------------- #
@@ -309,14 +424,12 @@ class Gatekeeper:
     (key_changed() lets the daemon also drop phones already connected).
     """
 
-    MAX_PENDING_HANDSHAKES = 8
-
     def __init__(self, key_path, cert_path, cert_key_path):
         self.key_path = key_path
         self.context = server_context(cert_path, cert_key_path)
         self.fingerprint = certificate_fingerprint(cert_path)
         self.throttle = FailureThrottle()
-        self.pending = threading.BoundedSemaphore(self.MAX_PENDING_HANDSHAKES)
+        self.slots = HandshakeSlots()
         self._admitted_key = ensure_pairing_key(key_path)
 
     @classmethod
@@ -343,7 +456,7 @@ class Gatekeeper:
         already been told why (DENY) where possible.
         """
         deadline = time.monotonic() + HANDSHAKE_TIMEOUT
-        raw_sock.settimeout(HANDSHAKE_TIMEOUT)
+        raw_sock.settimeout(FIRST_BYTE_TIMEOUT)
         try:
             if not raw_sock.recv(1, socket.MSG_PEEK):
                 raise Abandoned()
@@ -372,7 +485,11 @@ class Gatekeeper:
 
     def _prove(self, tls, deadline):
         ftype, hello = read_json_frame(tls, deadline)
-        if ftype != FRAME_HELLO or int(hello.get("v", 0)) < PROTOCOL_VERSION:
+        try:
+            version = int(hello.get("v", 0))
+        except (ValueError, TypeError, OverflowError):
+            version = -1
+        if ftype != FRAME_HELLO or version < PROTOCOL_VERSION:
             deny(tls, "update the Tandem app on this phone")
             raise AuthError("outdated app (no v2 hello)")
         try:
