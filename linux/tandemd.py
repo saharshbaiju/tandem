@@ -229,6 +229,11 @@ RESYNC_RETRY = 1.0                 # re-ask for a keyframe this often
 RESYNC_RESTART_AFTER = 4.0         # still no keyframe: restart the encoder
 KEYQ_MIN_INTERVAL = 0.5            # rate limit for a phone's KEYQ
 MAX_CLIENTS = 4                    # phones streaming at once
+RECV_BUDGET = 256 * 1024           # bytes read from one phone per I/O pass: a
+#                                    flood can't starve its own sending (or
+#                                    grow the receive buffer without bound)
+MAX_FRAMES_PER_SEC = 5000          # a real phone sends ~100-1200 (touch
+#                                    moves + heartbeat); more is a flood
 
 # Socket tuning (all best effort: a missing option is harmless)
 NOTSENT_LOWAT = 128 * 1024         # unsent kernel bytes before select() blocks
@@ -267,6 +272,9 @@ class Client:
         self._lock = threading.Lock()
         self._on_dead = on_dead
         self._on_message = on_message
+        self._more = False          # RECV_BUDGET ran out: read again, don't wait
+        self._rx_window = time.monotonic()    # incoming-frame rate limit
+        self._rx_frames = 0
         self._wake_r, self._wake_w = os.pipe()
         self._wake_open = True
         os.set_blocking(self._wake_r, False)
@@ -389,6 +397,9 @@ class Client:
                     wait = max(0.0, HEARTBEAT - (now - last_send))
                     if self._peer_heartbeats:
                         wait = min(wait, 0.5)
+                if self._more:
+                    wait = 0.0       # more input is already waiting (TLS may
+                    #                  hold it where select() can't see it)
                 readable, writable, _ = select.select(
                     [self.sock, self._wake_r], [self.sock] if out else [], [], wait)
                 if self._wake_r in readable:
@@ -397,7 +408,8 @@ class Client:
                             pass
                     except BlockingIOError:
                         pass
-                if self.sock in readable and not self._receive(inbuf):
+                if ((self.sock in readable or self._more)
+                        and not self._receive(inbuf)):
                     break
                 if out and self.sock in writable:
                     try:
@@ -430,29 +442,54 @@ class Client:
             self._on_dead(self)
 
     def _receive(self, inbuf):
-        """Read everything available and dispatch whole frames.
+        """Read what is available (at most RECV_BUDGET bytes) and dispatch
+        whole frames as they complete.
 
         False when the phone closed the connection or broke the protocol.
+        Reading is bounded and frames are checked as soon as their 8-byte
+        header is in, so a phone that never stops sending can neither grow
+        `inbuf` past one frame plus one chunk nor keep this thread from
+        sending video.
         """
-        while True:
+        budget = RECV_BUDGET
+        while budget > 0:
             try:
-                chunk = self.sock.recv(65536)
+                chunk = self.sock.recv(min(65536, budget))
             except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
                 break
             if not chunk:
                 return False
+            budget -= len(chunk)
             inbuf += chunk
             self._last_recv = time.monotonic()
-        while len(inbuf) >= 8:
-            length = int.from_bytes(inbuf[4:8], "big")
+            if not self._dispatch(inbuf):
+                return False
+        self._more = budget <= 0
+        return True
+
+    def _dispatch(self, inbuf):
+        """Handle every whole frame in `inbuf`, keep the partial rest.
+        False if the phone broke the protocol."""
+        now = time.monotonic()
+        if now - self._rx_window >= 1.0:
+            self._rx_window, self._rx_frames = now, 0
+        pos, size = 0, len(inbuf)
+        while size - pos >= 8:
+            length = int.from_bytes(inbuf[pos + 4:pos + 8], "big")
             if length > MAX_INCOMING_FRAME:
                 log(f"client {self.addr[0]} sent an oversized frame; "
                     "disconnecting it")
                 return False
-            if len(inbuf) < 8 + length:
+            end = pos + 8 + length
+            if end > size:
                 break
-            frame_type, body = bytes(inbuf[:4]), bytes(inbuf[8:8 + length])
-            del inbuf[:8 + length]
+            self._rx_frames += 1
+            if self._rx_frames > MAX_FRAMES_PER_SEC:
+                log(f"client {self.addr[0]} is flooding the connection; "
+                    "disconnecting it")
+                return False
+            frame_type, body = bytes(inbuf[pos:pos + 4]), bytes(inbuf[pos + 8:end])
+            pos = end
             if frame_type == FRAME_PING:
                 self._peer_heartbeats = True
             elif self._on_message:
@@ -462,6 +499,7 @@ class Client:
                     # A touch/input bug must never end the video connection.
                     log(f"client {self.addr[0]}: error handling "
                         f"{frame_type!r} ({e!r})")
+        del inbuf[:pos]            # once per pass, not once per frame
         return True
 
 
@@ -1045,12 +1083,13 @@ def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
     srv = _bind_with_retries(host, port, stop_evt)
     if srv is None:
         return
-    srv.listen(8)
+    srv.listen(128)       # a burst queues here, not as dropped SYNs
     srv.settimeout(0.5)
     if host in ANY_HOST:
         host = ("every interface (IPv4 + IPv6)"
                 if srv.family == socket.AF_INET6 else "every interface (IPv4)")
     log(f"listening on {host} port {port} (TLS, pairing required)")
+    last_full_log = 0.0
     try:
         while not stop_evt.is_set():
             try:
@@ -1068,22 +1107,30 @@ def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
                 stop_evt.set()       # visible to the TUI, unlike a dead thread
                 break
             addr = _peer(addr)
-            if not gatekeeper.pending.acquire(blocking=False):
-                sock.close()              # too many handshakes in flight
+            slot = gatekeeper.slots.acquire(addr[0])
+            if slot is None:
+                sock.close()      # this host (or everyone) has too many in flight
+                now = time.monotonic()
+                if now - last_full_log > 30:      # a flood must not flood the log
+                    last_full_log = now
+                    log(f"too many pending handshakes; dropping connections "
+                        f"(latest from {addr[0]})")
                 continue
             # Locked out after repeated failures: say so (a silent close looks
             # like a TLS failure to the app, i.e. "update Tandem"). It still
             # needs a handshake slot, so a flood can't take more than those.
             if gatekeeper.throttle.blocked(addr[0]):
-                target, targs = refuse, (sock, addr, gatekeeper, LOCKED_OUT)
+                target, targs = refuse, (sock, addr, gatekeeper, LOCKED_OUT,
+                                         slot)
             else:
-                target, targs = admit, (sock, addr, broadcaster, gatekeeper)
+                target, targs = admit, (sock, addr, broadcaster, gatekeeper,
+                                        slot)
             # The handshake waits on the phone; never let it stall accept().
             try:
                 threading.Thread(target=target, args=targs, daemon=True,
                                  name=f"admit-{addr[0]}").start()
             except RuntimeError as e:     # can't start a thread
-                gatekeeper.pending.release()
+                gatekeeper.slots.release(slot)
                 sock.close()
                 log(f"warning: could not handle {addr[0]} ({e})")
     finally:
@@ -1106,9 +1153,10 @@ def deny_before_okay(sock, gatekeeper, reason):
     deadline = time.monotonic() + secure_link.HANDSHAKE_TIMEOUT
     tls = None
     try:
-        sock.settimeout(secure_link.HANDSHAKE_TIMEOUT)
+        sock.settimeout(secure_link.FIRST_BYTE_TIMEOUT)
         if not sock.recv(1, socket.MSG_PEEK):
             return False              # the app's parallel connect: abandoned
+        sock.settimeout(secure_link.HANDSHAKE_TIMEOUT)
         tls = gatekeeper.context.wrap_socket(sock, server_side=True)
         secure_link.read_json_frame(tls, deadline)
         secure_link.deny(tls, reason)
@@ -1124,16 +1172,23 @@ def deny_before_okay(sock, gatekeeper, reason):
                 pass
 
 
-def refuse(sock, addr, gatekeeper, reason):
+def refuse(sock, addr, gatekeeper, reason, slot):
     """Thread target for a locked-out address: DENY, free the handshake slot.
     Not logged: a misbehaving device would flood the log."""
     try:
         deny_before_okay(sock, gatekeeper, reason)
     finally:
-        gatekeeper.pending.release()
+        gatekeeper.slots.release(slot)
 
 
-def admit(sock, addr, broadcaster, gatekeeper):
+def _printable(text, limit=32):
+    """`text` from a peer, safe for a log line the TUI parses: no newlines or
+    other control characters, nothing that could pass as one of our messages."""
+    return "".join(c for c in str(text)
+                   if c.isascii() and (c.isalnum() or c in " ._-+"))[:limit]
+
+
+def admit(sock, addr, broadcaster, gatekeeper, slot):
     """TLS + pairing proof, then hand the phone to the broadcaster."""
     try:
         _tune_socket(sock)
@@ -1160,13 +1215,17 @@ def admit(sock, addr, broadcaster, gatekeeper):
         transport = isinstance(e, OSError)     # AuthError is not an OSError
         locked = not transport and gatekeeper.throttle.failed(addr[0])
         if not isinstance(e, (secure_link.AuthError, OSError)):
-            e = f"malformed handshake ({type(e).__name__}: {e})"
+            # Type only: the message can echo what the (unauthenticated) peer
+            # sent, and the TUI reads these lines.
+            e = f"malformed handshake ({type(e).__name__})"
         log(f"client {addr[0]} rejected: {e}"
             + (" (locked out for a minute)" if locked else ""))
         return
     finally:
-        gatekeeper.pending.release()
+        gatekeeper.slots.release(slot)
     gatekeeper.throttle.succeeded(addr[0])
+    gatekeeper.slots.mark_known(addr[0])
+    app = _printable(app)
     log(f"client {addr[0]} paired" + (f" (app {app})" if app else ""))
     try:
         broadcaster.add(tls, addr)

@@ -47,6 +47,9 @@ TOUCH_BODY = struct.Struct(">BBHH")
 COORD_SCALE = 65535.0
 
 MAX_INCOMING_FRAME = 4096     # nothing a phone sends is bigger than this
+MAX_FINGERS_PER_CLIENT = 5    # one phone can't take every slot of the shared
+#                               touchscreen (a hand has 5; others must still
+#                               be able to touch)
 
 
 def log(*a):
@@ -81,6 +84,9 @@ class TouchRouter:
                 if slot is None:
                     if not self._free_slots:
                         return            # more fingers than the device has
+                    if sum(1 for k in self._slot_of
+                           if k[0] is client) >= MAX_FINGERS_PER_CLIENT:
+                        return            # this phone already has its share
                     slot = self._free_slots.pop(0)
                     self._slot_of[key] = slot
                 self.surface.down(slot, x, y)

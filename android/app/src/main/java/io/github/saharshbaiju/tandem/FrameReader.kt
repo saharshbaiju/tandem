@@ -25,15 +25,21 @@ class FrameReader(private val src: InputStream) {
 
     private val header = ByteArray(8)
 
-    /** Blocks until a full frame is read; returns null at end of stream. */
+    /**
+     * Blocks until a full frame is read; returns null at end of stream.
+     * A frame whose announced length exceeds [maxLength] is refused before any
+     * memory is allocated for it: during pairing the computer is not yet
+     * trusted (it may be a stale or hostile host at an address in the QR), and
+     * its handshake frames are tiny.
+     */
     @Throws(java.io.IOException::class)
-    fun next(): Frame? {
+    fun next(maxLength: Int = MAX_FRAME): Frame? {
         if (!readFully(header, 8)) return null
         val len = ((header[4].toInt() and 0xFF) shl 24) or
             ((header[5].toInt() and 0xFF) shl 16) or
             ((header[6].toInt() and 0xFF) shl 8) or
             (header[7].toInt() and 0xFF)
-        if (len < 0 || len > MAX_FRAME) throw java.io.IOException("corrupt frame from the computer")
+        if (len < 0 || len > maxLength) throw java.io.IOException("corrupt frame from the computer")
         val body = ByteArray(len)
         if (!readFully(body, len)) return null
         return Frame(typeOf(header), body)
