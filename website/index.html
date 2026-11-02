@@ -558,6 +558,11 @@ main, footer { position: relative; z-index: 1; }
 .vendor h4 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
 .vendor ol { padding-left: 1.3em; color: var(--gray-1); font-size: 16px; }
 .vendor ol li + li { margin-top: 4px; }
+.vendor .wide { grid-column: 1 / -1; }
+.vendor p { color: var(--gray-1); font-size: 16px; max-width: 40em; }
+.vendor .hint { margin-top: 8px; font-size: 14px; }
+.vendor .note { border: 1px solid var(--white); padding: 12px 16px; max-width: none; }
+.vendor .note b { color: var(--white); }
 .vendor.swap { animation: swap .25s ease-out; }
 
 /* Security: the one inverted section --------------------------------------- */
@@ -895,8 +900,8 @@ footer { background: var(--black); }
         <div class="qr-box">
           <div class="qr"><canvas id="qr" width="29" height="29"></canvas><div class="scan"></div></div>
           <dl>
-            <dt>link</dt><dd>USB cable</dd>
-            <dt>address</dt><dd>127.0.0.1:5000</dd>
+            <dt>link</dt><dd>USB tethering</dd>
+            <dt>address</dt><dd>192.168.42.129:5000</dd>
             <dt>pairing code</dt><dd>4821 7730</dd>
           </dl>
         </div>
@@ -2051,19 +2056,19 @@ const Demo = (() => {
   const VENDORS = {
     "Pixel / stock": {
       apk: ["Open the downloaded APK from the notification or Files.", "Android asks to allow installs from your browser: tap Settings.", "Turn on Allow from this source, go back, tap Install."],
-      usb: ["Settings › About phone: tap Build number seven times.", "Settings › System › Developer options.", "Turn on USB debugging, plug in, tap Allow on the prompt."],
+      usb: ["Plug the phone into the computer.", "Settings › Network & internet › Hotspot & tethering.", "Turn on USB tethering."],
     },
     "Samsung": {
       apk: ["Open the APK from My Files › Downloads.", "When asked, tap Settings and turn on Allow from this source for your browser.", "Go back and tap Install."],
-      usb: ["Settings › About phone › Software information: tap Build number seven times.", "Developer options now sits at the bottom of Settings.", "Turn on USB debugging, plug in, tap Allow."],
+      usb: ["Plug the phone into the computer.", "Settings › Connections › Mobile Hotspot and Tethering.", "Turn on USB tethering."],
     },
     "Xiaomi / POCO": {
       apk: ["Open the APK from the browser's downloads.", "Allow installs from this source when HyperOS asks.", "Tap Install. If a security scan runs, let it finish."],
-      usb: ["Settings › About phone: tap OS version seven times.", "Settings › Additional settings › Developer options.", "Turn on USB debugging, plug in, tap Allow."],
+      usb: ["Plug the phone into the computer.", "Settings › Connection & sharing.", "Turn on USB tethering."],
     },
     "OnePlus / Oppo": {
       apk: ["Open the APK from File Manager › Downloads.", "Allow installs from your browser when asked.", "Tap Install."],
-      usb: ["Settings › About device › Version: tap Build number seven times.", "Settings › System settings › Developer options.", "Turn on USB debugging, plug in, tap Allow."],
+      usb: ["Plug the phone into the computer.", "Settings › Connection & sharing.", "Turn on USB tethering."],
     },
   };
   const tabs = document.getElementById("tabs");
@@ -2076,7 +2081,8 @@ const Demo = (() => {
     panel.setAttribute("aria-labelledby", "tab" + i);
     panel.innerHTML = `
       <div><h4>Allow the install</h4><ol>${v.apk.map(s => `<li>${s}</li>`).join("")}</ol></div>
-      <div><h4>USB debugging, for the cable link</h4><ol>${v.usb.map(s => `<li>${s}</li>`).join("")}</ol></div>`;
+      <div><h4>USB tethering, the best link</h4><ol>${v.usb.map(s => `<li>${s}</li>`).join("")}</ol><p class="hint">No developer options needed. Can't find it? Search Settings for USB tethering.</p></div>
+      <p class="note wide"><b>Note:</b> for optimal performance on Wi-Fi, connect the laptop to the phone's hotspot. No mobile data needed.</p>`;
     panel.classList.remove("swap"); panel.offsetWidth; panel.classList.add("swap");
   }
   tabs.addEventListener("click", e => { const b = e.target.closest("button"); if (b) select([...tabs.children].indexOf(b)); });
