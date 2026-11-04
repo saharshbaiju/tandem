@@ -1,6 +1,7 @@
 package io.github.saharshbaiju.tandem
 
 import android.util.Base64
+import android.util.Size
 import java.io.IOException
 import java.net.Socket
 import java.security.MessageDigest
@@ -24,7 +25,7 @@ import org.json.JSONObject
  *     computer, and nothing is sent.
  *  2. Mutual proof of the pairing key, bound to the certificate actually seen:
  *
- *        HELO {v, nonce}  ->   <- CHAL {v, nonce}
+ *        HELO {v, nonce, app, display}  ->   <- CHAL {v, nonce}
  *        AUTH {proof}     ->   <- OKAY {proof}  /  DENY {reason}
  *
  *     proof = HMAC-SHA256(key, "tandem-v2 client|server" 0 fingerprint nc ns).
@@ -32,10 +33,14 @@ import org.json.JSONObject
  *     before reading a single video frame or sending a touch, so a look-alike
  *     computer can neither show us a fake desktop nor receive our touches.
  *     This also covers an address typed by hand (no fingerprint to pin).
+ *
+ *  `display` is our screen size: the computer creates its virtual monitor
+ *  at that size, so the desktop fills the screen exactly.
  */
 object SecureChannel {
 
-    const val PROTOCOL_VERSION = 2
+    /** Must match the computer's (linux/secure_link.py) exactly. */
+    const val PROTOCOL_VERSION = 3
     private const val NONCE_BYTES = 32
 
     const val TYPE_HELLO = "HELO"
@@ -135,20 +140,26 @@ object SecureChannel {
     }
 
     /**
-     * Prove we know [key] and check the computer does too. Returns normally
-     * when both sides are verified; throws [PairingException] (bad answer or
-     * proof), [DeniedException] (refused) or IOException (link broke).
+     * Prove we know [key] and check the computer does too, telling it our
+     * [display] size on the way. Returns normally when both sides are
+     * verified; throws [PairingException] (bad answer or proof),
+     * [DeniedException] (refused) or IOException (link broke).
      */
     fun authenticate(reader: FrameReader, writer: FrameWriter, key: String,
-                     certFingerprint: ByteArray, appVersion: String) {
+                     certFingerprint: ByteArray, appVersion: String, display: Size) {
         val clientNonce = ByteArray(NONCE_BYTES).also { random.nextBytes(it) }
         writer.send(TYPE_HELLO, JSONObject()
             .put("v", PROTOCOL_VERSION)
             .put("nonce", b64url(clientNonce))
             .put("app", appVersion)
+            .put("display", JSONObject().put("w", display.width).put("h", display.height))
             .toString().toByteArray(Charsets.UTF_8))
 
         val challenge = readHandshakeFrame(reader)
+        if (challenge.optInt("v") != PROTOCOL_VERSION) {
+            throw PairingException("update Tandem on the computer: it speaks an older " +
+                "version than this app")
+        }
         val serverNonce = b64urlDecode(challenge.optString("nonce"))
         if (serverNonce == null || serverNonce.size != NONCE_BYTES) {
             throw PairingException("unexpected answer from the computer")

@@ -44,13 +44,17 @@ QUALITY = {"low": "4M", "medium": "8M", "high": "12M", "ultra": "20M"}
 # hands the PC an address on this subnet.
 USB_TETHER_PREFIX = "192.168.42."
 
-RES_PRESETS = [
-    ("Match connected phone (USB)", None),
-    ("1280x720", (1280, 720)),
-    ("1920x1080", (1920, 1080)),
-    ("2560x1440", (2560, 1440)),
-    ("3840x2160", (3840, 2160)),
-]
+# "auto": the daemon sizes the monitor to the first phone that pairs.
+RESOLUTIONS = ["auto", "1280x720", "1920x1080", "2560x1440", "3840x2160"]
+
+# Desktop scales to offer: every step GNOME or Hyprland can produce. The one
+# picked is a wish; the desktop uses the nearest it allows at the monitor's
+# size (2160x1856 allows 133% but not 125%), and the live view shows it.
+SCALES = [1.0, 1.25, 1.333, 1.5, 1.667, 2.0, 2.5, 2.667, 3.0]
+
+
+def percent(scale) -> str:
+    return f"{float(scale) * 100:.0f}%"
 
 
 @dataclass
@@ -58,8 +62,9 @@ class Config:
     backend: str = "auto"          # auto / hyprland / gnome
     output: str = "EXT-1"
     side: str = "right"            # right / left / up / down
-    width: int = 1920
-    height: int = 1080
+    resolution: str = "auto"       # auto / WIDTHxHEIGHT (see RESOLUTIONS)
+    resize: bool = True            # auto: follow the phone when it's folded
+#                                    or rotated (False: keep the first size)
     fps: int = 60
     scale: float = 1.0             # desktop scale of the virtual monitor
     quality: str = "high"          # low / medium / high / ultra
@@ -78,11 +83,10 @@ class Config:
 
     def tandemd_args(self) -> list:
         """Build the explicit CLI for tandemd.py from this config."""
-        return [
+        args = [
             "--backend", self.resolved_backend() or "auto",
             "--output", self.output,
-            "--width", str(self.width),
-            "--height", str(self.height),
+            "--resolution", self.resolution,
             "--fps", str(self.fps),
             "--scale", str(self.scale),
             "--bitrate", self.bitrate(),
@@ -93,7 +97,12 @@ class Config:
             "--port", str(self.port),
             "--quality", self.quality,
             "--pairing-key-file", PAIRING_KEY_PATH,
-        ] + ([] if self.touch else ["--no-touch"])
+        ]
+        if not self.touch:
+            args.append("--no-touch")
+        if not self.resize:
+            args.append("--no-resize")
+        return args
 
 
 # --------------------------------------------------------------------------- #
@@ -119,16 +128,14 @@ def save_config(cfg: Config) -> None:
 
 
 # Settings advertised to the phone. Keys must match build_banner_payload() in
-# tandemd.py; the daemon also reads side/scale from here on SIGHUP and moves
-# the monitor live.
+# tandemd.py, which adds the monitor's size (only the daemon knows it); the
+# daemon also reads side/scale from here on SIGUSR1 and moves the monitor live.
 BANNER_PATH = os.path.join(CONFIG_DIR, "daemon-banner.json")
 
 
 def banner_payload(cfg: Config) -> dict:
     return {
         "side": cfg.side,
-        "width": cfg.width,
-        "height": cfg.height,
         "fps": cfg.fps,
         "scale": cfg.scale,
         "quality": cfg.quality,
@@ -385,18 +392,6 @@ def detect_va_device() -> str:
     return "/dev/dri/renderD128"
 
 
-def adb_device_present() -> bool:
-    if not shutil.which("adb"):
-        return False
-    try:
-        r = subprocess.run(["adb", "devices"], capture_output=True,
-                           text=True, timeout=5)
-        return any(l.strip().endswith("device")
-                   for l in r.stdout.splitlines()[1:])
-    except Exception:
-        return False
-
-
 def adb_status() -> str:
     """'missing' (no adb), 'none' (nothing plugged in / debugging off),
     'unauthorized' (phone hasn't accepted this PC's key yet) or 'ok'."""
@@ -651,23 +646,6 @@ def adb_reverse(port: int) -> bool:
             ok = False
     _adb_reverse_cache[port] = (now, ok)
     return ok
-
-
-def detect_phone_size(landscape: bool = True):
-    """(w, h) of a USB phone's panel, oriented for the (landscape) app."""
-    if not adb_device_present():
-        return None
-    try:
-        r = subprocess.run(["adb", "shell", "wm", "size"],
-                           capture_output=True, text=True, timeout=5)
-        m = re.search(r"(\d+)x(\d+)", r.stdout)
-        if not m:
-            return None
-        a, b = int(m.group(1)), int(m.group(2))
-        w, h = (max(a, b), min(a, b)) if landscape else (min(a, b), max(a, b))
-        return (w - w % 2, h - h % 2)   # encoders want even dimensions
-    except Exception:
-        return None
 
 
 # Interfaces that are never a path to the phone (containers, VMs, VPN tunnels).

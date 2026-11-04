@@ -10,7 +10,10 @@ Backend interface (duck-typed):
     missing()            -> list of missing tools (static)
     setup()              -> create the virtual monitor / capture session
     start_capture()      -> readable binary stream of Annex-B H.264
-    apply_live(side, scale) -> re-place / re-scale without restarting
+    apply_live(side, scale) -> re-place / re-scale the monitor; True if the
+                            capture must restart for it to keep working
+    resize()             -> give the monitor args.width x args.height, in
+                            place (the daemon then restarts capture)
     stop_capture(), teardown()
 
 start_capture() / stop_capture() may be called again within one session

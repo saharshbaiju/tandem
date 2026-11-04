@@ -16,6 +16,8 @@ import java.io.OutputStream
  *           keyframe or asks the encoder for one; older daemons ignore it.
  *   "PING"  empty: sent after 1 s without anything else, so the computer can
  *           tell a live phone from a vanished one. Older daemons ignore it.
+ *   "DISP"  JSON {"w", "h"}: our screen changed size (folded, unfolded,
+ *           rotated). The computer resizes its virtual monitor to match.
  *
  * Each call goes out in a single write so the bytes of two frames can never
  * interleave; [send] / [sendAll] are synchronized for the same reason.
@@ -49,5 +51,6 @@ class FrameWriter(private val out: OutputStream) {
         const val TYPE_TOUCH = "TUCH"
         const val TYPE_KEYFRAME_REQUEST = "KEYQ"
         const val TYPE_PING = "PING"
+        const val TYPE_DISPLAY = "DISP"
     }
 }

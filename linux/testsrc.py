@@ -104,10 +104,12 @@ def main():
     tandemd.log(f"pairing QR: {core.connect_uri(cfg)}")
     tandemd.log(f"pairing code: {core.pairing_code()}")
     gatekeeper = secure_link.Gatekeeper.from_files()
-    b = tandemd.Broadcaster(banner, phone_input)
+    b = tandemd.Broadcaster()
+    b.attach(banner, phone_input, keyframes=None)  # the pattern has a fixed size
     stop = threading.Event()
     threading.Thread(target=tandemd.accept_loop,
-                     args=("0.0.0.0", args.port, b, gatekeeper, stop),
+                     args=("0.0.0.0", args.port, b, gatekeeper,
+                           lambda display: None, stop),
                      daemon=True).start()
     tandemd.log(f"test pattern {args.width}x{args.height}@{args.fps} via {enc}"
                   f"{' (static)' if args.static else ''}; Ctrl+C to stop")

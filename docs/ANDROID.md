@@ -62,8 +62,9 @@ stutter while streaming. The app requests no camera, location or storage access.
                                      link drops ──▶ "Reconnecting…" (auto, backoff)
 ```
 
-**Connect screen** (Material 3, two panes in landscape). The left pane shows
-"Tandem" in ASCII (`AsciiWordmarkView`), the tagline and the credit. The right
+**Connect screen** (Material 3, two panes side by side in landscape, stacked in
+portrait by `layoutConnectScreen`). The left (top) pane shows
+"Tandem" in ASCII (`AsciiWordmarkView`), the tagline and the credit. The right (bottom)
 pane is a card that shows either *Connect to your computer* with a large **Scan
 QR code** button, or *Ready to connect* with the computer's name and addresses,
 **Connect**, *Scan again* and *Enter address manually*. In landscape, the card
@@ -255,6 +256,11 @@ computer is reachable and Tandem is not running), then a timeout.
 **Secure the connection** (`SecureChannel`, 5 s timeout). Establish TLS,
 accepting only the certificate pinned by the QR code. Then exchange `HELO`,
 `CHAL`, `AUTH` and `OKAY`, and check the computer's proof before anything else.
+The `HELO` carries the app's window size (`display`), and the computer creates
+its virtual monitor at that size, so the desktop fills the screen without black
+bars. The app runs in either orientation. When the window changes size
+(folded, unfolded, rotated), `StreamSession.displayChanged` sends a `DISP`
+frame with the new size and the computer resizes the monitor to match.
 
 **Final or retry** (`classify`). A session ends as *final*
 (`onStopped(…, final = true)`), with the reason shown and no reconnect, only for

@@ -35,6 +35,12 @@ I drag something onto it" bug):
   * Touches are injected on their own thread (phone_input.py): a slow
     compositor can never stall the video.
 
+The virtual monitor only appears once a phone has paired, at that phone's
+screen size (its hello says it; --resolution can fix a size instead), and it
+follows that phone when it is folded or rotated (DISP; --no-resize keeps the
+first size). So no size has to be configured, and no empty monitor sits on
+the desktop while no phone is watching.
+
 Transport is TCP on every interface, IPv4 and IPv6 (USB tethering, Wi-Fi, adb
 reverse all work), wrapped in TLS. A connection receives nothing until it
 passes the pairing handshake in secure_link.py (certificate fingerprint +
@@ -158,6 +164,8 @@ def kill_stale():
 #           to decode something). Answered with a GOP replay / new IDR.
 #   PING -> empty heartbeat. A phone that sends them is timed out after
 #           READ_TIMEOUT of silence (older apps never send one: no timeout).
+#   DISP -> JSON {"w": px, "h": px}: the phone's screen changed size (it was
+#           folded, unfolded or rotated). The monitor follows it.
 # Before any of these, the handshake frames HELO / CHAL / AUTH / OKAY / DENY
 # (secure_link.py). Unknown types are ignored on both ends, so new ones stay
 # compatible.
@@ -166,6 +174,7 @@ FRAME_NAL = b"NALU"
 FRAME_BANNER = b"ASX1"
 FRAME_PING = b"PING"
 FRAME_KEYFRAME_REQUEST = b"KEYQ"
+FRAME_DISPLAY = b"DISP"
 
 
 def frame(ftype, body=b""):
@@ -196,7 +205,8 @@ def load_banner_payload(args, backend_name=""):
     """Current banner body: the live --banner-file if present, else from args.
 
     The TUI keeps --banner-file up to date and sends SIGUSR1 so live changes
-    (side / scale) reach already-connected phones.
+    (side / scale) reach already-connected phones. The monitor's size always
+    comes from args: only the daemon knows it (it follows the first phone).
     """
     if args.banner_file:
         try:
@@ -205,6 +215,7 @@ def load_banner_payload(args, backend_name=""):
             if data:
                 data.setdefault("host", socket.gethostname())
                 data.setdefault("backend", backend_name)
+                data["width"], data["height"] = args.width, args.height
                 return json.dumps(data).encode("utf-8")
         except (OSError, ValueError):
             pass
@@ -255,9 +266,10 @@ class Client:
     only touches it under its own lock.
     """
 
-    def __init__(self, sock, addr, on_dead, on_message=None):
+    def __init__(self, sock, addr, display, on_dead, on_message=None):
         self.sock = sock
         self.addr = addr
+        self.display = display      # its screen (w, h); DISP updates it
         self.started = False        # True once it has a keyframe to decode from
         self.resync_since = time.monotonic()   # waiting for a keyframe since
         self.last_keyframe_ask = 0.0
@@ -588,18 +600,68 @@ class KeyframeSource:
 
 class Broadcaster:
     """Fans NAL frames out to every client; owns the SPS/PPS/GOP caches and
-    every client's resync state."""
+    every client's resync state.
 
-    def __init__(self, banner_payload=b"", phone_input=None):
+    It runs before the virtual monitor exists: the first phone to pair
+    decides the monitor's size. Phones admitted until then get heartbeats
+    only; attach() sends them the settings and the touch state once the
+    monitor is up, and the video follows on its first keyframe.
+
+    The monitor follows the longest-connected phone (the one that created
+    it, unless it left): `on_screen(display)` hears that phone's screen size
+    whenever it changes, or whenever another phone takes its place.
+    """
+
+    def __init__(self):
         self._clients = []
-        self.phone_input = phone_input      # handles TUCH / INPT, or None
-        self.keyframes = None               # KeyframeSource, set by main()
+        self.phone_input = None             # PhoneInput, set by attach()
+        self.keyframes = None               # KeyframeSource, set by attach()
         self._lock = threading.Lock()
         self.sps = None             # framed
         self.pps = None             # framed
         self.gop = None             # framed NALs since the last IDR, or None
         self._gop_bytes = 0
-        self.banner_payload = banner_payload
+        self.banner_payload = None  # settings JSON, once the monitor is up
+        self.on_screen = None       # set by attach(), or never (fixed size)
+
+    def attach(self, banner_payload, phone_input, keyframes, on_screen=None):
+        """The monitor is up: tell the phones already here what they get.
+
+        on_screen: called with the followed phone's screen size, at once
+        (it may have changed while the monitor was being created) and on
+        every later change. None keeps the monitor's size.
+        """
+        with self._lock:
+            self.banner_payload = banner_payload
+            self.phone_input = phone_input
+            self.keyframes = keyframes
+            self.on_screen = on_screen
+            clients = list(self._clients)
+            followed = self._followed_locked()
+        for c in clients:
+            c.send_message(FRAME_BANNER, banner_payload)
+            phone_input.on_admitted(c)
+        if on_screen and followed:
+            on_screen(followed.display)
+
+    def _followed_locked(self):
+        """The phone the monitor's size follows: the longest-connected."""
+        return self._clients[0] if self._clients else None
+
+    def _screen_changed(self, followed_before):
+        """Call on_screen if the followed phone, or its size, changed.
+        `followed_before` is (client, display) from before the change."""
+        with self._lock:
+            followed = self._followed_locked()
+            on_screen = self.on_screen
+        if (on_screen and followed
+                and (followed, followed.display) != followed_before):
+            on_screen(followed.display)
+
+    def _followed_state(self):
+        with self._lock:
+            c = self._followed_locked()
+            return (c, c.display if c else None)
 
     def set_banner(self, payload):
         with self._lock:
@@ -612,8 +674,10 @@ class Broadcaster:
         with self._lock:
             return len(self._clients) >= MAX_CLIENTS
 
-    def add(self, sock, addr):
-        """Start streaming to a phone that passed the pairing handshake."""
+    def add(self, sock, addr, display):
+        """Start streaming to a phone that passed the pairing handshake.
+        `display` is its screen size (w, h) from the hello."""
+        before = self._followed_state()
         with self._lock:
             if len(self._clients) >= MAX_CLIENTS:
                 # Normally refused before the handshake (deny_before_okay);
@@ -623,8 +687,13 @@ class Broadcaster:
                 log(f"client {addr[0]} refused: {MAX_CLIENTS} phones already "
                     "connected")
                 return
-            c = Client(sock, addr, self._remove, self._on_client_message)
-            c.send_message(FRAME_BANNER, self.banner_payload)
+            c = Client(sock, addr, display, self._remove,
+                       self._on_client_message)
+            # Read under the lock, with the append: a phone is either here
+            # for attach() to tell, or sees what attach() set. Never both.
+            phone_input = self.phone_input
+            if self.banner_payload is not None:
+                c.send_message(FRAME_BANNER, self.banner_payload)
             # Replay the current GOP: the decoder catches up to "now"
             # instantly, even if the desktop is static.
             replayed = self._start_locked(c, time.monotonic())
@@ -637,10 +706,12 @@ class Broadcaster:
                 + ("  [gop replay]" if replayed else ""))
         if not replayed:
             self._ask_keyframe()
-        if self.phone_input:
-            self.phone_input.on_admitted(c)       # tells the phone about touch
+        if phone_input:
+            phone_input.on_admitted(c)            # tells the phone about touch
+        self._screen_changed(before)
 
     def _remove(self, c):
+        before = self._followed_state()
         with self._lock:
             if c in self._clients:
                 self._clients.remove(c)
@@ -648,6 +719,7 @@ class Broadcaster:
         if self.phone_input:
             self.phone_input.on_disconnect(c)   # lift fingers it left down
         log(f"client disconnected: {c.addr[0]}:{c.addr[1]} (total {n})")
+        self._screen_changed(before)
 
     def close_all(self):
         with self._lock:
@@ -659,8 +731,23 @@ class Broadcaster:
         """Frames a phone sends: keyframe requests here, the rest is input."""
         if frame_type == FRAME_KEYFRAME_REQUEST:
             self.resync(client, "phone asked for a keyframe", rate_limit=True)
+        elif frame_type == FRAME_DISPLAY:
+            self._on_display(client, body)
         elif self.phone_input:
             self.phone_input.on_message(client, frame_type, body)
+
+    def _on_display(self, client, body):
+        """DISP: the phone's screen changed size (folded, rotated)."""
+        try:
+            display = secure_link.parse_display(json.loads(body))
+        except ValueError:
+            return
+        if display is None:
+            return                  # implausible: keep what we had
+        before = self._followed_state()
+        with self._lock:
+            client.display = display
+        self._screen_changed(before)
 
     # ---- resync ------------------------------------------------------------ #
 
@@ -1079,7 +1166,7 @@ def _bind_with_retries(host, port, stop_evt):
     return None
 
 
-def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
+def accept_loop(host, port, broadcaster, gatekeeper, on_paired, stop_evt):
     srv = _bind_with_retries(host, port, stop_evt)
     if srv is None:
         return
@@ -1124,7 +1211,7 @@ def accept_loop(host, port, broadcaster, gatekeeper, stop_evt):
                                          slot)
             else:
                 target, targs = admit, (sock, addr, broadcaster, gatekeeper,
-                                        slot)
+                                        slot, on_paired)
             # The handshake waits on the phone; never let it stall accept().
             try:
                 threading.Thread(target=target, args=targs, daemon=True,
@@ -1188,8 +1275,12 @@ def _printable(text, limit=32):
                    if c.isascii() and (c.isalnum() or c in " ._-+"))[:limit]
 
 
-def admit(sock, addr, broadcaster, gatekeeper, slot):
-    """TLS + pairing proof, then hand the phone to the broadcaster."""
+def admit(sock, addr, broadcaster, gatekeeper, slot, on_paired):
+    """TLS + pairing proof, then hand the phone to the broadcaster.
+
+    on_paired(display) learns the screen size (w, h) of every phone that
+    passed the proof, before it is streamed to.
+    """
     try:
         _tune_socket(sock)
         if broadcaster.full():
@@ -1197,7 +1288,7 @@ def admit(sock, addr, broadcaster, gatekeeper, slot):
                 log(f"client {addr[0]} refused: {MAX_CLIENTS} phones already "
                     "connected")
             return
-        tls, app = gatekeeper.handshake(sock)
+        tls, hello = gatekeeper.handshake(sock)
     except secure_link.Abandoned:
         sock.close()              # the app's parallel connect: another address won
         return
@@ -1225,33 +1316,194 @@ def admit(sock, addr, broadcaster, gatekeeper, slot):
         gatekeeper.slots.release(slot)
     gatekeeper.throttle.succeeded(addr[0])
     gatekeeper.slots.mark_known(addr[0])
-    app = _printable(app)
-    log(f"client {addr[0]} paired" + (f" (app {app})" if app else ""))
+    app = _printable(hello.app)
+    log(f"client {addr[0]} paired" + (f" (app {app})" if app else "")
+        + ", screen {}x{}".format(*hello.display))
+    on_paired(hello.display)
     try:
-        broadcaster.add(tls, addr)
+        broadcaster.add(tls, addr, hello.display)
     except OSError as e:
         log(f"client {addr[0]} failed after pairing ({e})")
 
 
 # --------------------------------------------------------------------------- #
-# Touch input
+# The virtual monitor
 # --------------------------------------------------------------------------- #
 
-def start_touch(args, backend):
-    """Create the backend's virtual touchscreen.
+class FirstPhone:
+    """Waits for the first phone to pair; its screen sizes the monitor.
 
-    Returns (surface, "") on success, or (None, reason) — the reason is shown
-    on the phone, so it is phrased for the user.
+    offer() is called from the admission threads, wait() from main().
+    `display` is that phone's (w, h).
     """
-    if not args.touch:
-        return None, "touch input is turned off on the computer"
+
+    def __init__(self):
+        self.display = None
+        self._paired = threading.Event()
+        self._lock = threading.Lock()
+
+    def offer(self, display):
+        with self._lock:
+            if not self._paired.is_set():
+                self.display = display
+                self._paired.set()
+
+    def wait(self, stop_evt):
+        """True once a phone paired, False if the daemon stopped first."""
+        while not self._paired.wait(0.25):
+            if stop_evt.is_set():
+                return False
+        return True
+
+
+class ScreenFollower:
+    """Resizes the monitor to the followed phone's screen, off the thread
+    that reported it.
+
+    Unfolding or rotating a phone reports a few sizes in quick succession,
+    so a change waits SETTLE seconds and then only the latest size counts:
+    one resize, not three encoder restarts.
+    """
+
+    SETTLE = 0.5
+
+    def __init__(self, monitor, on_resized, stop_evt):
+        self._monitor = monitor
+        self._on_resized = on_resized       # after a resize: e.g. new banner
+        self._stop = stop_evt
+        self._wanted = None
+        self._changed = threading.Event()
+        threading.Thread(target=self._run, daemon=True,
+                         name="screen-follower").start()
+
+    def want(self, display):
+        """Broadcaster.on_screen: the followed phone's screen is `display`."""
+        self._wanted = display
+        self._changed.set()
+
+    def _run(self):
+        while not self._stop.is_set():
+            if not self._changed.wait(0.5):
+                continue
+            if self._stop.wait(self.SETTLE):
+                return
+            self._changed.clear()
+            size = self._wanted
+            if size == self._monitor.size:
+                continue
+            try:
+                self._monitor.resize(size)
+            except Exception as e:
+                log(f"warning: resizing the virtual monitor failed ({e})")
+                continue
+            self._on_resized()
+
+
+def parse_resolution(text):
+    """`--resolution`: "auto" (None) or "WIDTHxHEIGHT"."""
+    if text == "auto":
+        return None
     try:
-        surface = backend.create_touch_surface()
-    except Exception as e:
-        log(f"touch input: unavailable ({e})")
-        return None, str(e)
-    log(f"touch input: ready ({surface.description})")
-    return surface, ""
+        w, h = (int(v) for v in text.lower().split("x"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not auto or WxH")
+    if w <= 0 or h <= 0 or w % 2 or h % 2:
+        raise argparse.ArgumentTypeError(f"{text!r}: need even, positive "
+                                         "sizes")
+    return w, h
+
+
+class VirtualMonitor:
+    """The virtual monitor and what lives on it: the backend's output, the
+    encoder's stream and the touch device.
+
+    close() undoes whatever start() got done, so it is safe after a start()
+    that failed half-way, or one that never ran.
+    """
+
+    def __init__(self, backend, args):
+        self.backend = backend
+        self.args = args
+        self.stream = None
+        self.touch_surface = None
+        self.phone_input = None
+        # Set to restart the encoder; supervise_capture() does it.
+        self.restart_capture = threading.Event()
+        self._created = False          # backend.setup() ran
+
+    @property
+    def size(self):
+        return self.args.width, self.args.height
+
+    def start(self, size):
+        """Create the monitor at `size` and start encoding it. Raises
+        RuntimeError, with a message for the log, when that fails."""
+        a = self.args
+        a.width, a.height = size            # the backends read it from args
+        log(f"virtual monitor: {a.width}x{a.height}")
+        try:
+            self.backend.setup()
+        except Exception as e:
+            raise RuntimeError(f"could not create the virtual monitor ({e})")
+        self._created = True
+        try:
+            self.stream = self.backend.start_capture()
+        except Exception as e:
+            raise RuntimeError(f"could not start capture ({e})")
+        self.touch_surface, problem = self._start_touch()
+        self.phone_input = PhoneInput(touch_surface=self.touch_surface,
+                                      unavailable_reason=problem)
+
+    def resize(self, size):
+        """Give the running monitor a new size, in place: windows stay on it.
+
+        The backend changes the mode, the touch device learns the new size,
+        and the encoder restarts at it (phones resync on its first keyframe).
+        """
+        a = self.args
+        a.width, a.height = size
+        log(f"virtual monitor: {a.width}x{a.height} (resized for the phone)")
+        self.backend.resize()
+        if self.touch_surface:
+            self.touch_surface.resize(a.width, a.height)
+        self.restart_capture.set()
+
+    def apply_live(self, side, scale):
+        """Move / rescale the running monitor (a settings change)."""
+        if self.backend.apply_live(side, scale):
+            log("restarting the encoder after the scale change")
+            self.restart_capture.set()
+
+    def _start_touch(self):
+        """(surface, "") or (None, reason): the reason is shown on the
+        phone, so it is phrased for the user."""
+        if not self.args.touch:
+            return None, "touch input is turned off on the computer"
+        try:
+            surface = self.backend.create_touch_surface()
+        except Exception as e:
+            log(f"touch input: unavailable ({e})")
+            return None, str(e)
+        log(f"touch input: ready ({surface.description})")
+        return surface, ""
+
+    def close(self, remove_output):
+        """Stop the encoder and the touch device; with `remove_output`, take
+        the monitor away too (otherwise the next daemon reuses it)."""
+        if self._created:
+            _stop_capture(self.backend)
+        _close_quietly(self.stream)
+        if self.phone_input:
+            self.phone_input.close()
+        if self.touch_surface:
+            try:
+                self.touch_surface.close()
+            except Exception as e:
+                log(f"warning: closing the touch device failed ({e})")
+        if remove_output:
+            # Also when start() never ran: a monitor kept by an earlier
+            # daemon (--keep-output) is still ours to remove.
+            self.backend.teardown()
 
 
 # --------------------------------------------------------------------------- #
@@ -1289,8 +1541,14 @@ def main():
                     help="compositor backend (auto-detected by default)")
     ap.add_argument("--output", default="EXT-1",
                     help="headless output name (Hyprland)")
-    ap.add_argument("--width", type=int, default=1920)
-    ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--resolution", type=parse_resolution, default=None,
+                    metavar="auto|WxH",
+                    help="virtual monitor size (default auto: the screen of "
+                         "the first phone that pairs)")
+    ap.add_argument("--no-resize", dest="resize", action="store_false",
+                    help="with --resolution auto: keep the size the monitor "
+                         "was created at, instead of following the phone "
+                         "when it is folded or rotated")
     ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--bitrate", default="12M")
@@ -1388,41 +1646,38 @@ def main():
             "keyframe handling only support h264; phones will show nothing")
 
     kill_stale()
-    try:
-        backend.setup()
-    except Exception as e:
-        log(f"error: could not create the virtual monitor ({e})")
-        sys.exit(1)
-
-    stream = None
-    touch_surface = None
-    phone_input = None
-    broadcaster = None
+    broadcaster = Broadcaster()
+    first_phone = FirstPhone()
+    monitor = VirtualMonitor(backend, args)
     failed = False
     try:
-        if stop_evt.is_set():
+        # Listen first: the monitor is created for the first phone that
+        # pairs, at its screen size unless --resolution fixes one.
+        threading.Thread(target=accept_loop,
+                         args=(args.host, args.port, broadcaster, gatekeeper,
+                               first_phone.offer, stop_evt),
+                         daemon=True).start()
+        if not first_phone.wait(stop_evt):
             return
         try:
-            stream = backend.start_capture()
-        except Exception as e:
-            log(f"error: could not start capture ({e})")
+            monitor.start(args.resolution or first_phone.display)
+        except RuntimeError as e:
+            log(f"error: {e}")
             failed = True
             return
         if stop_evt.is_set():
             return
 
-        touch_surface, touch_problem = start_touch(args, backend)
-        phone_input = PhoneInput(touch_surface=touch_surface,
-                                 unavailable_reason=touch_problem)
-        broadcaster = Broadcaster(load_banner_payload(args, backend.name),
-                                  phone_input)
-        restart_evt = threading.Event()
-        broadcaster.keyframes = KeyframeSource(backend, restart_evt.set)
-
-        threading.Thread(target=accept_loop,
-                         args=(args.host, args.port, broadcaster, gatekeeper,
-                               stop_evt),
-                         daemon=True).start()
+        restart_evt = monitor.restart_capture
+        follower = None
+        if args.resolution is None and args.resize:
+            follower = ScreenFollower(
+                monitor, lambda: broadcaster.set_banner(
+                    load_banner_payload(args, backend.name)), stop_evt)
+        broadcaster.attach(load_banner_payload(args, backend.name),
+                           monitor.phone_input,
+                           KeyframeSource(backend, restart_evt.set),
+                           on_screen=follower.want if follower else None)
 
         def control_loop():
             """Apply SIGUSR1 reloads off the signal handler (D-Bus / hyprctl),
@@ -1444,7 +1699,7 @@ def main():
                     scale = float(cfg.get("scale", args.scale))
                     if (side, scale) != (args.side, args.scale):
                         args.side, args.scale = side, scale
-                        backend.apply_live(side, scale)
+                        monitor.apply_live(side, scale)
                 except Exception as e:
                     log(f"warning: live reconfigure failed ({e})")
                 broadcaster.set_banner(payload)
@@ -1452,29 +1707,19 @@ def main():
 
         threading.Thread(target=control_loop, daemon=True).start()
 
-        failed = not supervise_capture(backend, stream, broadcaster,
+        failed = not supervise_capture(backend, monitor.stream, broadcaster,
                                        stop_evt, restart_evt)
     finally:
         shutdown()
-        _stop_capture(backend)
-        _close_quietly(stream)
-        if broadcaster:
-            broadcaster.close_all()
-        if phone_input:
-            phone_input.close()
-        if touch_surface:
-            try:
-                touch_surface.close()
-            except Exception as e:
-                log(f"warning: closing the touch device failed ({e})")
+        broadcaster.close_all()
         # A GNOME virtual monitor dies with our session anyway; only Hyprland's
         # headless output can outlive the daemon (the TUI uses that on restart,
         # so not once the TUI itself is gone).
-        if (not args.keep_output or backend.name == "gnome"
-                or parent_gone.is_set()):
-            if parent_gone.is_set():
-                log("the launcher exited; removing the virtual monitor")
-            backend.teardown()
+        remove = (not args.keep_output or backend.name == "gnome"
+                  or parent_gone.is_set())
+        if remove and parent_gone.is_set():
+            log("the launcher exited; removing the virtual monitor")
+        monitor.close(remove_output=remove)
         log("stopped")
         if failed:
             sys.exit(1)

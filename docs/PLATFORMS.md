@@ -99,7 +99,7 @@ sudo apt install python3-gi gstreamer1.0-tools gstreamer1.0-pipewire \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 # Optional hardware encoding (Intel or AMD):
 sudo apt install gstreamer1.0-vaapi        # or, on 24.04 and newer, the va plugin in plugins-bad
-sudo apt install adb                       # optional: "Match connected phone"
+sudo apt install adb                       # optional: connect over USB debugging
 ```
 
 - Log in with the **"Ubuntu"** session, which runs Wayland. Do not use "Ubuntu on
@@ -155,7 +155,8 @@ sudo dnf install android-tools             # optional
 session on Mutter's RemoteDesktop D-Bus API and links the ScreenCast session to
 it with `remote-desktop-session-id`. In step 2, the pair is started through the
 RemoteDesktop session. Touches are injected with `NotifyTouchDown`, `NotifyTouchMotion`
-and `NotifyTouchUp` on the virtual monitor's stream, in its pixel coordinates.
+and `NotifyTouchUp` on the virtual monitor's stream, in its logical pixels (its
+size divided by its scale, so 810 px wide for 2160 px at 267%).
 Mutter creates its virtual touchscreen on the first touch, so the seat advertises
 touch only from then on. The first tap itself is still delivered. If the
 RemoteDesktop session cannot be created, video still works, and the phone shows
@@ -226,6 +227,8 @@ phone's vendor. The pairing QR code then includes that address.
 | TUI: *"GNOME is running on X11"* | Log in to the Wayland session |
 | GNOME: `could not create the virtual monitor` | GNOME is older than 40, or Mutter's ScreenCast interface is unavailable. Check with `gdbus introspect --session -d org.gnome.Mutter.ScreenCast -o /org/gnome/Mutter/ScreenCast` |
 | GNOME: monitor appears on the wrong side | The log shows `could not place virtual monitor (…)`. Drag it in *Settings → Displays*. The stream keeps working |
+| GNOME: scale or side never changes, also not in *Settings → Displays* | The log says `GNOME refuses every display change while "<display>" … is at 150%`. Another monitor runs a scale this GNOME no longer allows at its resolution (150% on a 3000×2000 panel, set by an older GNOME), and Mutter then rejects every layout. Give that display one of the scales Settings offers (the message suggests two) |
+| Scale differs from the one chosen | The desktop uses the nearest scale it allows at the monitor's size (whole logical pixels), for example 133% instead of 125% at 2160×1856. The live view shows the applied scale |
 | Hyprland: resolution or scale ignored | Hyprland 0.55 and later need `hyprctl eval`. The daemon uses it automatically. Check that `hyprctl eval 'return 1'` prints `ok` |
 | Hyprland: `Unsupported format: bgra` or `Cannot create hw frames context` | The encoder is on a different GPU from Hyprland. With `--encoder auto`, Tandem follows the compositor, so check the daemon's `encoder:` log line |
 | Hyprland: *"invalid scale"* or *"EXT-1 overlaps"* popup | Tandem snaps the scale to a value Hyprland accepts. If you still see the popup, two daemons are running. The new one waits for the old one to exit |
