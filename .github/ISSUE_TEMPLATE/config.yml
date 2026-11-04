@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/saharshbaiju/tandem/security
+    about: Please report security problems privately here, not as an issue.
+  - name: Setup and troubleshooting docs
+    url: https://github.com/saharshbaiju/tandem/blob/main/docs/PLATFORMS.md
+    about: Install steps for Arch, Ubuntu and Fedora, and fixes for common connection problems.

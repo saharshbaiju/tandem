@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something Tandem should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/saharshbaiju/tandem#roadmap) first, it might already be planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The situation you're in and what gets in the way today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How you imagine it working. Rough is fine.
+
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup
+      description: Distro, desktop and phone, if it matters for this.
+      placeholder: "Fedora 42, GNOME, Galaxy S23"

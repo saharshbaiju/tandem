@@ -1,0 +1,87 @@
+name: Bug report
+description: Something doesn't work or behaves wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Connection problems (firewall, tethering, public Wi-Fi) are often covered in the [troubleshooting table](https://github.com/saharshbaiju/tandem/blob/main/docs/PLATFORMS.md), so it's worth a quick look first.
+        Security problems go to the [Security tab](https://github.com/saharshbaiju/tandem/security), not here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Tandem version
+      description: Output of `tandem --version`, and the app version if it differs.
+      placeholder: "0.6.2"
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distro
+      placeholder: "Arch, Ubuntu 24.04, Fedora 42, ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: desktop
+    attributes:
+      label: Desktop
+      options:
+        - Hyprland
+        - GNOME (Wayland)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: "Intel iGPU, AMD RX 6600, NVIDIA RTX 3060, ..."
+    validations:
+      required: true
+
+  - type: input
+    id: phone
+    attributes:
+      label: Phone and Android version
+      placeholder: "Pixel 7, Android 15"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: link
+    attributes:
+      label: Connection
+      options:
+        - USB debugging (adb)
+        - USB tethering
+        - Wi-Fi
+        - Phone hotspot
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        The daemon log from the TUI's live view. If the problem is on the phone, also `adb logcat -s StreamSession`.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, a screen recording, or whether it worked in an earlier version.
