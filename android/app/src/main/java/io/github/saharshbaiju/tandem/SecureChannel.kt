@@ -39,7 +39,8 @@ import org.json.JSONObject
  */
 object SecureChannel {
 
-    const val PROTOCOL_VERSION = 2
+    /** Must match the computer's (linux/secure_link.py) exactly. */
+    const val PROTOCOL_VERSION = 3
     private const val NONCE_BYTES = 32
 
     const val TYPE_HELLO = "HELO"
@@ -155,6 +156,10 @@ object SecureChannel {
             .toString().toByteArray(Charsets.UTF_8))
 
         val challenge = readHandshakeFrame(reader)
+        if (challenge.optInt("v") != PROTOCOL_VERSION) {
+            throw PairingException("update Tandem on the computer: it speaks an older " +
+                "version than this app")
+        }
         val serverNonce = b64urlDecode(challenge.optString("nonce"))
         if (serverNonce == null || serverNonce.size != NONCE_BYTES) {
             throw PairingException("unexpected answer from the computer")

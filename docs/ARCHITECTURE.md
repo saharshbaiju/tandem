@@ -847,10 +847,10 @@ before any phone paired, or after a failed setup, is clean too.
 **Sized by the first phone.** The monitor is created when the first phone
 passes the pairing proof, at the screen size its `HELO` reported
 (`display: {w, h}`, landscape, checked to be even and 320 to 7680 pixels per
-side). `--resolution WxH` fixes a size instead, and an app too old to report
-one gets 1920×1080. Phones admitted while the monitor is being created get
-heartbeats (so they don't time out) and then the settings and touch state from
-`Broadcaster.attach()`; the video follows on the first keyframe. Later phones
+side). `--resolution WxH` fixes a size instead. Phones admitted while the
+monitor is being created get heartbeats (so they don't time out) and then the
+settings and touch state from `Broadcaster.attach()`; the video follows on the
+first keyframe. Later phones
 with a different shape are letterboxed. The size is kept for the daemon's
 lifetime: folding a foldable doesn't resize the monitor yet (planned work).
 `--parent-pid PID` is optional. Where `prctl` is unavailable the daemon logs a

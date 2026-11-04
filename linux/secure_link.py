@@ -19,9 +19,9 @@ that scanned this computer's QR code:
   3. Mutual proof of the pairing key (`k`, also in the QR), bound to that
      certificate:
 
-        phone -> PC   HELO  {"v": 2, "nonce": nc, "app": version,
+        phone -> PC   HELO  {"v": 3, "nonce": nc, "app": version,
                              "display": {"w": px, "h": px}}
-        PC -> phone   CHAL  {"v": 2, "nonce": ns}
+        PC -> phone   CHAL  {"v": 3, "nonce": ns}
         phone -> PC   AUTH  {"proof": HMAC(key, "tandem-v2 client" | fp | nc | ns)}
         PC -> phone   OKAY  {"proof": HMAC(key, "tandem-v2 server" | fp | nc | ns)}
                    or DENY  {"reason": "..."} and the connection is closed
@@ -34,8 +34,9 @@ that scanned this computer's QR code:
      fingerprint to pin). The phone only accepts the stream after checking the
      PC's proof, so a look-alike computer can't receive its touches either.
 
-`display` is the size of the phone's screen in landscape (older apps leave
-it out). It sizes the virtual monitor, but only once the proof checked
+Both sides must speak the same protocol version `v`; a mismatch is refused
+with a message saying which side to update. `display` is the size of the
+phone's screen. It sizes the virtual monitor, but only once the proof checked
 out: an unpaired device can't influence anything.
 
 Only after OKAY does the daemon send the settings banner, video, or accept
@@ -79,7 +80,7 @@ if os.path.isdir(OLD_CONFIG_DIR) and not os.path.exists(CONFIG_DIR):
 PAIRING_KEY_PATH = os.path.join(CONFIG_DIR, "pairing-key")
 TLS_DIR = os.path.join(CONFIG_DIR, "tls")
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3            # must match the app's exactly
 
 FRAME_HELLO = b"HELO"
 FRAME_CHALLENGE = b"CHAL"
@@ -425,7 +426,7 @@ class HandshakeSlots:
 
 # What a paired phone told us about itself in its hello.
 #   app:     its version, printable and short (for the log)
-#   display: (width, height) of its screen in landscape, or None
+#   display: (width, height) of its screen
 PhoneHello = namedtuple("PhoneHello", "app display")
 
 
@@ -516,12 +517,18 @@ class Gatekeeper:
             version = -1
         if ftype != FRAME_HELLO or version < PROTOCOL_VERSION:
             deny(tls, "update the Tandem app on this phone")
-            raise AuthError("outdated app (no v2 hello)")
+            raise AuthError(f"outdated app (protocol {version}, "
+                            f"need {PROTOCOL_VERSION})")
+        if version > PROTOCOL_VERSION:
+            deny(tls, "update Tandem on the computer")
+            raise AuthError(f"newer app (protocol {version}, this computer "
+                            f"speaks {PROTOCOL_VERSION}): update tandem")
         try:
             client_nonce = b64url_decode(hello.get("nonce", ""))
         except ValueError:
             client_nonce = b""
-        if len(client_nonce) != NONCE_BYTES:
+        display = parse_display(hello.get("display"))
+        if len(client_nonce) != NONCE_BYTES or display is None:
             deny(tls, "invalid hello")
             raise AuthError("malformed hello")
 
@@ -547,8 +554,7 @@ class Gatekeeper:
 
         write_frame(tls, FRAME_OK, json.dumps({"proof": b64url(server_proof(
             key, self.fingerprint, client_nonce, server_nonce))}).encode())
-        return PhoneHello(app=str(hello.get("app", ""))[:32],
-                          display=parse_display(hello.get("display")))
+        return PhoneHello(app=str(hello.get("app", ""))[:32], display=display)
 
 
 def write_frame(sock, ftype, body=b""):

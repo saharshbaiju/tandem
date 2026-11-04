@@ -98,21 +98,11 @@ def load_config() -> Config:
         try:
             with open(CONFIG_PATH) as f:
                 data = json.load(f)
-            _migrate_size(data)
             fields = Config.__dataclass_fields__
             return Config(**{k: v for k, v in data.items() if k in fields})
         except Exception:
             pass
     return Config()
-
-
-def _migrate_size(data: dict) -> None:
-    """Configs before "resolution" stored width and height, always (the
-    default too). A size someone chose stays fixed; the old default, which
-    nobody had to choose, becomes "auto"."""
-    w, h = data.pop("width", None), data.pop("height", None)
-    if "resolution" not in data and w and h and (w, h) != (1920, 1080):
-        data["resolution"] = f"{w}x{h}"
 
 
 def save_config(cfg: Config) -> None:

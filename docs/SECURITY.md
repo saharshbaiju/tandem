@@ -3,7 +3,8 @@
 This document covers what protects the connection between the phone and the
 computer, why each part is there, and how it was tested. It applies from
 **Tandem 0.5.0** onward, in the Android app and in the matching `linux/` daemon.
-Both sides must be updated together, because the protocol is version 2.
+Both sides must be updated together: they refuse each other unless their
+protocol versions match exactly (currently version 3).
 
 Code: [`linux/secure_link.py`](../linux/secure_link.py) (computer) and
 [`SecureChannel.kt`](../android/app/src/main/java/io/github/saharshbaiju/tandem/SecureChannel.kt)
@@ -66,9 +67,9 @@ phone                                                    computer (tandemd)
   │  TLS 1.3 (1.2 on Android 8/9), self-signed cert            │  → handshake thread
   │ ◀════════════════════ encrypted from here ═══════════════▶ │
   │  cert SHA-256 == f from the QR?  else abort, send nothing  │
-  │  HELO {v:2, nonce: nc, display: {w, h}}                    │
+  │  HELO {v:3, nonce: nc, display: {w, h}}                    │
   │ ─────────────────────────────────────────────────────────▶ │
-  │                                    CHAL {v:2, nonce: ns}   │
+  │                                    CHAL {v:3, nonce: ns}   │
   │ ◀───────────────────────────────────────────────────────── │
   │  AUTH {proof: HMAC(k, "client"|fp|nc|ns)}                  │
   │ ─────────────────────────────────────────────────────────▶ │  check proof
@@ -292,7 +293,13 @@ recreated on the next start, and every phone must scan the new QR code.
 
 ## 5. Version compatibility
 
-Protocol version 2 requires both sides to be on 0.5 or later.
+The app and the computer must speak the same protocol version (currently 3).
+A mismatch is refused during the handshake, before anything else is sent, with
+a message that says which side to update: *"update the Tandem app on this
+phone"* from the computer, or *"update Tandem on the computer"* from the app.
+Version 3 added the phone's screen size to the hello.
+
+Before encryption (0.5):
 
 | | 0.5 daemon | Daemon before 0.5 |
 | --- | --- | --- |

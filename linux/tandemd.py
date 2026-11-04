@@ -1219,8 +1219,8 @@ def _printable(text, limit=32):
 def admit(sock, addr, broadcaster, gatekeeper, slot, on_paired):
     """TLS + pairing proof, then hand the phone to the broadcaster.
 
-    on_paired(display) learns the screen size ((w, h) or None) of every
-    phone that passed the proof, before it is streamed to.
+    on_paired(display) learns the screen size (w, h) of every phone that
+    passed the proof, before it is streamed to.
     """
     try:
         _tune_socket(sock)
@@ -1258,10 +1258,8 @@ def admit(sock, addr, broadcaster, gatekeeper, slot, on_paired):
     gatekeeper.throttle.succeeded(addr[0])
     gatekeeper.slots.mark_known(addr[0])
     app = _printable(hello.app)
-    screen = "{}x{}".format(*hello.display) if hello.display else ""
-    log(f"client {addr[0]} paired"
-        + (f" (app {app})" if app else "")
-        + (f", screen {screen}" if screen else ""))
+    log(f"client {addr[0]} paired" + (f" (app {app})" if app else "")
+        + ", screen {}x{}".format(*hello.display))
     on_paired(hello.display)
     try:
         broadcaster.add(tls, addr)
@@ -1273,14 +1271,11 @@ def admit(sock, addr, broadcaster, gatekeeper, slot, on_paired):
 # The virtual monitor
 # --------------------------------------------------------------------------- #
 
-FALLBACK_SIZE = (1920, 1080)        # an app too old to report its screen
-
-
 class FirstPhone:
     """Waits for the first phone to pair; its screen sizes the monitor.
 
     offer() is called from the admission threads, wait() from main().
-    `display` is that phone's (w, h), or None from an app too old to say.
+    `display` is that phone's (w, h).
     """
 
     def __init__(self):
@@ -1533,8 +1528,7 @@ def main():
         if not first_phone.wait(stop_evt):
             return
         try:
-            monitor.start(args.resolution or first_phone.display
-                          or FALLBACK_SIZE)
+            monitor.start(args.resolution or first_phone.display)
         except RuntimeError as e:
             log(f"error: {e}")
             failed = True
