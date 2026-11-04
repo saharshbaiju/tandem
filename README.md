@@ -195,7 +195,7 @@ tandem
 - **Dependencies** lists what is needed for your distribution and backend, using
   pacman, apt or dnf. Press `i` to install what is missing.
 - **Detected hardware** shows the desktop, the primary monitor, the VA-API node, the
-  USB tether link, the phone's panel size (through adb) and the LAN IP.
+  USB tether link and the LAN IP.
 
 ### The daemon directly (advanced, scripting)
 

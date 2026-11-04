@@ -376,18 +376,6 @@ def detect_va_device() -> str:
     return "/dev/dri/renderD128"
 
 
-def adb_device_present() -> bool:
-    if not shutil.which("adb"):
-        return False
-    try:
-        r = subprocess.run(["adb", "devices"], capture_output=True,
-                           text=True, timeout=5)
-        return any(l.strip().endswith("device")
-                   for l in r.stdout.splitlines()[1:])
-    except Exception:
-        return False
-
-
 def adb_status() -> str:
     """'missing' (no adb), 'none' (nothing plugged in / debugging off),
     'unauthorized' (phone hasn't accepted this PC's key yet) or 'ok'."""
@@ -642,23 +630,6 @@ def adb_reverse(port: int) -> bool:
             ok = False
     _adb_reverse_cache[port] = (now, ok)
     return ok
-
-
-def detect_phone_size(landscape: bool = True):
-    """(w, h) of a USB phone's panel, oriented for the (landscape) app."""
-    if not adb_device_present():
-        return None
-    try:
-        r = subprocess.run(["adb", "shell", "wm", "size"],
-                           capture_output=True, text=True, timeout=5)
-        m = re.search(r"(\d+)x(\d+)", r.stdout)
-        if not m:
-            return None
-        a, b = int(m.group(1)), int(m.group(2))
-        w, h = (max(a, b), min(a, b)) if landscape else (min(a, b), max(a, b))
-        return (w - w % 2, h - h % 2)   # encoders want even dimensions
-    except Exception:
-        return None
 
 
 # Interfaces that are never a path to the phone (containers, VMs, VPN tunnels).

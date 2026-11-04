@@ -418,7 +418,6 @@ def hardware_screen(win, cfg):
         enc = hb.pick_encoder("auto", core.detect_va_device())[3]
     else:
         enc = "GStreamer (best of vah264enc / x264enc / openh264enc)"
-    phone = core.detect_phone_size(landscape=True)
     ip = core.lan_ip()
 
     header(win)
@@ -439,12 +438,6 @@ def hardware_screen(win, cfg):
                  f"{cfg.port} — fix: {' '.join(fw['fix'])}"
                  if fw else "Firewall        : nothing blocking "
                  f"port {cfg.port}", curses.color_pair(4 if fw else 3)))
-    if phone:
-        rows.append((f"Phone panel     : {phone[0]}x{phone[1]} (landscape) — "
-                     "'Match phone' available (adb)", curses.color_pair(3)))
-    else:
-        rows.append(("Phone panel     : auto-match needs USB debugging "
-                     "(optional)", curses.color_pair(5)))
     rows.append((f"LAN IP (Wi-Fi)  : {ip or 'unknown'}", 0))
     for i, (text, attr) in enumerate(rows):
         addstr(win, 5 + i, 2, text, attr)
