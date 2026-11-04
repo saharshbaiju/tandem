@@ -345,9 +345,11 @@ def place_monitor(bus, connector, side, scale):
     top-left is 0,0, which Mutter requires. Nothing is sent if the virtual
     monitor is already where it should be.
 
-    Returns (changed, scale): whether a change was sent, and the scale the
-    monitor has (the supported one nearest to `scale`). Raises LayoutRefused
-    when another monitor's own scale would make Mutter reject any layout.
+    Returns (changed, scale, logical): whether a change was sent, the scale
+    the monitor has (the supported one nearest to `scale`), and whether the
+    layout is in logical mode (positions in logical pixels: size / scale).
+    Raises LayoutRefused when another monitor's own scale would make Mutter
+    reject any layout.
     """
     serial, monitors, logicals, props = display_state(bus)
     physical = props.get("layout-mode", 1) == 2
@@ -413,7 +415,7 @@ def place_monitor(bus, connector, side, scale):
 
     after = layout()
     if after == before:
-        return False, ext["scale"]
+        return False, ext["scale"], not physical
 
     # Every monitor is re-sent at its current scale, and Mutter checks them
     # all. It can be running a scale it no longer accepts (a 150% set by an
@@ -444,7 +446,7 @@ def place_monitor(bus, connector, side, scale):
     _call(bus, DC_BUS, DC_PATH, DC_IFACE, "ApplyMonitorsConfig",
           GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})",
                        (serial, APPLY_TEMPORARY, config, global_props)))
-    return True, ext["scale"]
+    return True, ext["scale"], not physical
 
 
 # --------------------------------------------------------------------------- #
@@ -496,9 +498,12 @@ class _DBusWorker:
 class MutterTouchscreen:
     """Touches injected through a RemoteDesktop session onto our stream.
 
-    Mutter takes coordinates in the stream's own pixel space (the virtual
-    monitor's width x height), so fractions from the phone are scaled by the
-    monitor size we asked for.
+    Mutter takes coordinates in the monitor's *logical* pixels: its width x
+    height divided by its scale (in the usual logical layout mode; in the
+    physical one the scale doesn't apply). At 267% a 2160-px-wide monitor is
+    810 logical px wide, so physical positions would land 2.67x too far or
+    off the monitor. The phone's fractions are scaled to that logical area,
+    kept current by resize() (new monitor size) and rescale() (new scale).
 
     Calls never block the caller: gnome-shell answers on its main loop,
     which is busiest exactly while a drag is being composited, and a
@@ -517,7 +522,9 @@ class MutterTouchscreen:
         self._bus = bus
         self._session = rd_session
         self._stream = stream_path
-        self._size = (width, height)
+        self._size = (width, height)      # physical pixels
+        self._scale = 1.0                 # pixels per logical pixel
+        self._area = (width, height)      # logical size touches are scaled to
         self._active_slots = set()
         self._warned = False
         self._worker = _DBusWorker("tandem-mutter-touch")
@@ -554,13 +561,23 @@ class MutterTouchscreen:
         self._worker.stop()
 
     def resize(self, width, height):
-        """The monitor was resized: scale touches to its new pixels."""
+        """The monitor was resized (in physical pixels)."""
         self._size = (width, height)
+        self._update_area()
+
+    def rescale(self, scale):
+        """The monitor's scale changed; 1.0 in the physical layout mode."""
+        self._scale = scale
+        self._update_area()
+
+    def _update_area(self):
+        width, height = self._size
+        self._area = (width / self._scale, height / self._scale)
 
     def _to_pixels(self, x, y):
         x = min(max(x, 0.0), 1.0)
         y = min(max(y, 0.0), 1.0)
-        width, height = self._size          # one read: resize() may race
+        width, height = self._area          # one read: resize() may race
         return x * (width - 1), y * (height - 1)
 
     # -- worker thread ------------------------------------------------------ #
@@ -624,6 +641,8 @@ class GnomeBackend:
         # once; two ApplyMonitorsConfig calls on one serial would fail.
         self._place_lock = threading.Lock()
         self._scale = None              # the scale last applied and logged
+        self._touch = None              # MutterTouchscreen, once created
+        self._touch_scale = None        # the scale touches must divide by
 
     @staticmethod
     def missing():
@@ -710,8 +729,12 @@ class GnomeBackend:
         if not self.remote_desktop:
             raise RuntimeError(self.touch_problem
                                or "touch input is turned off on the computer")
-        return MutterTouchscreen(self.bus, self.remote_desktop, self.stream,
-                                 self.a.width, self.a.height)
+        self._touch = MutterTouchscreen(self.bus, self.remote_desktop,
+                                        self.stream, self.a.width,
+                                        self.a.height)
+        if self._touch_scale:
+            self._touch.rescale(self._touch_scale)
+        return self._touch
 
     def start_capture(self):
         """Start the encoder on our PipeWire node; returns its H.264 stream.
@@ -805,18 +828,24 @@ class GnomeBackend:
         windows stay) when capture restarts at the new size."""
 
     def apply_live(self, side, scale, bus=None):
+        """Move / rescale the monitor. True if the encoder must restart: a
+        running pipewiresrc gets no more frames after Mutter changes the
+        monitor's scale (seen on GNOME 51), while a new one on the same
+        PipeWire node works."""
         if not self.connector:
             return False
+        before = self._scale
         error = self._place(side, scale, bus)
         if error:
             log(f"warning: could not place virtual monitor ({error})")
-        return error is None
+            return False
+        return self._scale != before
 
     def _place(self, side, scale, bus=None):
         """place_monitor under the lock; returns None or the error."""
         try:
             with self._place_lock:
-                changed, applied = place_monitor(
+                changed, applied, logical = place_monitor(
                     bus or Gio.bus_get_sync(Gio.BusType.SESSION, None),
                     self.connector, side, scale)
         except Exception as e:
@@ -827,6 +856,9 @@ class GnomeBackend:
             self._scale = applied
             # The TUI shows this: it can differ from the asked-for scale.
             log(f"monitor scale: {applied:g} (asked {scale:g})")
+        self._touch_scale = applied if logical else 1.0
+        if self._touch:
+            self._touch.rescale(self._touch_scale)
         return None
 
     def stop_capture(self):

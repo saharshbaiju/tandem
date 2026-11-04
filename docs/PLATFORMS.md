@@ -155,7 +155,8 @@ sudo dnf install android-tools             # optional
 session on Mutter's RemoteDesktop D-Bus API and links the ScreenCast session to
 it with `remote-desktop-session-id`. In step 2, the pair is started through the
 RemoteDesktop session. Touches are injected with `NotifyTouchDown`, `NotifyTouchMotion`
-and `NotifyTouchUp` on the virtual monitor's stream, in its pixel coordinates.
+and `NotifyTouchUp` on the virtual monitor's stream, in its logical pixels (its
+size divided by its scale, so 810 px wide for 2160 px at 267%).
 Mutter creates its virtual touchscreen on the first touch, so the seat advertises
 touch only from then on. The first tap itself is still delivered. If the
 RemoteDesktop session cannot be created, video still works, and the phone shows

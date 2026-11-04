@@ -753,7 +753,12 @@ session. It then links the ScreenCast session to it with
 `CreateSession({"remote-desktop-session-id": …})`, and starts the pair through
 the RemoteDesktop session. Touches go to `NotifyTouchDown/Motion(stream, slot, x,
 y)` and `NotifyTouchUp(slot)`. Here `stream` is the virtual monitor's stream, and
-`x, y` are in that monitor's pixel space. Mutter ties the session to the D-Bus
+`x, y` are in that monitor's logical pixels: its size divided by its scale in
+the usual logical layout mode, its plain pixels in the physical one. The
+backend tells the touchscreen the scale whenever placement applies one. A live
+scale change also restarts the encoder: a running `pipewiresrc` gets no more
+frames after Mutter rescales the monitor, while a new one on the same node
+does. Mutter ties the session to the D-Bus
 connection that created it, so it lives exactly as long as the daemon. If the
 RemoteDesktop session cannot be created, the backend falls back to a plain
 ScreenCast session. Video still works, and phones are told why touch is

@@ -1468,6 +1468,12 @@ class VirtualMonitor:
             self.touch_surface.resize(a.width, a.height)
         self.restart_capture.set()
 
+    def apply_live(self, side, scale):
+        """Move / rescale the running monitor (a settings change)."""
+        if self.backend.apply_live(side, scale):
+            log("restarting the encoder after the scale change")
+            self.restart_capture.set()
+
     def _start_touch(self):
         """(surface, "") or (None, reason): the reason is shown on the
         phone, so it is phrased for the user."""
@@ -1693,7 +1699,7 @@ def main():
                     scale = float(cfg.get("scale", args.scale))
                     if (side, scale) != (args.side, args.scale):
                         args.side, args.scale = side, scale
-                        backend.apply_live(side, scale)
+                        monitor.apply_live(side, scale)
                 except Exception as e:
                     log(f"warning: live reconfigure failed ({e})")
                 broadcaster.set_banner(payload)

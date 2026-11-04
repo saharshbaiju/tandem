@@ -1126,11 +1126,11 @@ class HyprlandBackend:
         with self._layout_lock:
             if self._touch_mapped:
                 map_touch_device(uinput_touch.DEVICE_NAME, a.output)
-            ok = place_output(a.output, a.width, a.height, a.fps,
-                              self._scale_for(scale), side)
+            place_output(a.output, a.width, a.height, a.fps,
+                         self._scale_for(scale), side)
         self._watcher.mute()            # our own change, not the user's
         log(f"moved {a.output} side={side}")
-        return ok
+        return False                    # the output's pixels didn't change
 
     def stop_capture(self):
         """Stop the encoder, then end the screencast (before any removal).
