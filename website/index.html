@@ -638,6 +638,7 @@ main, footer { position: relative; z-index: 1; }
 .chai-id .copy { border: 1px solid var(--white); background: var(--white); color: var(--black); padding: 8px 16px; font: 500 15px var(--text); cursor: pointer; }
 .chai-id .copy:hover { background: var(--black); color: var(--white); }
 .chai .btn { margin-top: 20px; width: 100%; justify-content: center; }
+.chai [hidden] { display: none; }
 
 /* Footer --------------------------------------------------------------------- */
 footer { background: var(--black); }
@@ -776,7 +777,7 @@ footer { background: var(--black); }
 <nav class="nav" aria-label="Main">
   <a class="wordmark" href="#top">Tandem</a>
   <ul>
-    <li><a class="nav-chai" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai aria-label="Buy me a chai"><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg><span>Buy me a chai</span></a></li>
+    <li><a class="nav-chai" href="#chai" data-chai aria-label="Buy me a chai"><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg><span>Buy me a chai</span></a></li>
     <li class="opt"><a href="#demo">See it work</a></li>
     <li class="opt"><a href="#install">Install</a></li>
     <li><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a></li>
@@ -964,7 +965,7 @@ footer { background: var(--black); }
         <a class="btn solid btn-star" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg>Star<span class="count" data-stars hidden></span></a>
         <button class="btn" type="button" data-share>Share Tandem</button>
         <a class="btn" href="https://github.com/saharshbaiju/tandem/issues/new">Report a bug</a>
-        <a class="btn" href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg>Buy me a chai</a>
+        <a class="btn" href="#chai" data-chai><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg>Buy me a chai</a>
       </div>
     </div>
     <div class="maker" data-rv="row">
@@ -991,18 +992,22 @@ footer { background: var(--black); }
       <li><a href="https://github.com/saharshbaiju/tandem/blob/main/docs/ARCHITECTURE.md">How it works</a></li>
       <li><a href="https://github.com/saharshbaiju/tandem/blob/main/docs/SECURITY.md">Security</a></li>
       <li><a href="https://github.com/saharshbaiju/tandem/blob/main/LICENSE">GPL-3.0</a></li>
-      <li><a href="upi://pay?pa=7012879159-2@ibl&amp;pn=Saharsh%20Baiju&amp;cu=INR&amp;tn=Buy%20me%20a%20chai%20for%20Tandem" data-chai>Buy me a chai</a></li>
+      <li><a href="#chai" data-chai>Buy me a chai</a></li>
     </ul>
   </div>
 </footer>
 
-<!-- Buy me a chai, on a computer: the UPI QR to scan with a phone. On a phone
-     the links open the UPI app directly instead (see the script). -->
+<!-- Buy me a chai: the UPI QR and ID, on computers and phones alike. Phones
+     don't get a upi:// link: UPI apps block person-to-person payments that a
+     web page starts, and report it as "exceeded the bank limit" even for ₹1.
+     Scanning the QR or paying the copied ID is started in the app, so it works. -->
 <dialog class="chai" id="chai" aria-labelledby="chaiTitle">
   <h2 id="chaiTitle">Buy me a chai</h2>
-  <p>Scan with any UPI app: Google Pay, PhonePe, Paytm or BHIM.</p>
+  <p data-chai-desk>Scan with any UPI app: Google Pay, PhonePe, Paytm or BHIM.</p>
+  <p data-chai-phone hidden>Copy the UPI ID and pay it from Google Pay, PhonePe, Paytm or BHIM. Or save the QR and scan it from your gallery in the app.</p>
   <img src="assets/upi-qr.svg" alt="UPI QR code for 7012879159-2@ibl" width="240" height="240">
   <div class="chai-id"><code>7012879159-2@ibl</code><button class="copy" type="button" data-copy="7012879159-2@ibl">Copy</button></div>
+  <a class="btn" href="assets/upi-qr.png" download="tandem-upi-qr.png" data-chai-phone hidden>Save QR</a>
   <button class="btn" type="button" data-close>Close</button>
 </dialog>
 
@@ -2299,9 +2304,9 @@ const Footer = (() => {
 })();
 
 /*
- * Buy me a chai. Phones follow the upi:// link: Android offers every UPI app
- * (GPay, PhonePe, Paytm, BHIM…) with the ID and note filled in. Computers
- * can't open it, so they show the QR to scan.
+ * Buy me a chai. Every device gets the dialog. Computers show the QR to scan.
+ * Phones show the UPI ID to copy and a QR to save, because UPI apps refuse
+ * person-to-person payments started from a upi:// link on a web page.
  */
 (() => {
   const dialog = document.getElementById("chai");
@@ -2312,10 +2317,14 @@ const Footer = (() => {
     || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
     || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))
     || matchMedia("(pointer: coarse) and (hover: none)").matches;
+  if (onPhone) {
+    dialog.querySelectorAll("[data-chai-desk]").forEach(el => { el.hidden = true; });
+    dialog.querySelectorAll("[data-chai-phone]").forEach(el => { el.hidden = false; });
+  }
   document.querySelectorAll("[data-chai]").forEach(a => a.addEventListener("click", e => {
-    if (onPhone || !dialog.showModal) return;
     e.preventDefault();
-    dialog.showModal();
+    if (dialog.showModal) dialog.showModal();
+    else dialog.setAttribute("open", "");
   }));
   dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });  // backdrop
