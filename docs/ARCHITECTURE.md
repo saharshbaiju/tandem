@@ -508,10 +508,10 @@ big-endian length, and a body:
 | Type | Direction | Body | When |
 | --- | --- | --- | --- |
 | `NALU` | PC to phone | One Annex-B NAL, start code included, passed straight to the decoder | Video |
-| `ASX1` | PC to phone | JSON settings: `side width height fps scale quality bitrate codec gop host backend` | On connect, and after any live config change |
+| `ASX1` | PC to phone | JSON settings: `side width height fps scale quality bitrate codec gop host backend` | Once the phone is admitted and the monitor exists, and after any live config change |
 | `PING` | Both | Empty | After 1 s with nothing else to send. Phone to PC only from current apps |
-| `HELO` `CHAL` `AUTH` `OKAY` `DENY` | Both | The pairing handshake ([`SECURITY.md`](./SECURITY.md) §3) | Once, before anything else. A `DENY` can also come before `OKAY` when the computer is full or the phone is locked out |
-| `INPT` | PC to phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | Right after the phone is admitted |
+| `HELO` `CHAL` `AUTH` `OKAY` `DENY` | Both | The pairing handshake ([`SECURITY.md`](./SECURITY.md) §3). `HELO` also carries the phone's screen size, `display: {w, h}` | Once, before anything else. A `DENY` can also come before `OKAY` when the computer is full or the phone is locked out |
+| `INPT` | PC to phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | Once the phone is admitted and the monitor exists |
 | `TUCH` | Phone to PC | 6 bytes: `action u8, finger u8, x u16, y u16` (big-endian) | Every touch change (stage 5) |
 | `KEYQ` | Phone to PC | Empty | The phone's decoder needs a fresh keyframe (see *Keyframe requests and resync* below) |
 
@@ -816,11 +816,14 @@ have not been measured yet.
 tandem (python.sh: /usr/bin/python3) ──▶ tui.py
 tui.py ──spawns──▶ tandemd.py --keep-output --banner-file … --parent-pid <tui pid>
                        │                           (same interpreter, its own session)
-                       ├─ backend.setup()          create the virtual monitor
-                       ├─ backend.start_capture()  wf-recorder | gst-launch-1.0  → pipe
-                       ├─ supervise_capture()      parse the pipe; restart the encoder if it exits
-                       ├─ start_touch()            virtual touchscreen (uinput / RemoteDesktop) + InputWorker
                        ├─ accept thread            TCP [::]:5000, one I/O thread per phone
+                       ├─ FirstPhone.wait()        until a phone pairs; its HELO gives the size
+                       ├─ VirtualMonitor.start()   at that size (or --resolution):
+                       │    ├─ backend.setup()          create the virtual monitor
+                       │    ├─ backend.start_capture()  wf-recorder | gst-launch-1.0  → pipe
+                       │    └─ touch device             uinput / RemoteDesktop + InputWorker
+                       ├─ Broadcaster.attach()     settings + touch state to the phones waiting
+                       ├─ supervise_capture()      parse the pipe; restart the encoder if it exits
                        ├─ keyframe thread          request_keyframe() / encoder restart for stuck phones
                        ├─ control thread           SIGUSR1 → re-read banner → apply side/scale live
                        └─ on exit                  stop capture, close clients, close the input worker,
@@ -837,7 +840,19 @@ tui.py ──spawns──▶ tandemd.py --keep-output --banner-file … --parent
 | SIGUSR2 | Sent by the kernel when the `--parent-pid` process dies (`PR_SET_PDEATHSIG`). Stops the daemon and removes the virtual monitor even with `--keep-output` (*"the launcher exited; removing the virtual monitor"*) |
 
 Signal handlers are installed first, so a stop requested during setup is
-honoured, and everything after `backend.setup()` runs in `try`/`finally`.
+honoured, and everything after the listener starts runs in `try`/`finally`.
+`VirtualMonitor.close()` undoes only what `start()` got done, so stopping
+before any phone paired, or after a failed setup, is clean too.
+
+**Sized by the first phone.** The monitor is created when the first phone
+passes the pairing proof, at the screen size its `HELO` reported
+(`display: {w, h}`, landscape, checked to be even and 320 to 7680 pixels per
+side). `--resolution WxH` fixes a size instead, and an app too old to report
+one gets 1920×1080. Phones admitted while the monitor is being created get
+heartbeats (so they don't time out) and then the settings and touch state from
+`Broadcaster.attach()`; the video follows on the first keyframe. Later phones
+with a different shape are letterboxed. The size is kept for the daemon's
+lifetime: folding a foldable doesn't resize the monitor yet (planned work).
 `--parent-pid PID` is optional. Where `prctl` is unavailable the daemon logs a
 note and carries on. It also checks for a parent that died before the `prctl`
 call. `start-tandem.sh` does not pass it: its daemon runs in the terminal's
@@ -944,3 +959,6 @@ next to each rule explain the details.
 - A KDE Plasma backend, using KWin virtual outputs through `kwin_wayland` screencast.
 - Pen input with pressure and hover, and a keyboard on the phone.
 - A latency overlay for tuning.
+- Resize the monitor when the phone's screen changes (a foldable folded or
+  unfolded): the app sends a new size, the daemon calls a `VirtualMonitor`
+  resize.

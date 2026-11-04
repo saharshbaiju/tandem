@@ -100,7 +100,7 @@ def run_shell(win, cmd, prompt="press Enter to return"):
 # Config keys that change the capture/encode pipeline: changing any of these
 # needs the daemon restarted. side/scale are applied live by the daemon itself
 # (SIGUSR1 -> backend.apply_live); transport only changes the QR's host order.
-RESTART_KEYS = ("backend", "output", "width", "height", "fps", "quality",
+RESTART_KEYS = ("backend", "output", "resolution", "fps", "quality",
                 "codec", "gop", "port", "touch")
 LIVE_KEYS = ("side", "scale")
 
@@ -119,6 +119,7 @@ class Stream:
         self.logs = deque(maxlen=8)
         self.state = {"live": 0, "ever": False}
         self.error = None
+        self.monitor_size = ""          # "WxH", once the daemon created it
         self.touch_status = ""          # daemon's "touch input: ..." verdict
         self.notice = ""                # e.g. "port 5000 is used by …"
         self.stop = threading.Event()
@@ -202,6 +203,8 @@ class Stream:
                 self.state["ever"] = True
             elif "client disconnected" in line:
                 self.state["live"] = max(0, self.state["live"] - 1)
+            elif "virtual monitor:" in line:
+                self.monitor_size = line.split("virtual monitor:", 1)[1].strip()
             elif "touch input:" in line:
                 self.touch_status = line.split("touch input:", 1)[1].strip()
             elif "error:" in line:
@@ -236,6 +239,7 @@ class Stream:
         self.cfg = cfg
         self.logs.clear()
         self.state = {"live": 0, "ever": False}
+        self.monitor_size = ""
         self.touch_status = ""
         self.start()
 
@@ -324,7 +328,7 @@ def main_menu(win, cfg, stream):
             addstr(win, row, 2, "○ Tandem stopped", curses.color_pair(5))
 
         summ = (f"{backends.describe(cfg.resolved_backend())}   "
-                f"side={cfg.side}  {cfg.width}x{cfg.height}@{cfg.fps}  "
+                f"side={cfg.side}  {cfg.resolution}@{cfg.fps}  "
                 f"quality={cfg.quality}  port={cfg.port}")
         addstr(win, row + 1, 2, summ, curses.color_pair(5))
         footer(win, "↑/↓ move   Enter select   q quit")
@@ -488,7 +492,9 @@ def configure_screen(win, cfg, live=False):
     rows = [
         ("Desktop backend", "choice", "backend", ["auto", "hyprland", "gnome"]),
         ("Screen side", "choice", "side", ["right", "left", "up", "down"]),
-        ("Resolution", "resolution", None, None),
+        ("Resolution", "choice", "resolution",
+         core.RESOLUTIONS + ([cfg.resolution]
+                             if cfg.resolution not in core.RESOLUTIONS else [])),
         ("Refresh (FPS)", "choice", "fps", [30, 60, 120]),
         ("Desktop scale", "choice", "scale", [1.0, 1.25, 1.5, 2.0]),
         ("Quality", "choice", "quality", ["low", "medium", "high", "ultra"]),
@@ -498,16 +504,14 @@ def configure_screen(win, cfg, live=False):
         ("Touch input", "choice", "touch", [True, False]),
         ("Paired phones", "forget", None, None),
     ]
-    res_idx = next((i for i, (_lbl, dims) in enumerate(core.RES_PRESETS)
-                    if dims == (cfg.width, cfg.height)), 0)
     sel = 0
     while True:
         header(win)
         addstr(win, 3, 2, "Configuration  (←/→ to change a value)", curses.A_BOLD)
         for i, (label, kind, key, choices) in enumerate(rows):
-            if kind == "resolution":
-                preset = core.RES_PRESETS[res_idx][0]
-                value = f"{cfg.width}x{cfg.height}   [{preset}]"
+            if key == "resolution":
+                value = ("auto  (sized to the first phone that connects)"
+                         if cfg.resolution == "auto" else cfg.resolution)
             elif kind == "port":
                 value = str(cfg.port)
             elif key == "quality":
@@ -532,11 +536,8 @@ def configure_screen(win, cfg, live=False):
             addstr(win, 5 + i, 28, value.ljust(40),
                    attr if i == sel else curses.color_pair(1))
 
-        addstr(win, 6 + len(rows), 2,
-               "Tip: 'Match connected phone' sizes the monitor to your phone "
-               "over USB.", curses.color_pair(5))
         if live:
-            addstr(win, 7 + len(rows), 2,
+            addstr(win, 6 + len(rows), 2,
                    "Tandem is running — saving applies changes immediately "
                    "(side/scale instantly; others restart the stream).",
                    curses.color_pair(3))
@@ -555,9 +556,6 @@ def configure_screen(win, cfg, live=False):
             step = -1 if c == curses.KEY_LEFT else 1
             if kind == "choice":
                 setattr(cfg, key, cycle(choices, getattr(cfg, key), step))
-            elif kind == "resolution":
-                res_idx = (res_idx + step) % len(core.RES_PRESETS)
-                _apply_resolution(win, cfg, res_idx)
             elif kind == "port":
                 raw = text_prompt(win, "Port", cfg.port)
                 if raw.isdigit():
@@ -571,23 +569,6 @@ def configure_screen(win, cfg, live=False):
             return True, cfg
         elif c in (27, ord("q")):
             return False, None
-
-
-def _apply_resolution(win, cfg, res_idx):
-    label, dims = core.RES_PRESETS[res_idx]
-    if dims is None:  # "match phone"
-        size = core.detect_phone_size(landscape=True)
-        if size:
-            cfg.width, cfg.height = size
-        else:
-            h, w = win.getmaxyx()
-            addstr(win, h - 2, 2,
-                   "No USB phone detected (needs USB debugging) — "
-                   "connect it and try again.", curses.color_pair(4))
-            win.refresh()
-            curses.napms(1200)
-    else:
-        cfg.width, cfg.height = dims
 
 
 # --------------------------------------------------------------------------- #
@@ -726,7 +707,10 @@ def live_screen(win, stream):
                        curses.color_pair(5) | curses.A_BOLD)
 
             addstr(win, 5, 2, f"Desktop : {backends.describe(cfg.resolved_backend())}")
-            addstr(win, 6, 2, f"Monitor : {cfg.width}x{cfg.height}@{cfg.fps}  "
+            # The daemon creates the monitor when the first phone pairs.
+            mon = (f"{stream.monitor_size}@{cfg.fps}" if stream.monitor_size
+                   else f"on first phone ({cfg.resolution})")
+            addstr(win, 6, 2, f"Monitor : {mon}  "
                               f"side={cfg.side}  scale={cfg.scale}")
             addstr(win, 7, 2, f"Stream  : h264 @ {cfg.bitrate()}  port {cfg.port}")
 

@@ -24,6 +24,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.PathInterpolator
 import android.util.Log
+import android.util.Size
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.OnBackPressedCallback
@@ -340,7 +341,20 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         if (!surfaceReady || !wantConnected || session != null) return
         setTouchState(false, "")       // until the new session's INPT arrives
         acquireWifiLock()
-        session = StreamSession(t, appVersion(), b.surface.holder.surface, this, networks::networkFor)
+        session = StreamSession(t, appVersion(), videoArea(), b.surface.holder.surface, this,
+            networks::networkFor)
+    }
+
+    /**
+     * Where the desktop is shown: the whole window (edge to edge), in
+     * landscape. The computer creates its virtual monitor at this size, so
+     * the picture fills the screen without black bars (a foldable reports
+     * whichever screen it is open on).
+     */
+    private fun videoArea(): Size {
+        val w = b.root.width
+        val h = b.root.height
+        return Size(maxOf(w, h), minOf(w, h))
     }
 
     private fun userDisconnect(why: String) {

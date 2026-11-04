@@ -66,7 +66,7 @@ phone                                                    computer (tandemd)
   │  TLS 1.3 (1.2 on Android 8/9), self-signed cert            │  → handshake thread
   │ ◀════════════════════ encrypted from here ═══════════════▶ │
   │  cert SHA-256 == f from the QR?  else abort, send nothing  │
-  │  HELO {v:2, nonce: nc}                                     │
+  │  HELO {v:2, nonce: nc, display: {w, h}}                    │
   │ ─────────────────────────────────────────────────────────▶ │
   │                                    CHAL {v:2, nonce: ns}   │
   │ ◀───────────────────────────────────────────────────────── │

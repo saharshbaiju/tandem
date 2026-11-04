@@ -19,7 +19,8 @@ that scanned this computer's QR code:
   3. Mutual proof of the pairing key (`k`, also in the QR), bound to that
      certificate:
 
-        phone -> PC   HELO  {"v": 2, "nonce": nc, "app": version}
+        phone -> PC   HELO  {"v": 2, "nonce": nc, "app": version,
+                             "display": {"w": px, "h": px}}
         PC -> phone   CHAL  {"v": 2, "nonce": ns}
         phone -> PC   AUTH  {"proof": HMAC(key, "tandem-v2 client" | fp | nc | ns)}
         PC -> phone   OKAY  {"proof": HMAC(key, "tandem-v2 server" | fp | nc | ns)}
@@ -32,6 +33,10 @@ that scanned this computer's QR code:
      protects a phone that typed the address and pairing code by hand (no
      fingerprint to pin). The phone only accepts the stream after checking the
      PC's proof, so a look-alike computer can't receive its touches either.
+
+`display` is the size of the phone's screen in landscape (older apps leave
+it out). It sizes the virtual monitor, but only once the proof checked
+out: an unpaired device can't influence anything.
 
 Only after OKAY does the daemon send the settings banner, video, or accept
 touches. Wrong code, wrong protocol, or too slow: DENY / close, logged, and
@@ -60,7 +65,7 @@ import ssl
 import subprocess
 import threading
 import time
-from collections import deque
+from collections import deque, namedtuple
 
 CONFIG_DIR = os.path.expanduser("~/.config/tandem")
 # Before the rename to Tandem the config lived here. Moving it keeps the
@@ -88,6 +93,8 @@ FIRST_BYTE_TIMEOUT = 2.0         # a real phone sends its TLS hello at once; a
 #                                  socket that stays silent is only holding a
 #                                  handshake slot
 MAX_HANDSHAKE_FRAME = 1024       # nothing in the handshake is bigger
+DISPLAY_MIN = 320                # a phone's reported screen, accepted range
+DISPLAY_MAX = 7680               #   (per side, in pixels)
 
 # Crockford base32: no i, l, o, u, so nothing reads as another character.
 KEY_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
@@ -416,6 +423,24 @@ class HandshakeSlots:
 # Server side of the handshake
 # --------------------------------------------------------------------------- #
 
+# What a paired phone told us about itself in its hello.
+#   app:     its version, printable and short (for the log)
+#   display: (width, height) of its screen in landscape, or None
+PhoneHello = namedtuple("PhoneHello", "app display")
+
+
+def parse_display(value):
+    """(width, height) from a hello's `display`, or None if it is missing or
+    not a plausible screen. Even sizes: encoders reject odd ones."""
+    if not isinstance(value, dict):
+        return None
+    w, h = value.get("w"), value.get("h")
+    if not all(type(v) is int and DISPLAY_MIN <= v <= DISPLAY_MAX
+               for v in (w, h)):
+        return None
+    return w - w % 2, h - h % 2
+
+
 class Gatekeeper:
     """Everything the accept loop needs to admit (or refuse) a connection.
 
@@ -451,8 +476,8 @@ class Gatekeeper:
     def handshake(self, raw_sock):
         """TLS + mutual pairing proof on a freshly accepted socket.
 
-        Returns (tls_socket, app_version) — blocking mode, ready for the
-        stream — or raises AuthError / OSError. On AuthError the phone has
+        Returns (tls_socket, PhoneHello) — the socket in blocking mode, ready
+        for the stream — or raises AuthError / OSError. On AuthError the phone has
         already been told why (DENY) where possible.
         """
         deadline = time.monotonic() + HANDSHAKE_TIMEOUT
@@ -522,7 +547,8 @@ class Gatekeeper:
 
         write_frame(tls, FRAME_OK, json.dumps({"proof": b64url(server_proof(
             key, self.fingerprint, client_nonce, server_nonce))}).encode())
-        return str(hello.get("app", ""))[:32]
+        return PhoneHello(app=str(hello.get("app", ""))[:32],
+                          display=parse_display(hello.get("display")))
 
 
 def write_frame(sock, ftype, body=b""):

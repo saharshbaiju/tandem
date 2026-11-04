@@ -99,7 +99,7 @@ sudo apt install python3-gi gstreamer1.0-tools gstreamer1.0-pipewire \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 # Optional hardware encoding (Intel or AMD):
 sudo apt install gstreamer1.0-vaapi        # or, on 24.04 and newer, the va plugin in plugins-bad
-sudo apt install adb                       # optional: "Match connected phone"
+sudo apt install adb                       # optional: connect over USB debugging
 ```
 
 - Log in with the **"Ubuntu"** session, which runs Wayland. Do not use "Ubuntu on

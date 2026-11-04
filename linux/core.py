@@ -44,13 +44,8 @@ QUALITY = {"low": "4M", "medium": "8M", "high": "12M", "ultra": "20M"}
 # hands the PC an address on this subnet.
 USB_TETHER_PREFIX = "192.168.42."
 
-RES_PRESETS = [
-    ("Match connected phone (USB)", None),
-    ("1280x720", (1280, 720)),
-    ("1920x1080", (1920, 1080)),
-    ("2560x1440", (2560, 1440)),
-    ("3840x2160", (3840, 2160)),
-]
+# "auto": the daemon sizes the monitor to the first phone that pairs.
+RESOLUTIONS = ["auto", "1280x720", "1920x1080", "2560x1440", "3840x2160"]
 
 
 @dataclass
@@ -58,8 +53,7 @@ class Config:
     backend: str = "auto"          # auto / hyprland / gnome
     output: str = "EXT-1"
     side: str = "right"            # right / left / up / down
-    width: int = 1920
-    height: int = 1080
+    resolution: str = "auto"       # auto / WIDTHxHEIGHT (see RESOLUTIONS)
     fps: int = 60
     scale: float = 1.0             # desktop scale of the virtual monitor
     quality: str = "high"          # low / medium / high / ultra
@@ -81,8 +75,7 @@ class Config:
         return [
             "--backend", self.resolved_backend() or "auto",
             "--output", self.output,
-            "--width", str(self.width),
-            "--height", str(self.height),
+            "--resolution", self.resolution,
             "--fps", str(self.fps),
             "--scale", str(self.scale),
             "--bitrate", self.bitrate(),
@@ -105,11 +98,21 @@ def load_config() -> Config:
         try:
             with open(CONFIG_PATH) as f:
                 data = json.load(f)
+            _migrate_size(data)
             fields = Config.__dataclass_fields__
             return Config(**{k: v for k, v in data.items() if k in fields})
         except Exception:
             pass
     return Config()
+
+
+def _migrate_size(data: dict) -> None:
+    """Configs before "resolution" stored width and height, always (the
+    default too). A size someone chose stays fixed; the old default, which
+    nobody had to choose, becomes "auto"."""
+    w, h = data.pop("width", None), data.pop("height", None)
+    if "resolution" not in data and w and h and (w, h) != (1920, 1080):
+        data["resolution"] = f"{w}x{h}"
 
 
 def save_config(cfg: Config) -> None:
@@ -119,16 +122,14 @@ def save_config(cfg: Config) -> None:
 
 
 # Settings advertised to the phone. Keys must match build_banner_payload() in
-# tandemd.py; the daemon also reads side/scale from here on SIGHUP and moves
-# the monitor live.
+# tandemd.py, which adds the monitor's size (only the daemon knows it); the
+# daemon also reads side/scale from here on SIGUSR1 and moves the monitor live.
 BANNER_PATH = os.path.join(CONFIG_DIR, "daemon-banner.json")
 
 
 def banner_payload(cfg: Config) -> dict:
     return {
         "side": cfg.side,
-        "width": cfg.width,
-        "height": cfg.height,
         "fps": cfg.fps,
         "scale": cfg.scale,
         "quality": cfg.quality,

@@ -180,11 +180,12 @@ tandem
 
 - **Start Tandem** launches the daemon and opens the live view. It shows the status,
   the pairing **QR code**, the plain addresses, the touch status and the daemon log.
+  The virtual monitor appears once a phone has paired, sized to that phone's screen.
   `q` returns to the menu and keeps the stream running. `d` disconnects and removes
   the monitor.
 - **Configure** sets the desktop backend (auto, hyprland or gnome), the screen
-  **side** (left, right, up or down), the **resolution** (presets, or *Match connected
-  phone* through adb), the **FPS**, the desktop **scale**, the **quality** (bitrate),
+  **side** (left, right, up or down), the **resolution** (*auto*, the default, sizes
+  the monitor to the first phone that connects; or a fixed size), the **FPS**, the desktop **scale**, the **quality** (bitrate),
   the keyframe interval, the **preferred link** (which address comes first in the
   QR code), the **port**, **touch input** (on or off), and **paired phones**. The
   paired phones option has a *forget all* action, which creates a new pairing key.
@@ -206,7 +207,7 @@ python3 tandemd.py --help
 
 ```
 --backend auto|hyprland|gnome            # auto-detected from the session
---width 2400 --height 1080 --fps 60      # virtual monitor mode
+--resolution auto|2400x1080 --fps 60     # monitor size: auto = the first phone's screen
 --side right|left|up|down --scale 1.5    # placement (applied live on SIGUSR1)
 --bitrate 12M --gop 30                   # encoder (Hyprland: GOP is at least 1 s of frames)
 --encoder auto|vah264enc|x264enc|…       # GNOME: GStreamer element to use

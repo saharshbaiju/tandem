@@ -255,6 +255,9 @@ computer is reachable and Tandem is not running), then a timeout.
 **Secure the connection** (`SecureChannel`, 5 s timeout). Establish TLS,
 accepting only the certificate pinned by the QR code. Then exchange `HELO`,
 `CHAL`, `AUTH` and `OKAY`, and check the computer's proof before anything else.
+The `HELO` carries the app's window size in landscape (`display`), and the
+computer creates its virtual monitor at that size, so the desktop fills the
+screen without black bars.
 
 **Final or retry** (`classify`). A session ends as *final*
 (`onStopped(…, final = true)`), with the reason shown and no reconnect, only for

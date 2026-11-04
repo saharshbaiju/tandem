@@ -11,6 +11,7 @@ import android.os.HandlerThread
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
+import android.util.Size
 import android.view.Surface
 import java.io.IOException
 import java.io.InputStream
@@ -116,6 +117,8 @@ data class ServerConfig(
 class StreamSession(
     private val target: ConnectTarget,
     private val appVersion: String,
+    /** Our screen in landscape: the computer sizes its virtual monitor to it. */
+    private val display: Size,
     private val surface: Surface,
     private val listener: Listener,
     /** The network whose subnet holds [InetAddress], so the socket can be bound to it. */
@@ -200,7 +203,7 @@ class StreamSession(
             val reader = FrameReader(input)
             val frameWriter = FrameWriter(s.getOutputStream())
             SecureChannel.authenticate(reader, frameWriter, target.pairingKey,
-                conn.fingerprint, appVersion)
+                conn.fingerprint, appVersion, display)
             if (!running) return
             s.soTimeout = READ_TIMEOUT_MS
 
