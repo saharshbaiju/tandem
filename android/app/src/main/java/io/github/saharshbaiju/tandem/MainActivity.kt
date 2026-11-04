@@ -27,6 +27,7 @@ import android.util.Log
 import android.util.Size
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.LinearLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -117,6 +118,14 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         b.surface.holder.addCallback(this)
+        // Folding, unfolding and rotating all end up here (configChanges
+        // keeps the activity; only the window's size changes).
+        b.root.addOnLayoutChangeListener { _, left, top, right, bottom,
+                                           oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                onRootResized()
+            }
+        }
         // Keep the picture clear of a punch-hole camera where the letterbox allows.
         ViewCompat.setOnApplyWindowInsetsListener(b.surface) { _, insets ->
             val cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
@@ -346,15 +355,41 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     }
 
     /**
-     * Where the desktop is shown: the whole window (edge to edge), in
-     * landscape. The computer creates its virtual monitor at this size, so
-     * the picture fills the screen without black bars (a foldable reports
-     * whichever screen it is open on).
+     * Where the desktop is shown: the whole window, edge to edge. The
+     * computer sizes its virtual monitor to it, so the picture fills the
+     * screen without black bars, and follows it when the phone is folded,
+     * unfolded or rotated ([onRootResized]).
      */
-    private fun videoArea(): Size {
-        val w = b.root.width
-        val h = b.root.height
-        return Size(maxOf(w, h), minOf(w, h))
+    private fun videoArea() = Size(b.root.width, b.root.height)
+
+    private fun onRootResized() {
+        session?.displayChanged(videoArea())
+        layoutConnectScreen()
+    }
+
+    /**
+     * Side by side in landscape (identity left, connect card right); stacked
+     * in portrait, where two columns don't fit a phone's width. Done here,
+     * not with a layout-port file: the activity handles rotation itself
+     * (configChanges), so layouts aren't reloaded.
+     */
+    private fun layoutConnectScreen() {
+        val portrait = b.root.height > b.root.width
+        val content = b.connectContent
+        val wanted = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        if (content.orientation == wanted) return
+        content.orientation = wanted
+        for (child in listOf(b.connectIdentity, b.connectCard)) {
+            val lp = child.layoutParams as LinearLayout.LayoutParams
+            lp.width = if (portrait) LinearLayout.LayoutParams.MATCH_PARENT else 0
+            lp.weight = if (portrait) 0f else if (child === b.connectCard) 1.15f else 1f
+            child.layoutParams = lp
+        }
+        val identityEnd = if (portrait) 0 else dp(36f).toInt()
+        b.connectIdentity.setPaddingRelative(0, 0, identityEnd, if (portrait) dp(24f).toInt() else 0)
+        val side = dp(if (portrait) 20f else 28f).toInt()
+        content.setPaddingRelative(if (portrait) side else dp(40f).toInt(), dp(20f).toInt(),
+            side, dp(20f).toInt())
     }
 
     private fun userDisconnect(why: String) {

@@ -117,8 +117,8 @@ data class ServerConfig(
 class StreamSession(
     private val target: ConnectTarget,
     private val appVersion: String,
-    /** Our screen in landscape: the computer sizes its virtual monitor to it. */
-    private val display: Size,
+    /** Our screen: the computer sizes its virtual monitor to it. */
+    display: Size,
     private val surface: Surface,
     private val listener: Listener,
     /** The network whose subnet holds [InetAddress], so the socket can be bound to it. */
@@ -151,6 +151,8 @@ class StreamSession(
     private class Connected(val host: String, val raw: Socket, val tls: SSLSocket,
                             val fingerprint: ByteArray)
 
+    /** Our screen's current size; the hello sends it, [displayChanged] updates it. */
+    @Volatile private var display = display
     @Volatile private var running = true
     @Volatile private var socket: Socket? = null
     @Volatile private var serverConfig: ServerConfig? = null
@@ -188,6 +190,17 @@ class StreamSession(
         sender?.queueTouches(points)
     }
 
+    /**
+     * Our screen changed size (folded, unfolded, rotated). The computer
+     * resizes its virtual monitor to match. Before the connection is up, the
+     * hello will carry the new size; after, a DISP frame does.
+     */
+    fun displayChanged(size: Size) {
+        if (size == display) return
+        display = size
+        sender?.reportDisplay(size)
+    }
+
     // ------------------------------------------------------------------ reader
 
     override fun run() {
@@ -202,8 +215,9 @@ class StreamSession(
             val input = s.getInputStream().buffered(1 shl 16)
             val reader = FrameReader(input)
             val frameWriter = FrameWriter(s.getOutputStream())
+            val helloDisplay = display
             SecureChannel.authenticate(reader, frameWriter, target.pairingKey,
-                conn.fingerprint, appVersion, display)
+                conn.fingerprint, appVersion, helloDisplay)
             if (!running) return
             s.soTimeout = READ_TIMEOUT_MS
 
@@ -212,7 +226,11 @@ class StreamSession(
             val rawInput = try { conn.raw.getInputStream() } catch (_: IOException) { null }
             val backlog = BacklogMeter(input, rawInput)
             // sender first: the decode thread may ask for a keyframe at once
-            sender = Sender(frameWriter).also { it.start() }
+            sender = Sender(frameWriter).also {
+                it.start()
+                // The screen changed while we were pairing: catch up.
+                if (display != helloDisplay) it.reportDisplay(display)
+            }
             val f = Feeder().also { feeder = it; it.start() }
             listener.onConnected(this, conn.host)
 
@@ -728,6 +746,7 @@ class StreamSession(
         private val touches = TouchQueue()
         private var keyframeWanted = false
         private var lastKeyframeRequestMs = 0L
+        private var displayToReport: Size? = null    // newest only
         @Volatile private var active = true
 
         fun queueTouches(points: List<TouchPoint>) = synchronized(lock) {
@@ -742,6 +761,11 @@ class StreamSession(
          * not dropped (dropping lost the request that mattered, e.g. the one
          * at the end of a skipped backlog right after a catch-up's).
          */
+        fun reportDisplay(size: Size) = synchronized(lock) {
+            displayToReport = size
+            lock.notifyAll()
+        }
+
         fun requestKeyframe() = synchronized(lock) {
             keyframeWanted = true
             lock.notifyAll()
@@ -763,7 +787,7 @@ class StreamSession(
                 while (active) {
                     val frames = ArrayList<Pair<String, ByteArray>>()
                     synchronized(lock) {
-                        while (active && touches.isEmpty()) {
+                        while (active && touches.isEmpty() && displayToReport == null) {
                             val now = SystemClock.elapsedRealtime()
                             val keyframeIn = keyframeDelayMs(now)
                             if (keyframeIn == 0L) break
@@ -776,6 +800,12 @@ class StreamSession(
                             frames += FrameWriter.TYPE_KEYFRAME_REQUEST to EMPTY
                             keyframeWanted = false
                             lastKeyframeRequestMs = now
+                        }
+                        displayToReport?.let {
+                            frames += FrameWriter.TYPE_DISPLAY to JSONObject()
+                                .put("w", it.width).put("h", it.height)
+                                .toString().toByteArray(Charsets.UTF_8)
+                            displayToReport = null
                         }
                         touches.drainTo(frames)
                     }

@@ -40,8 +40,9 @@
             android:paddingEnd="28dp"
             android:paddingBottom="20dp">
 
-            <!-- left: identity -->
+            <!-- left (top in portrait, see MainActivity.layoutConnectScreen): identity -->
             <LinearLayout
+                android:id="@+id/connectIdentity"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -74,7 +75,7 @@
                     android:textColor="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
 
-            <!-- right: the connect card -->
+            <!-- right (bottom in portrait): the connect card -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/connectCard"
                 style="?attr/materialCardViewFilledStyle"

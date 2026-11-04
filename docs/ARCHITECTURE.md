@@ -512,6 +512,7 @@ big-endian length, and a body:
 | `PING` | Both | Empty | After 1 s with nothing else to send. Phone to PC only from current apps |
 | `HELO` `CHAL` `AUTH` `OKAY` `DENY` | Both | The pairing handshake ([`SECURITY.md`](./SECURITY.md) §3). `HELO` also carries the phone's screen size, `display: {w, h}` | Once, before anything else. A `DENY` can also come before `OKAY` when the computer is full or the phone is locked out |
 | `INPT` | PC to phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | Once the phone is admitted and the monitor exists |
+| `DISP` | Phone to PC | JSON `{"w": px, "h": px}` | When the phone's screen changes size (folded, unfolded, rotated) |
 | `TUCH` | Phone to PC | 6 bytes: `action u8, finger u8, x u16, y u16` (big-endian) | Every touch change (stage 5) |
 | `KEYQ` | Phone to PC | Empty | The phone's decoder needs a fresh keyframe (see *Keyframe requests and resync* below) |
 
@@ -844,15 +845,26 @@ honoured, and everything after the listener starts runs in `try`/`finally`.
 `VirtualMonitor.close()` undoes only what `start()` got done, so stopping
 before any phone paired, or after a failed setup, is clean too.
 
-**Sized by the first phone.** The monitor is created when the first phone
-passes the pairing proof, at the screen size its `HELO` reported
-(`display: {w, h}`, landscape, checked to be even and 320 to 7680 pixels per
-side). `--resolution WxH` fixes a size instead. Phones admitted while the
-monitor is being created get heartbeats (so they don't time out) and then the
-settings and touch state from `Broadcaster.attach()`; the video follows on the
-first keyframe. Later phones
-with a different shape are letterboxed. The size is kept for the daemon's
-lifetime: folding a foldable doesn't resize the monitor yet (planned work).
+**Sized by the phone.** The monitor is created when the first phone passes
+the pairing proof, at the screen size its `HELO` reported (`display: {w, h}`,
+checked to be even and 320 to 7680 pixels per side). `--resolution WxH` fixes
+a size instead. Phones admitted while the monitor is being created get
+heartbeats (so they don't time out) and then the settings and touch state from
+`Broadcaster.attach()`; the video follows on the first keyframe.
+
+The monitor then follows the longest-connected phone: the one that created it,
+or, if that one left, the next oldest. When that phone's screen changes size
+(folded, unfolded, rotated) it sends `DISP {w, h}`; when a different phone
+takes its place, its size counts. `ScreenFollower` waits 0.5 s and applies
+only the latest size, so an unfold animation means one resize, then
+`VirtualMonitor.resize()` changes the monitor in place: on Hyprland a new
+mode for the headless output, on GNOME nothing beyond restarting the encoder
+at the new size (Mutter resizes the virtual monitor to the stream's caps
+without replacing it, so windows stay). The touch device learns the new size,
+phones get a new `ASX1` and resync on the new stream's first keyframe. With
+every phone gone the size is kept. Other phones are letterboxed.
+`--no-resize` (TUI: *Follow the phone: off*) keeps the first size, for a
+desktop that handles the resize badly.
 `--parent-pid PID` is optional. Where `prctl` is unavailable the daemon logs a
 note and carries on. It also checks for a parent that died before the `prctl`
 call. `start-tandem.sh` does not pass it: its daemon runs in the terminal's
@@ -959,6 +971,3 @@ next to each rule explain the details.
 - A KDE Plasma backend, using KWin virtual outputs through `kwin_wayland` screencast.
 - Pen input with pressure and hover, and a keyboard on the phone.
 - A latency overlay for tuning.
-- Resize the monitor when the phone's screen changes (a foldable folded or
-  unfolded): the app sends a new size, the daemon calls a `VirtualMonitor`
-  resize.

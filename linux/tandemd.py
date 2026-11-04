@@ -36,9 +36,10 @@ I drag something onto it" bug):
     compositor can never stall the video.
 
 The virtual monitor only appears once a phone has paired, at that phone's
-screen size (its hello says it; --resolution can fix a size instead). So no
-size has to be configured, and no empty monitor sits on the desktop while no
-phone is watching.
+screen size (its hello says it; --resolution can fix a size instead), and it
+follows that phone when it is folded or rotated (DISP; --no-resize keeps the
+first size). So no size has to be configured, and no empty monitor sits on
+the desktop while no phone is watching.
 
 Transport is TCP on every interface, IPv4 and IPv6 (USB tethering, Wi-Fi, adb
 reverse all work), wrapped in TLS. A connection receives nothing until it
@@ -163,6 +164,8 @@ def kill_stale():
 #           to decode something). Answered with a GOP replay / new IDR.
 #   PING -> empty heartbeat. A phone that sends them is timed out after
 #           READ_TIMEOUT of silence (older apps never send one: no timeout).
+#   DISP -> JSON {"w": px, "h": px}: the phone's screen changed size (it was
+#           folded, unfolded or rotated). The monitor follows it.
 # Before any of these, the handshake frames HELO / CHAL / AUTH / OKAY / DENY
 # (secure_link.py). Unknown types are ignored on both ends, so new ones stay
 # compatible.
@@ -171,6 +174,7 @@ FRAME_NAL = b"NALU"
 FRAME_BANNER = b"ASX1"
 FRAME_PING = b"PING"
 FRAME_KEYFRAME_REQUEST = b"KEYQ"
+FRAME_DISPLAY = b"DISP"
 
 
 def frame(ftype, body=b""):
@@ -262,9 +266,10 @@ class Client:
     only touches it under its own lock.
     """
 
-    def __init__(self, sock, addr, on_dead, on_message=None):
+    def __init__(self, sock, addr, display, on_dead, on_message=None):
         self.sock = sock
         self.addr = addr
+        self.display = display      # its screen (w, h); DISP updates it
         self.started = False        # True once it has a keyframe to decode from
         self.resync_since = time.monotonic()   # waiting for a keyframe since
         self.last_keyframe_ask = 0.0
@@ -601,6 +606,10 @@ class Broadcaster:
     decides the monitor's size. Phones admitted until then get heartbeats
     only; attach() sends them the settings and the touch state once the
     monitor is up, and the video follows on its first keyframe.
+
+    The monitor follows the longest-connected phone (the one that created
+    it, unless it left): `on_screen(display)` hears that phone's screen size
+    whenever it changes, or whenever another phone takes its place.
     """
 
     def __init__(self):
@@ -613,17 +622,46 @@ class Broadcaster:
         self.gop = None             # framed NALs since the last IDR, or None
         self._gop_bytes = 0
         self.banner_payload = None  # settings JSON, once the monitor is up
+        self.on_screen = None       # set by attach(), or never (fixed size)
 
-    def attach(self, banner_payload, phone_input, keyframes):
-        """The monitor is up: tell the phones already here what they get."""
+    def attach(self, banner_payload, phone_input, keyframes, on_screen=None):
+        """The monitor is up: tell the phones already here what they get.
+
+        on_screen: called with the followed phone's screen size, at once
+        (it may have changed while the monitor was being created) and on
+        every later change. None keeps the monitor's size.
+        """
         with self._lock:
             self.banner_payload = banner_payload
             self.phone_input = phone_input
             self.keyframes = keyframes
+            self.on_screen = on_screen
             clients = list(self._clients)
+            followed = self._followed_locked()
         for c in clients:
             c.send_message(FRAME_BANNER, banner_payload)
             phone_input.on_admitted(c)
+        if on_screen and followed:
+            on_screen(followed.display)
+
+    def _followed_locked(self):
+        """The phone the monitor's size follows: the longest-connected."""
+        return self._clients[0] if self._clients else None
+
+    def _screen_changed(self, followed_before):
+        """Call on_screen if the followed phone, or its size, changed.
+        `followed_before` is (client, display) from before the change."""
+        with self._lock:
+            followed = self._followed_locked()
+            on_screen = self.on_screen
+        if (on_screen and followed
+                and (followed, followed.display) != followed_before):
+            on_screen(followed.display)
+
+    def _followed_state(self):
+        with self._lock:
+            c = self._followed_locked()
+            return (c, c.display if c else None)
 
     def set_banner(self, payload):
         with self._lock:
@@ -636,8 +674,10 @@ class Broadcaster:
         with self._lock:
             return len(self._clients) >= MAX_CLIENTS
 
-    def add(self, sock, addr):
-        """Start streaming to a phone that passed the pairing handshake."""
+    def add(self, sock, addr, display):
+        """Start streaming to a phone that passed the pairing handshake.
+        `display` is its screen size (w, h) from the hello."""
+        before = self._followed_state()
         with self._lock:
             if len(self._clients) >= MAX_CLIENTS:
                 # Normally refused before the handshake (deny_before_okay);
@@ -647,7 +687,8 @@ class Broadcaster:
                 log(f"client {addr[0]} refused: {MAX_CLIENTS} phones already "
                     "connected")
                 return
-            c = Client(sock, addr, self._remove, self._on_client_message)
+            c = Client(sock, addr, display, self._remove,
+                       self._on_client_message)
             # Read under the lock, with the append: a phone is either here
             # for attach() to tell, or sees what attach() set. Never both.
             phone_input = self.phone_input
@@ -667,8 +708,10 @@ class Broadcaster:
             self._ask_keyframe()
         if phone_input:
             phone_input.on_admitted(c)            # tells the phone about touch
+        self._screen_changed(before)
 
     def _remove(self, c):
+        before = self._followed_state()
         with self._lock:
             if c in self._clients:
                 self._clients.remove(c)
@@ -676,6 +719,7 @@ class Broadcaster:
         if self.phone_input:
             self.phone_input.on_disconnect(c)   # lift fingers it left down
         log(f"client disconnected: {c.addr[0]}:{c.addr[1]} (total {n})")
+        self._screen_changed(before)
 
     def close_all(self):
         with self._lock:
@@ -687,8 +731,23 @@ class Broadcaster:
         """Frames a phone sends: keyframe requests here, the rest is input."""
         if frame_type == FRAME_KEYFRAME_REQUEST:
             self.resync(client, "phone asked for a keyframe", rate_limit=True)
+        elif frame_type == FRAME_DISPLAY:
+            self._on_display(client, body)
         elif self.phone_input:
             self.phone_input.on_message(client, frame_type, body)
+
+    def _on_display(self, client, body):
+        """DISP: the phone's screen changed size (folded, rotated)."""
+        try:
+            display = secure_link.parse_display(json.loads(body))
+        except ValueError:
+            return
+        if display is None:
+            return                  # implausible: keep what we had
+        before = self._followed_state()
+        with self._lock:
+            client.display = display
+        self._screen_changed(before)
 
     # ---- resync ------------------------------------------------------------ #
 
@@ -1262,7 +1321,7 @@ def admit(sock, addr, broadcaster, gatekeeper, slot, on_paired):
         + ", screen {}x{}".format(*hello.display))
     on_paired(hello.display)
     try:
-        broadcaster.add(tls, addr)
+        broadcaster.add(tls, addr, hello.display)
     except OSError as e:
         log(f"client {addr[0]} failed after pairing ({e})")
 
@@ -1297,6 +1356,49 @@ class FirstPhone:
         return True
 
 
+class ScreenFollower:
+    """Resizes the monitor to the followed phone's screen, off the thread
+    that reported it.
+
+    Unfolding or rotating a phone reports a few sizes in quick succession,
+    so a change waits SETTLE seconds and then only the latest size counts:
+    one resize, not three encoder restarts.
+    """
+
+    SETTLE = 0.5
+
+    def __init__(self, monitor, on_resized, stop_evt):
+        self._monitor = monitor
+        self._on_resized = on_resized       # after a resize: e.g. new banner
+        self._stop = stop_evt
+        self._wanted = None
+        self._changed = threading.Event()
+        threading.Thread(target=self._run, daemon=True,
+                         name="screen-follower").start()
+
+    def want(self, display):
+        """Broadcaster.on_screen: the followed phone's screen is `display`."""
+        self._wanted = display
+        self._changed.set()
+
+    def _run(self):
+        while not self._stop.is_set():
+            if not self._changed.wait(0.5):
+                continue
+            if self._stop.wait(self.SETTLE):
+                return
+            self._changed.clear()
+            size = self._wanted
+            if size == self._monitor.size:
+                continue
+            try:
+                self._monitor.resize(size)
+            except Exception as e:
+                log(f"warning: resizing the virtual monitor failed ({e})")
+                continue
+            self._on_resized()
+
+
 def parse_resolution(text):
     """`--resolution`: "auto" (None) or "WIDTHxHEIGHT"."""
     if text == "auto":
@@ -1325,7 +1427,13 @@ class VirtualMonitor:
         self.stream = None
         self.touch_surface = None
         self.phone_input = None
+        # Set to restart the encoder; supervise_capture() does it.
+        self.restart_capture = threading.Event()
         self._created = False          # backend.setup() ran
+
+    @property
+    def size(self):
+        return self.args.width, self.args.height
 
     def start(self, size):
         """Create the monitor at `size` and start encoding it. Raises
@@ -1345,6 +1453,20 @@ class VirtualMonitor:
         self.touch_surface, problem = self._start_touch()
         self.phone_input = PhoneInput(touch_surface=self.touch_surface,
                                       unavailable_reason=problem)
+
+    def resize(self, size):
+        """Give the running monitor a new size, in place: windows stay on it.
+
+        The backend changes the mode, the touch device learns the new size,
+        and the encoder restarts at it (phones resync on its first keyframe).
+        """
+        a = self.args
+        a.width, a.height = size
+        log(f"virtual monitor: {a.width}x{a.height} (resized for the phone)")
+        self.backend.resize()
+        if self.touch_surface:
+            self.touch_surface.resize(a.width, a.height)
+        self.restart_capture.set()
 
     def _start_touch(self):
         """(surface, "") or (None, reason): the reason is shown on the
@@ -1417,6 +1539,10 @@ def main():
                     metavar="auto|WxH",
                     help="virtual monitor size (default auto: the screen of "
                          "the first phone that pairs)")
+    ap.add_argument("--no-resize", dest="resize", action="store_false",
+                    help="with --resolution auto: keep the size the monitor "
+                         "was created at, instead of following the phone "
+                         "when it is folded or rotated")
     ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--bitrate", default="12M")
@@ -1536,10 +1662,16 @@ def main():
         if stop_evt.is_set():
             return
 
-        restart_evt = threading.Event()
+        restart_evt = monitor.restart_capture
+        follower = None
+        if args.resolution is None and args.resize:
+            follower = ScreenFollower(
+                monitor, lambda: broadcaster.set_banner(
+                    load_banner_payload(args, backend.name)), stop_evt)
         broadcaster.attach(load_banner_payload(args, backend.name),
                            monitor.phone_input,
-                           KeyframeSource(backend, restart_evt.set))
+                           KeyframeSource(backend, restart_evt.set),
+                           on_screen=follower.want if follower else None)
 
         def control_loop():
             """Apply SIGUSR1 reloads off the signal handler (D-Bus / hyprctl),

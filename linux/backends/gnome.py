@@ -484,8 +484,7 @@ class MutterTouchscreen:
         self._bus = bus
         self._session = rd_session
         self._stream = stream_path
-        self._width = width
-        self._height = height
+        self._size = (width, height)
         self._active_slots = set()
         self._warned = False
         self._worker = _DBusWorker("tandem-mutter-touch")
@@ -521,10 +520,15 @@ class MutterTouchscreen:
         self._worker.drain(1.0)
         self._worker.stop()
 
+    def resize(self, width, height):
+        """The monitor was resized: scale touches to its new pixels."""
+        self._size = (width, height)
+
     def _to_pixels(self, x, y):
         x = min(max(x, 0.0), 1.0)
         y = min(max(y, 0.0), 1.0)
-        return x * (self._width - 1), y * (self._height - 1)
+        width, height = self._size          # one read: resize() may race
+        return x * (width - 1), y * (height - 1)
 
     # -- worker thread ------------------------------------------------------ #
 
@@ -757,6 +761,11 @@ class GnomeBackend:
         if settle_until is None and proc.poll() is None:
             log("warning: could not place virtual monitor "
                 f"({error or 'it never appeared in DisplayConfig'})")
+
+    def resize(self):
+        """Nothing to do here: the encoder's caps set the monitor's size,
+        and Mutter resizes the virtual monitor in place (same connector,
+        windows stay) when capture restarts at the new size."""
 
     def apply_live(self, side, scale, bus=None):
         if not self.connector:

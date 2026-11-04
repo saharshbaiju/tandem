@@ -169,6 +169,10 @@ class VirtualTouchscreen:
         for slot in sorted(self._active_slots):
             self.up(slot)
 
+    def resize(self, width, height):
+        """Nothing to do: the compositor maps the device's whole range onto
+        the output, so fractions land right at any output size."""
+
     def close(self):
         if self._fd is None:
             return

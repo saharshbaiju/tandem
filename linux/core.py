@@ -54,6 +54,8 @@ class Config:
     output: str = "EXT-1"
     side: str = "right"            # right / left / up / down
     resolution: str = "auto"       # auto / WIDTHxHEIGHT (see RESOLUTIONS)
+    resize: bool = True            # auto: follow the phone when it's folded
+#                                    or rotated (False: keep the first size)
     fps: int = 60
     scale: float = 1.0             # desktop scale of the virtual monitor
     quality: str = "high"          # low / medium / high / ultra
@@ -72,7 +74,7 @@ class Config:
 
     def tandemd_args(self) -> list:
         """Build the explicit CLI for tandemd.py from this config."""
-        return [
+        args = [
             "--backend", self.resolved_backend() or "auto",
             "--output", self.output,
             "--resolution", self.resolution,
@@ -86,7 +88,12 @@ class Config:
             "--port", str(self.port),
             "--quality", self.quality,
             "--pairing-key-file", PAIRING_KEY_PATH,
-        ] + ([] if self.touch else ["--no-touch"])
+        ]
+        if not self.touch:
+            args.append("--no-touch")
+        if not self.resize:
+            args.append("--no-resize")
+        return args
 
 
 # --------------------------------------------------------------------------- #

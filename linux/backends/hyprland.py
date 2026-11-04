@@ -1112,6 +1112,16 @@ class HyprlandBackend:
         screen.description += f" mapped to {self.a.output}"
         return screen
 
+    def resize(self):
+        """New mode for the headless output; it keeps its workspaces."""
+        a = self.a
+        with self._layout_lock:
+            if not place_output(a.output, a.width, a.height, a.fps,
+                                valid_scale(a.width, a.height, a.scale),
+                                a.side):
+                log(f"warning: could not apply mode {a.width}x{a.height}")
+        self._watcher.mute()            # our own change, not the user's
+
     def apply_live(self, side, scale):
         a = self.a
         with self._layout_lock:

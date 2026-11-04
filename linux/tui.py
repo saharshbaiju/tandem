@@ -100,8 +100,8 @@ def run_shell(win, cmd, prompt="press Enter to return"):
 # Config keys that change the capture/encode pipeline: changing any of these
 # needs the daemon restarted. side/scale are applied live by the daemon itself
 # (SIGUSR1 -> backend.apply_live); transport only changes the QR's host order.
-RESTART_KEYS = ("backend", "output", "resolution", "fps", "quality",
-                "codec", "gop", "port", "touch")
+RESTART_KEYS = ("backend", "output", "resolution", "resize", "fps",
+                "quality", "codec", "gop", "port", "touch")
 LIVE_KEYS = ("side", "scale")
 
 
@@ -204,7 +204,8 @@ class Stream:
             elif "client disconnected" in line:
                 self.state["live"] = max(0, self.state["live"] - 1)
             elif "virtual monitor:" in line:
-                self.monitor_size = line.split("virtual monitor:", 1)[1].strip()
+                # "virtual monitor: 2160x1856", maybe "(resized for …)"
+                self.monitor_size = line.split("virtual monitor:", 1)[1].split()[0]
             elif "touch input:" in line:
                 self.touch_status = line.split("touch input:", 1)[1].strip()
             elif "error:" in line:
@@ -488,6 +489,7 @@ def configure_screen(win, cfg, live=False):
         ("Resolution", "choice", "resolution",
          core.RESOLUTIONS + ([cfg.resolution]
                              if cfg.resolution not in core.RESOLUTIONS else [])),
+        ("Follow the phone", "choice", "resize", [True, False]),
         ("Refresh (FPS)", "choice", "fps", [30, 60, 120]),
         ("Desktop scale", "choice", "scale", [1.0, 1.25, 1.5, 2.0]),
         ("Quality", "choice", "quality", ["low", "medium", "high", "ultra"]),
@@ -512,6 +514,12 @@ def configure_screen(win, cfg, live=False):
             elif key == "backend":
                 value = (f"auto → {cfg.resolved_backend() or 'unsupported'}"
                          if cfg.backend == "auto" else cfg.backend)
+            elif key == "resize":
+                value = ("—  (the resolution is fixed)"
+                         if cfg.resolution != "auto" else
+                         "on   (resizes when the phone folds or rotates)"
+                         if cfg.resize else
+                         "off  (keeps the size it started with)")
             elif key == "touch":
                 value = ("on   (phones that scanned the QR can tap)"
                          if cfg.touch else "off  (view only)")

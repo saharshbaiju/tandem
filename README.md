@@ -185,7 +185,9 @@ tandem
   the monitor.
 - **Configure** sets the desktop backend (auto, hyprland or gnome), the screen
   **side** (left, right, up or down), the **resolution** (*auto*, the default, sizes
-  the monitor to the first phone that connects; or a fixed size), the **FPS**, the desktop **scale**, the **quality** (bitrate),
+  the monitor to the phone that connects; or a fixed size), **follow the phone**
+  (with *auto*: resize when the phone is folded, unfolded or rotated; turn it off
+  if your desktop handles that badly), the **FPS**, the desktop **scale**, the **quality** (bitrate),
   the keyframe interval, the **preferred link** (which address comes first in the
   QR code), the **port**, **touch input** (on or off), and **paired phones**. The
   paired phones option has a *forget all* action, which creates a new pairing key.
@@ -207,7 +209,8 @@ python3 tandemd.py --help
 
 ```
 --backend auto|hyprland|gnome            # auto-detected from the session
---resolution auto|2400x1080 --fps 60     # monitor size: auto = the first phone's screen
+--resolution auto|2400x1080 --fps 60     # monitor size: auto = the phone's screen
+--no-resize                              # auto: keep the first size when the phone rotates
 --side right|left|up|down --scale 1.5    # placement (applied live on SIGUSR1)
 --bitrate 12M --gop 30                   # encoder (Hyprland: GOP is at least 1 s of frames)
 --encoder auto|vah264enc|x264enc|…       # GNOME: GStreamer element to use

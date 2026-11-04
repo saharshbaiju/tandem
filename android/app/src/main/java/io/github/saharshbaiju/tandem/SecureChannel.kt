@@ -34,8 +34,8 @@ import org.json.JSONObject
  *     computer can neither show us a fake desktop nor receive our touches.
  *     This also covers an address typed by hand (no fingerprint to pin).
  *
- *  `display` is our screen size in landscape: the computer creates its
- *  virtual monitor at that size, so the desktop fills the screen exactly.
+ *  `display` is our screen size: the computer creates its virtual monitor
+ *  at that size, so the desktop fills the screen exactly.
  */
 object SecureChannel {
 
