@@ -187,8 +187,9 @@ tandem
   **side** (left, right, up or down), the **resolution** (*auto*, the default, sizes
   the monitor to the phone that connects; or a fixed size), **follow the phone**
   (with *auto*: resize when the phone is folded, unfolded or rotated; turn it off
-  if your desktop handles that badly), the **FPS**, the desktop **scale**, the **quality** (bitrate),
-  the keyframe interval, the **preferred link** (which address comes first in the
+  if your desktop handles that badly), the **FPS**, the desktop **scale** (100 to
+  300%; the desktop uses the nearest it allows at the monitor's size, shown in the
+  live view), the **quality** (bitrate), the keyframe interval, the **preferred link** (which address comes first in the
   QR code), the **port**, **touch input** (on or off), and **paired phones**. The
   paired phones option has a *forget all* action, which creates a new pairing key.
   Connected phones are dropped, and each one must scan the QR code again. Saving

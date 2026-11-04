@@ -47,6 +47,15 @@ USB_TETHER_PREFIX = "192.168.42."
 # "auto": the daemon sizes the monitor to the first phone that pairs.
 RESOLUTIONS = ["auto", "1280x720", "1920x1080", "2560x1440", "3840x2160"]
 
+# Desktop scales to offer: every step GNOME or Hyprland can produce. The one
+# picked is a wish; the desktop uses the nearest it allows at the monitor's
+# size (2160x1856 allows 133% but not 125%), and the live view shows it.
+SCALES = [1.0, 1.25, 1.333, 1.5, 1.667, 2.0, 2.5, 2.667, 3.0]
+
+
+def percent(scale) -> str:
+    return f"{float(scale) * 100:.0f}%"
+
 
 @dataclass
 class Config:

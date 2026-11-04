@@ -326,6 +326,15 @@ def place_beside(anchor, others, ext_size, side):
     return outer, ry
 
 
+class LayoutRefused(RuntimeError):
+    """GNOME won't take any layout from us until the user changes something
+    in Settings → Displays: retrying can't help, so don't."""
+
+
+def _scale_ok(scale, supported):
+    return not supported or any(abs(scale - s) < 1e-3 for s in supported)
+
+
 def place_monitor(bus, connector, side, scale):
     """Put `connector` on `side` of the primary monitor and set its scale.
 
@@ -334,13 +343,19 @@ def place_monitor(bus, connector, side, scale):
     primary flag, position (relative to each other) and per-monitor settings
     such as underscan and HDR colour mode. The layout is then shifted so its
     top-left is 0,0, which Mutter requires. Nothing is sent if the virtual
-    monitor is already where it should be. Returns True if a change was sent.
+    monitor is already where it should be.
+
+    Returns (changed, scale): whether a change was sent, and the scale the
+    monitor has (the supported one nearest to `scale`). Raises LayoutRefused
+    when another monitor's own scale would make Mutter reject any layout.
     """
     serial, monitors, logicals, props = display_state(bus)
     physical = props.get("layout-mode", 1) == 2
 
     current = {}            # connector -> (mode_id, w, h, scales, apply props)
+    names = {}              # connector -> what Settings calls it
     for spec, modes, mprops in monitors:
+        names[spec[0]] = mprops.get("display-name") or spec[0]
         for mid, w, h, _rate, _pref, scales, modeprops in modes:
             if modeprops.get("is-current"):
                 current[spec[0]] = (mid, w, h, scales, _apply_props(mprops))
@@ -398,7 +413,25 @@ def place_monitor(bus, connector, side, scale):
 
     after = layout()
     if after == before:
-        return False
+        return False, ext["scale"]
+
+    # Every monitor is re-sent at its current scale, and Mutter checks them
+    # all. It can be running a scale it no longer accepts (a 150% set by an
+    # older GNOME on a 3000x2000 panel, where 150% gives fractional pixels):
+    # then *every* layout change fails, ours and Settings' alike, with an
+    # error that doesn't say what to do. Say it.
+    for lm in others:
+        conn = lm["conns"][0]
+        _mid, w, h, supported, _p = current[conn]
+        if not _scale_ok(lm["scale"], supported):
+            raise LayoutRefused(
+                f"GNOME refuses every display change while "
+                f"\"{names[conn]}\" ({w}x{h}) is at {lm['scale'] * 100:.0f}%, "
+                "a scale it no longer allows at that resolution. Pick "
+                "another scale for it in Settings → Displays (e.g. "
+                + " or ".join(f"{sc * 100:.0f}%" for sc in sorted(
+                    supported, key=lambda sc: abs(sc - lm["scale"]))[:2])
+                + "), then try again")
 
     config = [(x, y, sc, transform, primary,
                [(c, current[c][0], current[c][4]) for c in conns])
@@ -411,7 +444,7 @@ def place_monitor(bus, connector, side, scale):
     _call(bus, DC_BUS, DC_PATH, DC_IFACE, "ApplyMonitorsConfig",
           GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})",
                        (serial, APPLY_TEMPORARY, config, global_props)))
-    return True
+    return True, ext["scale"]
 
 
 # --------------------------------------------------------------------------- #
@@ -590,6 +623,7 @@ class GnomeBackend:
         # apply_live (control thread) and the placement watcher can run at
         # once; two ApplyMonitorsConfig calls on one serial would fail.
         self._place_lock = threading.Lock()
+        self._scale = None              # the scale last applied and logged
 
     @staticmethod
     def missing():
@@ -755,6 +789,9 @@ class GnomeBackend:
                 # Errors are expected while Mutter is still adding it to
                 # the layout; only the last one is worth reporting.
                 error = self._place(self.a.side, self.a.scale, bus)
+                if isinstance(error, LayoutRefused):
+                    log(f"warning: {error}")
+                    return              # retrying can't fix it
                 if error is None:
                     settle_until = settle_until or time.monotonic() + 5
             time.sleep(0.25)
@@ -779,13 +816,17 @@ class GnomeBackend:
         """place_monitor under the lock; returns None or the error."""
         try:
             with self._place_lock:
-                changed = place_monitor(
+                changed, applied = place_monitor(
                     bus or Gio.bus_get_sync(Gio.BusType.SESSION, None),
                     self.connector, side, scale)
         except Exception as e:
             return e
         if changed:
-            log(f"placed {self.connector} side={side} scale={scale}")
+            log(f"placed {self.connector} side={side}")
+        if applied != self._scale:
+            self._scale = applied
+            # The TUI shows this: it can differ from the asked-for scale.
+            log(f"monitor scale: {applied:g} (asked {scale:g})")
         return None
 
     def stop_capture(self):

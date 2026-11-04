@@ -226,6 +226,8 @@ phone's vendor. The pairing QR code then includes that address.
 | TUI: *"GNOME is running on X11"* | Log in to the Wayland session |
 | GNOME: `could not create the virtual monitor` | GNOME is older than 40, or Mutter's ScreenCast interface is unavailable. Check with `gdbus introspect --session -d org.gnome.Mutter.ScreenCast -o /org/gnome/Mutter/ScreenCast` |
 | GNOME: monitor appears on the wrong side | The log shows `could not place virtual monitor (…)`. Drag it in *Settings → Displays*. The stream keeps working |
+| GNOME: scale or side never changes, also not in *Settings → Displays* | The log says `GNOME refuses every display change while "<display>" … is at 150%`. Another monitor runs a scale this GNOME no longer allows at its resolution (150% on a 3000×2000 panel, set by an older GNOME), and Mutter then rejects every layout. Give that display one of the scales Settings offers (the message suggests two) |
+| Scale differs from the one chosen | The desktop uses the nearest scale it allows at the monitor's size (whole logical pixels), for example 133% instead of 125% at 2160×1856. The live view shows the applied scale |
 | Hyprland: resolution or scale ignored | Hyprland 0.55 and later need `hyprctl eval`. The daemon uses it automatically. Check that `hyprctl eval 'return 1'` prints `ok` |
 | Hyprland: `Unsupported format: bgra` or `Cannot create hw frames context` | The encoder is on a different GPU from Hyprland. With `--encoder auto`, Tandem follows the compositor, so check the daemon's `encoder:` log line |
 | Hyprland: *"invalid scale"* or *"EXT-1 overlaps"* popup | Tandem snaps the scale to a value Hyprland accepts. If you still see the popup, two daemons are running. The new one waits for the old one to exit |

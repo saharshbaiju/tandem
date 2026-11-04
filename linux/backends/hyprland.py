@@ -366,12 +366,6 @@ def place_output(name, width, height, fps, scale, side):
     return True
 
 
-def apply_live(name, width, height, fps, scale, side):
-    """Re-apply mode/scale/side to an existing output (no stream restart)."""
-    return place_output(name, width, height, fps,
-                        valid_scale(width, height, scale), side)
-
-
 def pick_ext_workspace(name):
     """The workspace id the phone hosts: the one it shows now, else a free id
     above every workspace and numeric workspace rule the user has."""
@@ -926,10 +920,7 @@ class HyprlandBackend:
             except Exception:
                 unbind_workspace(a.output)
                 raise
-        scale = valid_scale(a.width, a.height, a.scale)
-        if scale != a.scale:
-            log(f"scale {a.scale} gives fractional pixels at {a.width}x"
-                f"{a.height}; using {scale:g}")
+        scale = self._scale_for(a.scale)
         with self._layout_lock:
             if not place_output(a.output, a.width, a.height, a.fps, scale,
                                 a.side):
@@ -1112,12 +1103,20 @@ class HyprlandBackend:
         screen.description += f" mapped to {self.a.output}"
         return screen
 
+    def _scale_for(self, scale):
+        """The scale Hyprland takes nearest to `scale` at the current size,
+        logged for the TUI (it can differ from the one asked for)."""
+        a = self.a
+        valid = valid_scale(a.width, a.height, scale)
+        log(f"monitor scale: {valid:g} (asked {scale:g})")
+        return valid
+
     def resize(self):
         """New mode for the headless output; it keeps its workspaces."""
         a = self.a
+        scale = self._scale_for(a.scale)    # the new size may allow others
         with self._layout_lock:
-            if not place_output(a.output, a.width, a.height, a.fps,
-                                valid_scale(a.width, a.height, a.scale),
+            if not place_output(a.output, a.width, a.height, a.fps, scale,
                                 a.side):
                 log(f"warning: could not apply mode {a.width}x{a.height}")
         self._watcher.mute()            # our own change, not the user's
@@ -1127,9 +1126,10 @@ class HyprlandBackend:
         with self._layout_lock:
             if self._touch_mapped:
                 map_touch_device(uinput_touch.DEVICE_NAME, a.output)
-            ok = apply_live(a.output, a.width, a.height, a.fps, scale, side)
+            ok = place_output(a.output, a.width, a.height, a.fps,
+                              self._scale_for(scale), side)
         self._watcher.mute()            # our own change, not the user's
-        log(f"moved {a.output} side={side} scale={scale}")
+        log(f"moved {a.output} side={side}")
         return ok
 
     def stop_capture(self):

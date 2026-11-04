@@ -120,6 +120,7 @@ class Stream:
         self.state = {"live": 0, "ever": False}
         self.error = None
         self.monitor_size = ""          # "WxH", once the daemon created it
+        self.monitor_scale = None       # the scale the desktop applied
         self.touch_status = ""          # daemon's "touch input: ..." verdict
         self.notice = ""                # e.g. "port 5000 is used by …"
         self.stop = threading.Event()
@@ -206,6 +207,10 @@ class Stream:
             elif "virtual monitor:" in line:
                 # "virtual monitor: 2160x1856", maybe "(resized for …)"
                 self.monitor_size = line.split("virtual monitor:", 1)[1].split()[0]
+            elif "monitor scale:" in line:
+                # "monitor scale: 1.33333 (asked 1.25)"
+                self.monitor_scale = float(
+                    line.split("monitor scale:", 1)[1].split()[0])
             elif "touch input:" in line:
                 self.touch_status = line.split("touch input:", 1)[1].strip()
             elif "error:" in line:
@@ -241,6 +246,7 @@ class Stream:
         self.logs.clear()
         self.state = {"live": 0, "ever": False}
         self.monitor_size = ""
+        self.monitor_scale = None
         self.touch_status = ""
         self.start()
 
@@ -491,7 +497,7 @@ def configure_screen(win, cfg, live=False):
                              if cfg.resolution not in core.RESOLUTIONS else [])),
         ("Follow the phone", "choice", "resize", [True, False]),
         ("Refresh (FPS)", "choice", "fps", [30, 60, 120]),
-        ("Desktop scale", "choice", "scale", [1.0, 1.25, 1.5, 2.0]),
+        ("Desktop scale", "choice", "scale", core.SCALES),
         ("Quality", "choice", "quality", ["low", "medium", "high", "ultra"]),
         ("Keyframe interval", "choice", "gop", [15, 30, 60]),
         ("Preferred link", "choice", "transport", ["usb", "wifi"]),
@@ -514,6 +520,9 @@ def configure_screen(win, cfg, live=False):
             elif key == "backend":
                 value = (f"auto → {cfg.resolved_backend() or 'unsupported'}"
                          if cfg.backend == "auto" else cfg.backend)
+            elif key == "scale":
+                value = (f"{core.percent(cfg.scale)}  (or the nearest the "
+                         "desktop allows at the monitor's size)")
             elif key == "resize":
                 value = ("—  (the resolution is fixed)"
                          if cfg.resolution != "auto" else
@@ -711,8 +720,13 @@ def live_screen(win, stream):
             # The daemon creates the monitor when the first phone pairs.
             mon = (f"{stream.monitor_size}@{cfg.fps}" if stream.monitor_size
                    else f"on first phone ({cfg.resolution})")
+            # The scale the desktop applied; it may be the nearest it allows.
+            applied = stream.monitor_scale
+            scale = core.percent(applied if applied else cfg.scale)
+            if applied and abs(applied - cfg.scale) > 0.005:
+                scale += f" (asked {core.percent(cfg.scale)})"
             addstr(win, 6, 2, f"Monitor : {mon}  "
-                              f"side={cfg.side}  scale={cfg.scale}")
+                              f"side={cfg.side}  scale {scale}")
             addstr(win, 7, 2, f"Stream  : h264 @ {cfg.bitrate()}  port {cfg.port}")
 
             # QR on the right when there's room, else below the text. Its width
