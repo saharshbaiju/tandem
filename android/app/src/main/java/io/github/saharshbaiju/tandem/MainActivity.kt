@@ -627,7 +627,6 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             "hyprland" -> "Hyprland"
             "gnome" -> "GNOME"
             "kde" -> "KDE Plasma"
-            "niri" -> "niri"
             null, "" -> "—"
             else -> sc.backend
         }

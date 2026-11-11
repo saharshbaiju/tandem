@@ -3,7 +3,7 @@ layout.py - where the phone's monitor goes in a desktop layout.
 
 Pure geometry on (x, y, w, h) rectangles in the compositor's logical
 coordinates, with no compositor calls, so every backend that has to compute an
-explicit position (GNOME's ApplyMonitorsConfig, kscreen-doctor, niri) places
+explicit position (GNOME's ApplyMonitorsConfig, kscreen-doctor) places
 the phone the same way and the rules can be unit-tested on their own.
 """
 

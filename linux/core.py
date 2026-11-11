@@ -8,8 +8,7 @@ Supported desktops (see backends/), on Arch, Fedora, Debian / Ubuntu and
 their derivatives (package names for each in DEPS):
     Hyprland                      -> hyprland backend
     GNOME on Wayland              -> gnome backend
-    KDE Plasma on Wayland         -> kde backend
-    niri with virtual outputs     -> niri backend (experimental)
+    KDE Plasma on Wayland         -> kde backend (beta)
 
 Anything that differs per desktop is asked of the backend's module hooks
 (backends.module(name), documented in backends/__init__.py), never decided
@@ -318,11 +317,7 @@ _KWIN_HELPER_BUILD_ROWS = [
      True, "libwayland-client for the KWin helper build"),
 ]
 
-# The package name for a distro that doesn't package a dependency at all:
-# the row still shows (missing or not), but nothing is installed for it.
-NOT_PACKAGED = None
-
-# (label, check, {distro: package or NOT_PACKAGED}, required, purpose)
+# (label, check, {distro: package}, required, purpose)
 DEPS = {
     "hyprland": [
         ("hyprctl", _bin("hyprctl"), {"arch": "hyprland"}, True,
@@ -344,16 +339,6 @@ DEPS = {
               "fedora": "libkscreen"}, True,
              "places and scales the phone's monitor")]
            + _KWIN_HELPER_BUILD_ROWS + _GSTREAMER_PIPELINE_ROWS,
-    # niri: virtual outputs need a niri build with PR #3800 (no release has
-    # it yet; the daemon says so). Debian / Ubuntu don't package niri at all
-    # (checked on sources.debian.org and Launchpad, 2026-11-10): NOT_PACKAGED
-    # there, so `i` installs the GStreamer rows and leaves niri to the user.
-    "niri": [("niri", _bin("niri"),
-              {"arch": "niri", "debian": NOT_PACKAGED, "fedora": "niri"},
-              True, "niri compositor with virtual outputs (must be running)"),
-             _GST_LAUNCH_ROW,
-             _python_gi("talks to niri's screencast service over D-Bus")]
-            + _GSTREAMER_ELEMENT_ROWS,
     "common": [
         ("openssl", _bin("openssl"),
          {"arch": "openssl", "debian": "openssl", "fedora": "openssl"}, True,
@@ -380,8 +365,7 @@ def system_python() -> bool:
 def check_dependencies(backend=None) -> list:
     """[(label, package, purpose, required, present), ...] for this backend.
 
-    `package` is NOT_PACKAGED when this distro has no package for it; a
-    distro without a name of its own gets the first one listed.
+    A distro without a package name of its own gets the first one listed.
     """
     d = distro()
     rows = []
@@ -397,22 +381,12 @@ def check_dependencies(backend=None) -> list:
 
 
 def missing_packages(backend=None, required_only=False) -> list:
-    """Packages to install for what's missing; rows this distro doesn't
-    package (NOT_PACKAGED) are left out: there is nothing to install."""
+    """Packages to install for what's missing."""
     pkgs = []
     for _l, pkg, _p, req, present in check_dependencies(backend):
-        if (not present and pkg is not NOT_PACKAGED
-                and (req or not required_only) and pkg not in pkgs):
+        if not present and (req or not required_only) and pkg not in pkgs:
             pkgs.append(pkg)
     return pkgs
-
-
-def unpackaged_missing(backend=None) -> list:
-    """Labels of missing dependencies this distro has no package for
-    (niri on Debian / Ubuntu): the user builds or installs them."""
-    return [label for label, pkg, _p, _req, present
-            in check_dependencies(backend)
-            if not present and pkg is NOT_PACKAGED]
 
 
 def install_command(packages) -> list:
@@ -441,9 +415,8 @@ def remove_virtual_output(cfg: Config) -> None:
 
     The TUI launches the daemon with --keep-output, so on Hyprland the
     headless output survives a restart and this removes it (windows moved to
-    the main monitor first). niri keeps a virtual output after a daemon that
-    was killed, and its hook removes that one. Where the monitor dies with
-    the daemon (GNOME, KDE) the backend's hook does nothing.
+    the main monitor first). Where the monitor dies with the daemon (GNOME,
+    KDE) the backend's hook does nothing.
     """
     hooks = backends.module(cfg.resolved_backend())
     if hooks:
@@ -947,10 +920,8 @@ def touch_setup_check(cfg: Config):
 
     Returns {"problem": text, "fix": argv or None}, as the backend's
     touch_setup_problem() hook reports it. Hyprland needs a one-time udev
-    rule for its uinput device (the fix runs with sudo). niri needs that
-    rule too, then one include line in its config.kdl (that fix runs
-    without sudo; fix is None when niri has no config file yet). GNOME and
-    KDE inject touches through the compositor's own API and need nothing.
+    rule for its uinput device (the fix runs with sudo). GNOME and KDE
+    inject touches through the compositor's own API and need nothing.
     Callers show the fix as given and must not assume it uses sudo.
     """
     if not cfg.touch:

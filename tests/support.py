@@ -9,8 +9,8 @@ first.
   of those modules is imported: secure_link computes its config paths from
   HOME at import time and migrates an old config directory there, and no
   test may read or write the real user's pairing key or config.
-* Removes NIRI_SOCKET and WAYLAND_DISPLAY (and moves XDG_RUNTIME_DIR), so
-  no test talks to the real compositor.
+* Removes WAYLAND_DISPLAY (and moves XDG_RUNTIME_DIR), so no test talks to
+  the real compositor.
 """
 
 import atexit
@@ -35,9 +35,8 @@ os.environ["HOME"] = SCRATCH_HOME
 os.environ["XDG_CONFIG_HOME"] = os.path.join(SCRATCH_HOME, ".config")
 os.environ["XDG_DATA_HOME"] = os.path.join(SCRATCH_HOME, ".local", "share")
 # Tests run inside a desktop session must not reach the real compositor (the
-# niri and KDE backends ask its process where its config and desktop entries
-# live): no niri socket, no Wayland display, and a runtime directory of our
-# own. Tests that need one set these to fakes.
-os.environ.pop("NIRI_SOCKET", None)
+# KDE backend asks its process where its desktop entries live): no Wayland
+# display, and a runtime directory of our own. Tests that need one set these
+# to fakes.
 os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ["XDG_RUNTIME_DIR"] = os.path.join(SCRATCH_HOME, "runtime")

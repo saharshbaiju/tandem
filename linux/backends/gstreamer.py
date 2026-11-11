@@ -2,7 +2,7 @@
 gstreamer.py - PipeWire -> H.264 through gst-launch-1.0, for any backend.
 
 Every backend that gets its frames as a PipeWire node (GNOME's virtual
-monitor, the KWin and niri virtual outputs, Hyprland's portal path on NVIDIA)
+monitor, the KWin virtual output, Hyprland's portal path on NVIDIA)
 encodes them the same way:
 
     gst-launch-1.0 pipewiresrc path=<node> ! video/x-raw,width=W,height=H
@@ -280,7 +280,7 @@ def choose_encoder(args, backend_label):
     best one available). Notes in the log that only H.264 is encoded when
     --codec asks for something else. Raises RuntimeError when there is no
     usable encoder. `backend_label` names the backend in that note
-    ("GNOME", "KDE", "niri")."""
+    ("GNOME", "KDE")."""
     if args.codec != "h264":
         log(f"note: {backend_label} backend encodes h264 only; ignoring "
             f"codec '{args.codec}'")

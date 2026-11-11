@@ -5,7 +5,7 @@
 #
 # Prints the pairing QR code (scan it with the phone app), then runs the daemon
 # in the foreground with its logs on stderr. The desktop backend (Hyprland,
-# GNOME, KDE Plasma or niri) is auto-detected; force one with --backend.
+# GNOME or KDE Plasma) is auto-detected; force one with --backend.
 #
 #   usb  : USB tethering (NO USB debugging) — the tether address goes first in
 #          the QR. Enable 'USB tethering' on the phone before scanning.

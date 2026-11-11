@@ -3,7 +3,8 @@
 This document describes the whole system: how a desktop frame gets from a
 virtual monitor to the phone's screen, the exact bytes sent on the wire, and
 the rules that keep a connection reliable. Setup for each desktop (Hyprland,
-GNOME, KDE Plasma, niri) and distribution is in [`PLATFORMS.md`](./PLATFORMS.md). The phone app is covered in
+GNOME, KDE Plasma, the last in beta) and distribution is in
+[`PLATFORMS.md`](./PLATFORMS.md). The phone app is covered in
 [`ANDROID.md`](./ANDROID.md).
 
 ---
@@ -31,10 +32,9 @@ monitor logic lives on the Linux side, in a backend for each compositor:
 ```
  ┌──────────────── Linux ───────────────────────────────────────┐        ┌── Android ──┐
  │                                                              │        │             │
- │  backend: hyprland         backend: gnome / kde / niri       │        │             │
+ │  backend: hyprland         backend: gnome / kde              │        │             │
  │  hyprctl output create     Mutter RecordVirtual,             │        │             │
- │  headless EXT-1            KWin virtual output (helper),     │        │             │
- │                            niri CreateVirtualOutput          │        │             │
+ │  headless EXT-1            KWin virtual output (helper)      │        │             │
  │        │ wlr-screencopy          │ PipeWire                  │        │             │
  │  wf-recorder + VA-API      GStreamer + VA / x264 / openh264  │        │             │
  │        │                         │                           │        │             │
@@ -43,7 +43,7 @@ monitor logic lives on the Linux side, in a backend for each compositor:
  │             tandemd.py  (parse, GOP cache,                   │  TCP   │ MediaCodec  │
  │             per-client senders, heartbeats) ─────────────────┼───────▶│  → Surface  │
  │             phone_input.py (pairing, touches) ◀──────────────┼────────┤ touches     │
- │               → uinput touchscreen     (Hyprland, niri)      │        │             │
+ │               → uinput touchscreen     (Hyprland)            │        │             │
  │               → Mutter RemoteDesktop   (GNOME)               │        │             │
  │               → KWin fake input        (KDE, via the helper) │        │             │
  │                       ▲                                      │        │             │
@@ -332,6 +332,13 @@ moves its windows back.
 
 ### Stage 0c: virtual output on KDE Plasma (`backends/kde.py`, `linux/kwin-helper/`)
 
+This backend is a beta in 0.7.0-beta.1: it passes the automated tests against
+real KWin 6.7.5 and 6.8.2 in containers, but has not been used in a real Plasma
+session on real hardware yet. Its registry entry carries `beta_name`, so
+`backends.describe()` and the desktop name say *beta*, and the daemon, the TUI's
+Dependencies screen and the installer print `backends.beta_notice()`, which
+points to the issue tracker.
+
 KWin creates virtual outputs and streams them to PipeWire through the
 `zkde_screencast_unstable_v1` Wayland protocol, and injects input through
 `org_kde_kwin_fake_input`. Python's standard library cannot speak Wayland, so a
@@ -401,51 +408,6 @@ tandem-kwin-helper --name Tandem --width W --height H
   mid-session, the helper reports `closed`, capture restarts fail with *the KWin
   virtual output was closed*, and the daemon exits.
 
-### Stage 0d: virtual output on niri (`backends/niri.py`, experimental)
-
-niri's IPC socket (`$NIRI_SOCKET`, one JSON request and one JSON reply per line)
-creates outputs in [niri pull request #3800](https://github.com/niri-wm/niri/pull/3800),
-which no release has yet. Each request is one short connection with a 5 s
-timeout; `{"Ok": …}` is unwrapped and `{"Err": …}` raised.
-
-```
-{"CreateVirtualOutput": {"width": W, "height": H, "refresh_rate": FPS, "name": "Tandem"}}
-{"Output": {"output": "Tandem", "action": {"CustomMode": {"mode": {...}}}}}
-{"Output": {"output": "Tandem", "action": {"Scale": {"scale": {"Specific": 1.5}}}}}
-{"Output": {"output": "Tandem", "action": {"Position": {"position": "Automatic" | {"Specific": {x, y}}}}}}
-{"RemoveVirtualOutput": {"name": "Tandem"}}
-```
-
-- **Support check.** A niri without the pull request answers
-  `CreateVirtualOutput` with `{"Err": "error parsing request"}`. Setup then fails
-  with *this niri (<version>) cannot create virtual monitors* and changes
-  nothing. The TUI asks the same question cheaply before starting, by removing
-  an output with an empty name.
-- **Mode.** `CustomMode` is sent after creation because a user `output "Tandem"
-  { mode … }` block would otherwise win.
-- **Placement.** niri lays out explicitly positioned outputs first, then the
-  automatic ones, each to the right of everything so far. Right is therefore
-  `Automatic`, which never moves the user's monitors. Left, up and down are an
-  explicit position beside the main monitor (the one at 0,0, else the top-left
-  one), from `place_beside`. The layout is read back; if any other output moved
-  or the phone landed elsewhere, the phone goes back to `Automatic` with a
-  warning. Monitors with explicit positions in `config.kdl` keep left, up and
-  down working.
-- **Config reloads.** niri drops settings made over IPC when a reload changes
-  `output` sections. A watcher thread on a second connection
-  (`"EventStream"`) re-applies mode, scale and position after `ConfigLoaded`,
-  debounced 0.4 s. The stream replays one `ConfigLoaded` when it starts, which
-  is skipped whether it says the config failed or not (otherwise the reload
-  that fixes a broken config would be taken for the replay and lost); a
-  later failed reload changes nothing in niri, so it is ignored. niri sends no
-  event for monitor hotplug.
-- **Lifetime.** Unlike KWin and Mutter, niri keeps a virtual output after its
-  creator's connection closes. So teardown always runs (moving workspaces that
-  have windows to the main monitor by id, then `RemoveVirtualOutput`), setup
-  removes a leftover `Tandem` first, and the TUI's `remove_leftover_output` hook
-  cleans up after a daemon that was killed. Only an output that is virtual
-  (make `niri`) and named `Tandem` is ever removed.
-
 ### Stage 1: capture and encode
 
 On Hyprland, `wf-recorder` (wlr-screencopy, DMA-BUF) feeds FFmpeg `h264_vaapi`
@@ -508,10 +470,9 @@ substitutes its own guess, and the side position, computed from 1.5, overlaps
 the laptop screen (*"Monitor EXT-1 overlaps with other monitor(s)"*). The daemon
 uses the nearest valid scale instead (4/3 here) and logs the substitution.
 
-On GNOME, KDE and niri, `gst-launch-1.0` reads the PipeWire node
+On GNOME and KDE, `gst-launch-1.0` reads the PipeWire node
 (`backends/gstreamer.py`). The node comes from Mutter's `RecordVirtual` on
-GNOME, from the helper's `created` line on KDE, and from `RecordMonitor("Tandem")`
-on niri's implementation of Mutter's ScreenCast API:
+GNOME, and from the helper's `created` line on KDE:
 
 ```
 pipewiresrc path=<node> do-timestamp=true keepalive-time=1000   ← keepalive only if the plugin has it
@@ -530,7 +491,7 @@ default of 200 buffers or 1 s would hold seconds of lag. `videoconvert` gets
 own session (`start_new_session=True`), so Ctrl+C or a hangup on the launching
 terminal cannot kill capture behind the daemon's back. It still dies with the
 daemon: its next write to the pipe fails, and the compositor drops the PipeWire
-node when the daemon's D-Bus connection (GNOME, niri) or the helper's Wayland
+node when the daemon's D-Bus connection (GNOME) or the helper's Wayland
 connection (KDE) closes.
 
 The encoder chain converts to I420 or NV12 before the encoder. Without that,
@@ -543,15 +504,15 @@ first: `vah264enc`, then `vah264lpenc`, `vaapih264enc`, `x264enc` and
 really encode H.264, so "the element exists" is a reliable test. `--encoder`
 overrides the choice.
 
-All three backends start the encoder through the same two calls in
+Both backends start the encoder through the same two calls in
 `backends/gstreamer.py`, so the pipeline, its log line and the
 "no usable GStreamer H.264 encoder" error are written once:
 `choose_encoder(args, label)` picks the element (and notes that only H.264 is
 encoded when `--codec` asks for more), then `start_encoder(node, args, encoder)`
 builds the pipeline for the node at the requested size and starts it. Each
 backend keeps only its own steps around them: GNOME starts its placement
-watcher afterwards, KDE first checks that KWin's output still exists, and niri
-opens a screencast session to get the node. Their `missing()` lists share
+watcher afterwards, and KDE first checks that KWin's output still exists.
+Their `missing()` lists share
 `missing_pipeline_tools()` the same way.
 
 Every encoder is configured the same way, for the same reasons:
@@ -559,12 +520,12 @@ Every encoder is configured the same way, for the same reasons:
 | Setting | Reason |
 | --- | --- |
 | No B-frames | B-frames need future frames, which adds reorder delay |
-| A keyframe every `max(gop, fps)` frames, about 1 s (Hyprland and xdph), or every `gop` frames (GNOME, KDE, niri) | Fast joins. A lost frame is recovered by `KEYQ` and GOP replay, not by frequent keyframes |
+| A keyframe every `max(gop, fps)` frames, about 1 s (Hyprland and xdph), or every `gop` frames (GNOME, KDE) | Fast joins. A lost frame is recovered by `KEYQ` and GOP replay, not by frequent keyframes |
 | CBR at the quality preset's bitrate | No bitrate spikes that stall the link |
 | A rate-control buffer of 2 frames (`cpb-size` on `vah264enc`/`vah264lpenc`, `cpb-length` on `vaapih264enc`, `vbv-buf-capacity` on `x264enc`, `vbv-buffer-size` on `nvh264enc`), each set only if the element has it | Encoders defaulted to 0.6 to 1.5 s, which let each keyframe arrive as one big burst and caused a latency spike every GOP. `openh264enc` has no such property |
 | One slice per frame (`sliced-threads=false` for x264) | The phone's hardware decoder wants one complete access unit per input buffer |
 | Raw Annex-B, no container | The decoder reads it directly |
-| `keepalive-time=1000` (GNOME, KDE, niri) | These compositors only send frames when something changes, so the last frame is resent every second. KWin 6.7 with PipeWire 1.4 ignores it, and an idle phone monitor there gets almost no frames; the GOP replay still gives a joining phone the picture |
+| `keepalive-time=1000` (GNOME, KDE) | These compositors only send frames when something changes, so the last frame is resent every second. KWin 6.7 with PipeWire 1.4 ignores it, and an idle phone monitor there gets almost no frames; the GOP replay still gives a joining phone the picture |
 
 ### Stage 2: NAL parsing and broadcast (`tandemd.py`)
 
@@ -918,39 +879,6 @@ input through the same desktop entry as the screencast protocol, so the setup
 of stage 0c covers it. If KWin refused it (`ready … fake_input=0`), video still
 works and phones are told *KWin refused touch input*.
 
-**niri: a uinput touchscreen plus `tandem.kdl`** (`backends/niri.py`). niri has
-no protocol for injecting touches, so the phone's touches go through the same
-`tandem-touch` uinput device as on Hyprland, with the same udev rule. niri maps
-touchscreens to an output only in its config, and the setting
-`input { touch { map-to-output "…"; } }` applies to every touchscreen. Tandem
-owns one file, `tandem.kdl` next to the config file niri reads: the one given
-to `niri -c` or in `$NIRI_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/niri/config.kdl`.
-niri removes `NIRI_CONFIG` from its environment before it starts any client, so
-Tandem reads both from the running compositor (its PID from `SO_PEERCRED` on
-`$NIRI_SOCKET`, then `/proc/<pid>/cmdline` and `/proc/<pid>/environ`, which
-keeps the environment niri started with), and falls back to its own
-environment only when no niri can be asked. While the phone streams it holds that
-mapping for `Tandem`, and on teardown it is emptied rather than deleted, because
-niri warns about a missing include on every reload. Both writes are atomic,
-because niri watches the file and must never read half of it. The user's
-`config.kdl` needs one line, added once by the touch setup without root:
-
-```
-include optional=true "tandem.kdl"
-```
-
-`touch_setup_problem()` reports the uinput rule first (fixed with sudo, shared
-with Hyprland), then the missing include line (fixed by appending it, no sudo).
-Detecting the line strips KDL comments and follows nested includes. With no
-config file at all there is no fix to offer, because a file holding only the
-include would replace niri's defaults; the setup says to start niri once. On a
-computer with a real touchscreen (found in `/sys/class/input/event*/device` by
-`INPUT_PROP_DIRECT` and `ABS_MT_POSITION_X`, other than `tandem-touch`), touch
-from the phone stays off with that reason, because the global mapping would
-send the real touchscreen's touches to the phone's monitor too. An included
-`touch { }` section also replaces the user's own one rather than merging with
-it, which is harmless for the same reason.
-
 **What it can and cannot do.** Taps, drags, scrolling, long-press menus and
 pinch-zoom work in apps that support touch on Wayland. That includes GTK, Qt,
 Chromium and Electron, and Firefox. The apps interpret the gestures, exactly as
@@ -965,11 +893,7 @@ containers on Mutter 46.2 (Ubuntu 24.04) and 48.8 (Fedora 42), observed with
 `wev`. A wrong pairing key gets `touch: false` and injects nothing. On KDE, in
 containers on KWin 6.8.2 and 6.7.5 with the real daemon: taps at the corners,
 the centre and a quarter point land on the exact logical pixel on the phone's
-monitor, also after it moved to the left side. On niri, the `tandem.kdl` include
-setup and the mapping it writes were checked against niri's reloads in a
-container, but touches through uinput were not (containers have no
-`/dev/uinput`). On a real
-phone, over USB with `adb reverse` and Hyprland with NVENC at 2560×1440 and 120
+monitor, also after it moved to the left side. On a real phone, over USB with `adb reverse` and Hyprland with NVENC at 2560×1440 and 120
 Hz: taps, scrolling and pinch all work smoothly. The test recorded 138 touches,
 and every finger-down had a matching finger-up.
 
@@ -1084,12 +1008,11 @@ has waited 4 s for a keyframe (stage 3).
   daemon's control thread moves and rescales the monitor through the backend,
   then pushes a fresh `ASX1` frame to connected phones. Changes to resolution,
   fps, quality, GOP, port or backend restart the daemon. On Hyprland the monitor
-  survives (`--keep-output`). On GNOME, KDE and niri it is recreated: the
-  first two remove it with the daemon's connection, and niri's teardown removes
-  it because `honors_keep_output` is false there.
+  survives (`--keep-output`). On GNOME and KDE it is recreated: both remove it
+  with the daemon's connection.
 - The TUI and the installer never decide anything by backend name. They ask
   the backend module's hooks (`backends.module(name)`): `session_problem()` for
-  the start check (X11, no niri socket, a niri without virtual outputs),
+  the start check (GNOME or Plasma on X11),
   `describe_primary_monitor()`, `remove_leftover_output()` for the cleanup after
   a daemon, and `touch_setup_problem()` for the **t** key and the installer.
 - A stale daemon from an earlier run is found and killed by inspecting `/proc`
@@ -1106,7 +1029,7 @@ next to each rule explain the details.
 | --- | --- | --- |
 | App loops between connecting and disconnecting | A finished session cleared the current session. The reconnect then created a second decoder on the same Surface, which failed, and the cycle repeated | Every callback carries its session, and stale callbacks are ignored. The Surface is released synchronously in `surfaceDestroyed` |
 | Drops under load or on weak Wi-Fi | A resync cut off a half-sent frame, so the phone read garbage lengths | Queues hold whole frames. Only frames that have not been sent yet are dropped |
-| Black screen when joining an idle desktop | No damage, so no frames and no keyframe for the new client | GOP cache replayed on connect. `keepalive-time` on GNOME, KDE and niri (KWin 6.7 with PipeWire 1.4 ignores it, so the replay is what covers it there) |
+| Black screen when joining an idle desktop | No damage, so no frames and no keyframe for the new client | GOP cache replayed on connect. `keepalive-time` on GNOME and KDE (KWin 6.7 with PipeWire 1.4 ignores it, so the replay is what covers it there) |
 | Last frame of a motion missing until the next change | The tail NAL was held until the next start code | Quiet-pipe tail flush |
 | Silent hangs | No liveness check at either end | `PING` heartbeats both ways, read timeouts on both ends, TCP keepalive and `TCP_USER_TIMEOUT` |
 | Freezes at native phone resolution | Decoder input buffers were sized for a 1080p guess, so large IDRs were dropped | `KEY_MAX_INPUT_SIZE` comes from the real stream resolution in the banner |
@@ -1132,11 +1055,7 @@ next to each rule explain the details.
 | KDE: KWin 6.7 gives the helper neither protocol | KWin 6.0 to 6.7 only grant them to a binary named in a desktop entry, and ignore an entry rewritten in place | Write the entry by temp file and rename, with an absolute `Exec=`, and retry once after 2 s |
 | KDE: the phone's monitor comes out at 1.5× the requested size, or with a stale scale | KWin's virtual backend multiplies the size by the requested scale, and restores the scale it saved for that output name | Always request scale 1, then set scale and position with `kscreen-doctor` |
 | KDE: placement reported as done but not applied | `kscreen-doctor` exits 0 even when KWin rejects the configuration | Check its output for `failed` and `not found`, and read the layout back |
-| niri: the user's monitor jumps right when the phone goes left | niri lays out automatically positioned outputs after explicit ones, so an explicit phone position pushes them aside | Read the layout back; if anything else moved, put the phone back on `Automatic` (the right) with a warning |
-| niri: the phone's mode, scale and position reset after editing `config.kdl` | niri drops IPC output settings when a reload changes `output` sections | An event-stream watcher re-applies them after `ConfigLoaded`, debounced |
-| niri: a `Tandem` output left after the daemon was killed | niri's virtual outputs outlive their creator's connection | Remove a leftover `Tandem` at setup and from the TUI's cleanup hook; teardown always runs (`honors_keep_output = False`) |
-| niri: windows return to the phone's monitor when it is created again | niri moves a removed output's workspaces away but brings them back when that output reappears | Move workspaces with windows to the main monitor by id before removing the output |
-| niri or KDE: a static desktop sends no frames | Both send frames only on damage | `pipewiresrc keepalive-time` where the plugin and PipeWire honour it, and the GOP replay for joining phones |
+| KDE: a static desktop sends no frames | KWin sends frames only on damage | `pipewiresrc keepalive-time` where the plugin and PipeWire honour it, and the GOP replay for joining phones |
 
 ---
 
@@ -1150,11 +1069,10 @@ next to each rule explain the details.
   for example by running the GStreamer pipeline in-process.
 - Address discovery (mDNS or broadcast), so a phone finds the computer after
   its address changes without rescanning the QR.
-- niri out of experimental once virtual outputs land in a niri release, adapting
-  to any change in the request names.
-- Touch on niri for computers with a touchscreen, for example through the wlr
-  virtual-pointer protocol bound to the phone's output (taps and drags, no
-  multitouch).
+- KDE Plasma out of beta, once it has been used in real Plasma sessions on
+  real hardware.
+- niri, once a niri release can create virtual outputs ([niri pull request
+  #3800](https://github.com/niri-wm/niri/pull/3800)).
 - A Sway / wlroots backend.
 - Pen input with pressure and hover, and a keyboard on the phone.
 - A latency overlay for tuning.

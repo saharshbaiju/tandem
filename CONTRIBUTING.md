@@ -10,8 +10,8 @@ combinations of distro, desktop, GPU and phone, so the details it asks for
 usually decide whether I can reproduce the problem. Please include:
 
 - the output of `tandem --version`
-- your distro, desktop (Hyprland, GNOME, KDE Plasma or niri, with its version:
-  `kwin_wayland --version`, `niri msg version`) and GPU
+- your distro, desktop (Hyprland, GNOME or KDE Plasma, with its version, e.g.
+  `kwin_wayland --version`) and GPU
 - your phone model and Android version
 - how the phone is connected: USB debugging, USB tethering or Wi-Fi
 - the daemon log from the TUI's live view, and if the phone side is involved,
@@ -61,7 +61,7 @@ what each module covers.
 A new backend reuses the shared helpers instead of copying another backend's
 code: `backends/gstreamer.py` for the PipeWire to H.264 pipeline (its
 `missing_pipeline_tools()`, `choose_encoder()` and `start_encoder()` are what
-GNOME, KDE and niri call), `backends/layout.py` for where the phone's monitor
+GNOME and KDE call), `backends/layout.py` for where the phone's monitor
 goes and for scale snapping, `backends/system.py` for atomic file writes and
 for asking the compositor's own process about its environment, and
 `uinput_touch.py` for a uinput touchscreen and its one-time udev rule.

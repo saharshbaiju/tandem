@@ -121,7 +121,7 @@ class ProbingTest(unittest.TestCase):
 
 
 class MissingPipelineToolsTest(unittest.TestCase):
-    """The checks GNOME, KDE and niri share in their missing()."""
+    """The checks GNOME and KDE share in their missing()."""
 
     def which(self, *present):
         return mock.patch.object(gstreamer.shutil, "which",
@@ -149,17 +149,15 @@ class MissingPipelineToolsTest(unittest.TestCase):
             self.assertEqual(gstreamer.missing_pipeline_tools(), [])
 
     def test_every_pipewire_backend_reports_the_same_gaps(self):
-        from backends import kde, niri
+        from backends import kde
         shared = ["gstreamer:pipewiresrc", "gstreamer:h264-encoder"]
         with self.which("gst-launch-1.0", "gst-inspect-1.0",
                         "kscreen-doctor"), \
                 FakeInspect({"videoconvert": (), "h264parse": ()}), \
                 mock.patch.object(gnome, "Gio", object()), \
-                mock.patch.object(niri, "Gio", object()), \
                 mock.patch.object(kde.kwin_helper, "is_current",
                                   return_value=True):
-            for backend in (gnome.GnomeBackend, kde.KdeBackend,
-                            niri.NiriBackend):
+            for backend in (gnome.GnomeBackend, kde.KdeBackend):
                 with self.subTest(backend=backend.name):
                     self.assertEqual(backend.missing(), shared)
 
@@ -186,7 +184,7 @@ class EncoderStartTest(unittest.TestCase):
         with FakeInspect({}), mock.patch.object(gstreamer, "log") as log:
             with self.assertRaisesRegex(RuntimeError,
                                         "no usable GStreamer H.264"):
-                gstreamer.choose_encoder(self.args(), "niri")
+                gstreamer.choose_encoder(self.args(), "KDE")
         log.assert_not_called()
 
     def test_start_encoder_builds_logs_and_spawns(self):

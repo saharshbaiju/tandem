@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-tui.py - terminal UI for Tandem (Hyprland, GNOME, KDE Plasma or niri, on
-Arch, Fedora, Debian / Ubuntu and their derivatives).
+tui.py - terminal UI for Tandem (Hyprland, GNOME or KDE Plasma, on Arch,
+Fedora, Debian / Ubuntu and their derivatives).
 
 A self-contained curses app (no third-party deps) that:
   * checks/installs required packages for your distro + desktop on first run,
@@ -111,8 +111,8 @@ class Stream:
     The daemon is launched with --keep-output. Where the backend honors it
     (backend.honors_keep_output: Hyprland), the virtual monitor and the
     windows on it persist across restarts triggered by realtime config edits
-    and are only removed on an explicit disconnect. Elsewhere (GNOME, KDE,
-    niri) the monitor dies with the daemon, and a restart recreates it.
+    and are only removed on an explicit disconnect. Elsewhere (GNOME, KDE)
+    the monitor dies with the daemon, and a restart recreates it.
     """
 
     def __init__(self, cfg):
@@ -247,9 +247,8 @@ class Stream:
 
         Strictly in that order — remove_virtual_output also makes sure no
         capture is left on the monitor before the compositor removes it (on
-        Hyprland and niri; elsewhere the monitor went with the daemon). Takes
-        a few seconds, so `win` (if given) shows progress instead of a frozen
-        UI.
+        Hyprland; elsewhere the monitor went with the daemon). Takes a few
+        seconds, so `win` (if given) shows progress instead of a frozen UI.
         """
         if win is not None:
             show_busy(win, "Disconnecting… stopping the stream")
@@ -350,19 +349,16 @@ def main_menu(win, cfg, stream):
 # dependencies screen
 # --------------------------------------------------------------------------- #
 
-def backend_notes(backend, dist):
+def backend_notes(backend):
     """Lines shown under the Dependencies list: what the package rows alone
-    can't say for this backend and distro."""
+    can't say for this backend."""
     notes = []
     if backend == "kde":
         notes.append("KDE: the compiler and Wayland rows build Tandem's small "
                      "KWin helper (once, and after updates).")
-    elif backend == "niri":
-        notes.append("niri: virtual monitors need a niri built from pull "
-                     "request #3800 (not in a release yet; docs/PLATFORMS.md).")
-        if dist == "debian":
-            notes.append("Debian / Ubuntu don't package niri: build it from "
-                         "source.")
+    beta_notice = backends.beta_notice(backend)
+    if beta_notice:
+        notes.append(f"Note: {beta_notice}.")
     return notes
 
 
@@ -381,13 +377,10 @@ def deps_screen(win, cfg):
                 status, attr = "[missing]", curses.color_pair(4)
             req = "required" if required else "optional"
             addstr(win, row, 2, status, attr)
-            package = "(not packaged here)" if pkg is None else pkg
-            addstr(win, row, 13,
-                   f"{label:<15} {package:<28} {req:<9} {purpose}")
+            addstr(win, row, 13, f"{label:<15} {pkg:<28} {req:<9} {purpose}")
             row += 1
 
         missing = core.missing_packages(backend)
-        unpackaged = core.unpackaged_missing(backend)
         cmd = core.install_command(missing) if missing else None
         row += 1
         if missing and cmd:
@@ -413,16 +406,11 @@ def deps_screen(win, cfg):
                                 "(unknown distro — install them manually)",
                    curses.color_pair(4))
             row += 1
-        elif not unpackaged:
+        else:
             addstr(win, row, 2, "All dependencies satisfied.",
                    curses.color_pair(3))
             row += 1
-        if unpackaged:
-            addstr(win, row, 2, f"Not packaged for {dist}: "
-                                f"{', '.join(unpackaged)} (see below).",
-                   curses.color_pair(4))
-            row += 1
-        for note in backend_notes(backend, dist):
+        for note in backend_notes(backend):
             addstr(win, row, 2, note, curses.color_pair(5))
             row += 1
         footer(win, "i install missing   r refresh   Esc back")
@@ -734,9 +722,9 @@ def touch_line(cfg, stream, touch_setup):
 
 def touch_row(cfg, stream, touch_setup, width):
     """(row text, color pair, detail lines) for the Touch row in `width`
-    columns. A setup problem too long for the row (niri's include line,
-    say) moves to wrapped detail lines, drawn lower down, so the reason and
-    the 'press t' hint are never cut off."""
+    columns. A setup problem too long for the row moves to wrapped detail
+    lines, drawn lower down, so the reason and the 'press t' hint are never
+    cut off."""
     text, color = touch_line(cfg, stream, touch_setup)
     row = f"Touch   : {text}"
     if len(row) <= width or not cfg.touch or not touch_setup:
@@ -875,8 +863,7 @@ def live_screen(win, stream):
                     fw_fixed_port, fw = cfg.port, None
                 continue
             if c in (ord("t"), ord("T")) and touch_setup and touch_setup["fix"]:
-                # The fix may or may not need sudo (niri's config line
-                # doesn't); run_shell shows the command either way.
+                # run_shell shows the command (and any sudo) as it runs.
                 if run_shell(win, touch_setup["fix"]) == 0:
                     stream.restart(cfg)           # daemon re-creates the device
                 checked = 0.0

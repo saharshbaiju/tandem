@@ -5,19 +5,14 @@ The daemon picks a **backend** based on the running session:
 | Session | Detected by | Backend |
 | --- | --- | --- |
 | Hyprland | `$HYPRLAND_INSTANCE_SIGNATURE` | `hyprland` |
-| niri *(experimental)* | `$NIRI_SOCKET`, naming a socket that exists | `niri`. Needs a niri built with virtual outputs ([below](#niri-experimental)) |
-| KDE Plasma on Wayland (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian and others) | `$XDG_CURRENT_DESKTOP` contains `KDE`, and `$WAYLAND_DISPLAY` is set | `kde` |
+| KDE Plasma on Wayland (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian and others) | `$XDG_CURRENT_DESKTOP` contains `KDE`, and `$WAYLAND_DISPLAY` is set | `kde` (beta, see [below](#kde-plasma-beta)) |
 | GNOME on Wayland (Ubuntu, Fedora Workstation and similar) | `$XDG_CURRENT_DESKTOP` contains `GNOME`, and `$WAYLAND_DISPLAY` is set | `gnome` |
 | KDE Plasma or GNOME on X11 | `$XDG_CURRENT_DESKTOP` alone | Not supported, because virtual monitors need Wayland. The TUI says so and explains how to switch |
 | Sway and others | None | Not yet. See the roadmap in the README |
 
-A compositor's own IPC variable (`HYPRLAND_INSTANCE_SIGNATURE`, `NIRI_SOCKET`)
-counts for more than the desktop name, so a niri started from a KDE login, for
-example, is still detected as niri. When only `$XDG_CURRENT_DESKTOP` names
-Hyprland or niri (from ssh, say), that backend is still picked. A
-`$NIRI_SOCKET` whose socket is gone doesn't count: `niri --session` exports it
-to systemd and D-Bus, and after a crashed niri a later GNOME or Plasma login
-can still hand it to its terminals.
+Hyprland's own IPC variable (`HYPRLAND_INSTANCE_SIGNATURE`) counts for more
+than the desktop name. When only `$XDG_CURRENT_DESKTOP` names Hyprland (from
+ssh, say), the Hyprland backend is still picked.
 
 To override the detected backend, use *Configure → Desktop backend* in the TUI,
 or the `--backend` option on the daemon. The TUI's **Dependencies** screen shows
@@ -139,6 +134,24 @@ sudo dnf install android-tools             # optional
   Intel) or `gstreamer1-plugins-ugly` (x264). The backend picks the best encoder
   that is available.
 
+## KDE Plasma (beta)
+
+KDE Plasma support is new in **0.7.0-beta.1** and is a beta: it passes the
+automated tests against real KWin 6.7.5 and 6.8.2 (see *How the KDE backend
+works*), but has not yet been used in a real Plasma session on real hardware.
+The TUI, the installer and the daemon's log say so. Please report what works
+and what doesn't in [GitHub issues](https://github.com/saharshbaiju/tandem/issues),
+with your distribution and the output of `kwin_wayland --version`.
+
+The beta is a GitHub pre-release, which the default install command skips, so
+name it when installing (the same line on every distribution below):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+```
+
+The sections below list the packages it installs, for installing by hand.
+
 ## KDE Plasma on Arch, CachyOS, EndeavourOS and Manjaro
 
 ```bash
@@ -189,8 +202,8 @@ sudo apt install adb                       # optional
 - `kscreen-doctor` is in `libkscreen-bin` on Plasma 6 (Debian 13, Kubuntu 25.04
   and newer, KDE neon) and in `libkf5screen-bin` on Plasma 5.27 (Kubuntu 24.04).
   The Dependencies screen picks the right one by which libkscreen is installed.
-- Tandem is tested on Plasma 6 (KWin 6.7 and 6.8). Plasma 5.27 should work, and
-  the helper builds there, but it has not been tested.
+- Tandem is tested in containers on Plasma 6 (KWin 6.7 and 6.8). Plasma 5.27
+  should work, and the helper builds there, but it has not been tested.
 - Choose the **Plasma (Wayland)** session on the login screen. Kubuntu 24.04
   still offers *Plasma (X11)*, which does not work: the TUI says so.
 
@@ -212,109 +225,6 @@ sudo zypper install libkscreen6-plugin gcc pkgconf-pkg-config wayland-devel \
 
 openSUSE's own repositories have no x264; `gstreamer-plugin-openh264` (or x264
 from Packman) provides the encoder.
-
-## niri (experimental)
-
-niri can create virtual monitors only in **[niri pull request
-#3800](https://github.com/niri-wm/niri/pull/3800)** ("virtual outputs"), which
-is not merged yet. No niri release has it (26.04 is the latest), so the niri in
-Arch, CachyOS and Fedora cannot be used, and Debian and Ubuntu do not package
-niri at all. Tandem detects this when it starts. A niri without virtual outputs
-gets this message, and nothing is changed:
-
-```
-error: could not create the virtual monitor (this niri (26.04 (8ed0da4)) cannot
-create virtual monitors: Tandem needs a niri build with virtual-output support
-(niri pull request #3800, not in a niri release yet))
-```
-
-The backend is experimental until the pull request is merged, because the
-names of its IPC requests could still change.
-
-### Building niri with virtual outputs (Arch, CachyOS)
-
-```bash
-sudo pacman -S --needed niri rust clang git pkgconf libinput libxkbcommon pango \
-    seatd libdisplay-info systemd-libs wayland libpipewire mesa
-git clone https://github.com/niri-wm/niri.git && cd niri
-git fetch origin pull/3800/head:virtual-outputs && git checkout virtual-outputs
-cargo build --release
-sudo install -Dm755 target/release/niri /usr/local/bin/niri
-```
-
-The packaged `niri` stays installed for its session file, systemd unit and
-portal configuration. Its unit starts `niri --session` through `PATH`, where
-`/usr/local/bin` comes before `/usr/bin`, so after logging out and back in the
-niri session runs the new build. `niri msg version` then shows a version such
-as `26.04 (v26.04-139-g7fd585dd)`. To go back, `sudo rm /usr/local/bin/niri`.
-Tandem was tested with the pull request at commit `7fd585dd`.
-
-### Packages
-
-```bash
-sudo pacman -S --needed gstreamer gst-plugin-pipewire gst-plugins-base \
-    gst-plugins-bad gst-plugins-ugly python-gobject openssl
-```
-
-On Fedora: `sudo dnf install gstreamer1 pipewire-gstreamer gstreamer1-plugins-base
-gstreamer1-plugins-bad-free gstreamer1-plugin-openh264 python3-gobject openssl`.
-
-On Debian and Ubuntu, the Dependencies screen lists niri as *not packaged here*
-and its **i** key (like `install.sh`) installs only the GStreamer and Python
-packages; niri itself has to be built from source.
-
-### What to know
-
-- Start niri as a session (`niri --session`, which display managers and
-  `niri-session` do). Only then does niri offer the screen-cast D-Bus service
-  Tandem records the monitor with.
-- **Placement.** *Right* always works: niri puts the phone right of everything
-  and never moves your monitors for it. *Left*, *up* and *down* need your
-  monitors to have explicit positions in `config.kdl`
-  (`output "eDP-1" { position x=0 y=0; }`). Otherwise niri would rearrange them
-  around the phone, so Tandem puts the phone on the right and logs a warning
-  saying so.
-- **Config reloads.** niri forgets settings made over IPC when you change an
-  `output` section in `config.kdl`. The daemon follows niri's event stream and
-  re-applies the phone's mode, scale and position after every reload. niri
-  sends no event when a monitor is plugged in, so only config reloads trigger
-  this.
-- An `output "Tandem" { mode … }` block in your config is overridden: Tandem
-  always sets the size the phone asked for.
-- **Crashes.** niri keeps a virtual output after the program that made it
-  exits. If the daemon is killed, the next start (or *disconnect* in the TUI)
-  removes the leftover `Tandem` output. Only an output that niri labels as
-  virtual and named `Tandem` is ever removed.
-- **Windows.** On disconnect, workspaces with windows on the phone move to your
-  main monitor, and stay there when the phone comes back.
-- **Touch input** needs two one-time steps, which the installer offers and the
-  live view's **t** key runs:
-  1. the same `/dev/uinput` udev rule as on Hyprland (asks for sudo), because
-     touches are replayed through a virtual touchscreen;
-  2. one line in the config file your niri reads (the one given to `niri -c`
-     or in `$NIRI_CONFIG`, else `~/.config/niri/config.kdl`; Tandem asks the
-     running niri which), added without sudo:
-
-     ```
-     include optional=true "tandem.kdl"
-     ```
-
-  niri can map touchscreens to an output only in its config, and only all of
-  them at once. Tandem owns `tandem.kdl` next to `config.kdl`: while the phone
-  streams it holds `input { touch { map-to-output "Tandem"; } }`, and it is
-  emptied afterwards. niri reloads it live. If you have no `config.kdl` yet and
-  niri runs on `/etc/niri/config.kdl`, the setup copies that file to
-  `~/.config/niri/config.kdl` first, as niri itself does on first start. If
-  there is no config at all, start niri once to create one. If niri was
-  started with a config file (`niri -c` or `$NIRI_CONFIG`) that doesn't
-  exist, niri runs on its built-in defaults; the setup then only says so,
-  because copying another file there would change your desktop. Create the
-  file first.
-- **Computers with a touchscreen.** Because the mapping would also send the
-  real touchscreen's touches to the phone's monitor, touch from the phone stays
-  off when the computer has a touchscreen. The phone and the live view say so.
-  An included `touch { }` section replaces your own one while it is in effect,
-  which is why Tandem never maps it on such computers.
 
 ---
 
@@ -450,50 +360,8 @@ daemon's GOP replay.
 KWin's permission check). Placement on the right, a live move to the left and
 back, taps landing at the exact point, encoder restarts, SIGTERM and SIGKILL cleanup, and the
 bug 527747 recovery all passed. Real hardware, several monitors and rotated
-monitors were covered by unit tests only.
-
----
-
-## How the niri backend works
-
-Everything goes over niri's IPC socket (`$NIRI_SOCKET`, one JSON request and one
-JSON reply per line), with Python's standard library.
-
-1. **Check.** A `Tandem` output left by a daemon that was killed is removed. A
-   niri without virtual outputs answers `CreateVirtualOutput` with `error parsing
-   request`, and the daemon stops with the message above.
-2. **Create.** `{"CreateVirtualOutput": {"width": W, "height": H,
-   "refresh_rate": FPS, "name": "Tandem"}}`, then `CustomMode` (so a config
-   `mode` cannot win) and `Scale` on that output.
-3. **Place.** Right: niri's automatic position, right of everything. Left, up,
-   down: an explicit position beside the main monitor. The daemon then reads the
-   layout back. If niri moved any other monitor, or put the phone elsewhere, it
-   goes back to automatic (the right side) with a warning. Tandem never changes
-   another output.
-4. **Capture.** niri implements Mutter's `org.gnome.Mutter.ScreenCast` D-Bus API:
-   `CreateSession`, `RecordMonitor("Tandem")` with the pointer embedded, `Start`,
-   then `PipeWireStreamAdded` gives the node, and the same `gst-launch-1.0`
-   pipeline as GNOME and KDE encodes it. niri sends frames only on damage, so
-   `pipewiresrc keepalive-time` re-sends the last one on an idle desktop.
-5. **Watch.** A second connection follows niri's event stream. After every
-   `ConfigLoaded` of a config that parsed, mode, scale and position are
-   re-applied (once per burst of saves). The stream starts by replaying the
-   current state, one `ConfigLoaded` that may say the current config failed;
-   that one is skipped either way.
-6. **Touch.** A uinput touchscreen (`tandem-touch`, as on Hyprland), mapped to
-   the phone's output by `tandem.kdl` while streaming.
-7. **Stop.** Workspaces with windows on the phone are moved to the main monitor
-   by id, then `RemoveVirtualOutput`, then `tandem.kdl` is emptied. Unlike KWin and
-   Mutter, niri keeps the output when the daemon's connection closes, so this
-   always runs, and the TUI repeats it after a daemon that crashed.
-
-**Tested.** In Docker, on a headless niri built from pull request #3800: video at
-2400×1080 (59.5 fps with a moving window), every side with automatic and with
-explicit monitor positions, config reloads, encoder restarts, SIGTERM and SIGKILL
-cleanup, and the tandem.kdl setup with niri reloading it cleanly. Stable niri 26.04
-gave the clear error above and changed nothing. Not tested: touches through
-uinput (containers have no `/dev/uinput`), niri's GPU capture path, and niri run
-as a real login session.
+monitors were covered by unit tests only, which is why KDE Plasma support is
+still a beta.
 
 ---
 
@@ -537,12 +405,6 @@ phone's vendor. The pairing QR code then includes that address.
 | KDE: `KWin refused the virtual monitor under every name Tandem tried (…)` | KWin 6.7 refused all five names Tandem tries; when KWin's reason is `Could not find output` (or its translation), that is bug 527747. Remove the `Virtual-Tandem` entries from `~/.config/kwinoutputconfig.json` and log out and back in, or update Plasma |
 | KDE: my monitors moved right or down | The phone is on the left or above, and KWin does not allow negative positions, so the other monitors moved by the phone's size (the log has `note: moving your other monitors …`). They move back when the phone goes right or below, or Tandem stops |
 | KDE: monitor on the wrong side, `warning: could not place virtual monitor` | `kscreen-doctor` failed (it is in `libkscreen` / `libkscreen-bin`). The stream keeps working; drag the monitor in *System Settings → Display & Monitor* |
-| niri: `this niri … cannot create virtual monitors` | The running niri has no virtual outputs. Build it from pull request #3800 (see *niri (experimental)*), log out and back in, and check `niri msg version` |
-| niri: `niri's screencast D-Bus service isn't running` | niri was not started as a session. Start it with `niri-session` or from a display manager, which run `niri --session` |
-| niri: `warning: could not put Tandem left of the main monitor …; putting it on the right instead` | Your monitors use automatic positions, so niri would move them. Give them explicit positions in `config.kdl` (`output "eDP-1" { position x=0 y=0; }`) |
-| niri: *Touch: needs one-time setup (niri's config needs the line include optional=true "tandem.kdl" …)* | Press **t**. It appends that line to `config.kdl` (no sudo). If niri has no config file yet, start niri once so it creates one |
-| niri: touch is off, *"niri maps every touchscreen to one output…"* | The computer has its own touchscreen. niri's touch mapping is global, so Tandem does not map the phone's touches there |
-| niri: a `Tandem` monitor stays after a crash | Start Tandem again, or press **d** in the TUI: both remove it. By hand: `niri msg remove-virtual-output Tandem` |
 | GNOME: `could not create the virtual monitor` | GNOME is older than 40, or Mutter's ScreenCast interface is unavailable. Check with `gdbus introspect --session -d org.gnome.Mutter.ScreenCast -o /org/gnome/Mutter/ScreenCast` |
 | GNOME: monitor appears on the wrong side | The log shows `could not place virtual monitor (…)`. Drag it in *Settings → Displays*. The stream keeps working |
 | Hyprland: resolution or scale ignored | Hyprland 0.55 and later need `hyprctl eval`. The daemon uses it automatically. Check that `hyprctl eval 'return 1'` prints `ok` |
@@ -561,7 +423,7 @@ phone's vendor. The pairing QR code then includes that address.
 | Daemon log: `warning: several Hyprland sessions are running …` | `HYPRLAND_INSTANCE_SIGNATURE` is unset (ssh, a systemd service) and more than one Hyprland is running. Start `tandem` from a terminal inside the session |
 | Daemon log: `warning: --codec hevc: the Tandem app … only support h264` | `--codec hevc` was given. The app only decodes H.264, so phones show nothing. Use `--codec h264` |
 | TUI: *"Couldn't set up the encrypted connection"* | `openssl` is missing (the Dependencies screen installs it), or `~/.config/tandem/` is not writable |
-| Hyprland or niri: *Touch: needs one-time setup (… /dev/uinput …)* | `/dev/uinput` is not writable. Press **t** in the live view (see *Arch Linux with Hyprland*). After a kernel update, if the modules-load file is missing, run `sudo modprobe uinput` |
+| Hyprland: *Touch: needs one-time setup (… /dev/uinput …)* | `/dev/uinput` is not writable. Press **t** in the live view (see *Arch Linux with Hyprland*). After a kernel update, if the modules-load file is missing, run `sudo modprobe uinput` |
 | Hyprland: touches land on the laptop screen | The device mapping was dropped. The daemon re-applies it after a config reload or monitor change on its own. If it persists, change side or scale, or restart the stream. Check that `hyprctl devices` lists `tandem-touch` |
 | Touch does nothing in one app | That app does not handle Wayland touch events. Some terminals and older toolkits do not. GTK, Qt, Chromium, Electron and Firefox do |
 | Fedora: the `openh264` download fails | A Cisco mirror problem. Retry, or use RPM Fusion's x264 (`gstreamer1-plugins-ugly`) |

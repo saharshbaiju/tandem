@@ -23,8 +23,13 @@ from end to end.
 | --- | --- | --- |
 | **Hyprland** | Arch, and anything else running Hyprland | `hyprctl output create headless`, with wf-recorder and VA-API. On NVIDIA, xdg-desktop-portal-hyprland and GStreamer NVENC, zero copy |
 | **GNOME on Wayland** | **Ubuntu 22.04 and newer**, **Fedora 36 and newer**, any GNOME 40 or newer | Mutter's virtual monitor API, PipeWire and GStreamer |
-| **KDE Plasma on Wayland** | Any distribution with **Plasma 6**: Arch, CachyOS, EndeavourOS, Fedora KDE, Kubuntu 25.04 and newer, KDE neon, Debian 13, openSUSE (Plasma 5.27 should work but is untested) | A KWin virtual output made by a small helper Tandem compiles on first start, placed with kscreen-doctor, PipeWire and GStreamer |
-| **niri** *(experimental)* | Arch, CachyOS, Fedora, with a niri built from [pull request #3800](https://github.com/niri-wm/niri/pull/3800) | niri's virtual output IPC, its ScreenCast service, PipeWire and GStreamer. No niri release has virtual outputs yet; see [`docs/PLATFORMS.md`](docs/PLATFORMS.md#niri-experimental) |
+| **KDE Plasma on Wayland** *(beta)* | Any distribution with **Plasma 6**: Arch, CachyOS, EndeavourOS, Fedora KDE, Kubuntu 25.04 and newer, KDE neon, Debian 13, openSUSE (Plasma 5.27 should work but is untested) | A KWin virtual output made by a small helper Tandem compiles on first start, placed with kscreen-doctor, PipeWire and GStreamer |
+
+**KDE Plasma support is in beta** (0.7.0-beta.1, a pre-release). It passes the
+automated tests against real KWin 6.7 and 6.8, but has not yet been used in a
+real Plasma session on real hardware. Install it as shown under
+[Install](#install), and please report what works and what doesn't in
+[GitHub issues](https://github.com/saharshbaiju/tandem/issues).
 
 **Touch works too.** Tap, drag, scroll and pinch on the phone to control what is on
 it. Touches go through a virtual touchscreen, so your mouse pointer stays where it
@@ -43,8 +48,8 @@ stay the same, and they move back when the phone moves back or goes away.
 ## Documentation
 
 - [`docs/PLATFORMS.md`](docs/PLATFORMS.md): install and setup for each desktop and
-  distribution (Hyprland, GNOME, KDE Plasma, niri), how the GNOME, KDE and niri
-  backends work, and troubleshooting.
+  distribution (Hyprland, GNOME, KDE Plasma), how the GNOME and KDE backends
+  work, and troubleshooting.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the whole pipeline, the wire
   protocol, the reliability rules, and the latency budget.
 - [`docs/ANDROID.md`](docs/ANDROID.md): the phone app, covering the UI, its
@@ -80,13 +85,19 @@ git checkout, `./install.sh` installs that checkout instead.
 > encoder comes from the `fedora-cisco-openh264` repository, which is enabled by
 > default on Workstation.
 >
-> **KDE Plasma:** log in to the **Plasma (Wayland)** session, the default on
-> Plasma 6. The installer compiles a small KWin helper (it installs a C compiler
-> and the Wayland development files for that) and registers it with KWin.
+> **KDE Plasma (beta):** KDE support is only in the 0.7.0-beta.1 pre-release so
+> far. The line above installs the latest stable release, so name the beta:
 >
-> **niri:** the niri your distribution ships cannot create virtual monitors yet.
-> Tandem needs a niri built from pull request #3800; the steps are in
-> [`docs/PLATFORMS.md`](docs/PLATFORMS.md#niri-experimental).
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+> ```
+>
+> Take the matching `Tandem.apk` for the phone from the
+> [0.7.0-beta.1 release](https://github.com/saharshbaiju/tandem/releases/tag/v0.7.0-beta.1).
+>
+> Log in to the **Plasma (Wayland)** session, the default on Plasma 6. The
+> installer compiles a small KWin helper (it installs a C compiler and the
+> Wayland development files for that) and registers it with KWin.
 
 ### On the phone (Android 8 and newer)
 
@@ -127,10 +138,7 @@ phone, open it, and allow installs from your browser when asked.
 4. Touch the phone's screen to use it. On **Hyprland**, touch needs a one-time
    permission for `/dev/uinput`. The installer offers to set it up, or you can press
    **t** in the live view. On **GNOME** and **KDE Plasma**, nothing needs to be set
-   up. On **niri**, touch needs the same `/dev/uinput` permission plus one line in
-   niri's `config.kdl` (`include optional=true "tandem.kdl"`); the installer and
-   the **t** key add both. niri maps every touchscreen to one output, so on a
-   computer that has its own touchscreen, touch from the phone stays off.
+   up.
 
 The phone's stock camera works too. Point it at the QR code, and it opens a
 `tandem://` link in the app, which asks you to confirm the computer.
@@ -149,10 +157,10 @@ the same QR code and runs the daemon in the foreground.
 
 ```
 virtual monitor (Hyprland headless output / Mutter virtual monitor /
-                 KWin virtual output / niri virtual output)
+                 KWin virtual output)
         │  zero-copy capture
    H.264 encode on the compositor's GPU (NVENC / VA-API, x264 / openh264 fallback;
-                GStreamer VA / x264 / openh264 on GNOME, KDE and niri)
+                GStreamer VA / x264 / openh264 on GNOME and KDE)
         │  no B-frames, one slice per frame, CBR with a 2-frame buffer
    tandemd.py   splits NAL units, caches the current GOP, one I/O
         │         thread per phone, 1 s heartbeats, keyframe on request (KEYQ),
@@ -163,7 +171,7 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor /
    Android app → MediaCodec → Surface            │ touches, keyframe requests
                 hardware decode, rendered on arrival    (paired phones only)
                                                  │
-   phone_input.py → virtual touchscreen: uinput (Hyprland, niri) /
+   phone_input.py → virtual touchscreen: uinput (Hyprland) /
                     Mutter RemoteDesktop (GNOME) / KWin fake input (KDE)
 ```
 
@@ -202,7 +210,7 @@ tandem
   the pairing **QR code**, the plain addresses, the touch status and the daemon log.
   `q` returns to the menu and keeps the stream running. `d` disconnects and removes
   the monitor.
-- **Configure** sets the desktop backend (auto, hyprland, gnome, kde or niri), the screen
+- **Configure** sets the desktop backend (auto, hyprland, gnome or kde), the screen
   **side** (left, right, up or down), the **resolution** (presets, or *Match connected
   phone* through adb), the **FPS**, the desktop **scale**, the **quality** (bitrate),
   the keyframe interval, the **preferred link** (which address comes first in the
@@ -225,16 +233,16 @@ python3 tandemd.py --help
 ```
 
 ```
---backend auto|hyprland|gnome|kde|niri   # auto-detected from the session
+--backend auto|hyprland|gnome|kde        # auto-detected from the session (kde: beta)
 --width 2400 --height 1080 --fps 60      # virtual monitor mode
 --side right|left|up|down --scale 1.5    # placement (applied live on SIGUSR1)
 --bitrate 12M --gop 30                   # encoder (Hyprland: GOP is at least 1 s of frames)
---encoder auto|vah264enc|x264enc|…       # GNOME, KDE, niri: GStreamer element to use
+--encoder auto|vah264enc|x264enc|…       # GNOME, KDE: GStreamer element to use
 --encoder auto|h264_nvenc|h264_vaapi|libx264|libopenh264  # Hyprland: compositor GPU, CPU fallback
 --device /dev/dri/renderD128             # Hyprland: VA-API node (h264_vaapi)
 --host 0.0.0.0 --port 5000               # default: every interface, IPv4 and IPv6
 --keep-output                            # Hyprland: keep the monitor when the daemon exits
-                                         #   (GNOME, KDE, niri: it always goes with the daemon)
+                                         #   (GNOME, KDE: it always goes with the daemon)
 --parent-pid PID                         # stop, and remove the monitor, when PID exits
 --pairing-key-file ~/.config/tandem/pairing-key   # phones must prove this key (default)
 --tls-dir ~/.config/tandem/tls                    # TLS certificate (default; created if missing)
@@ -289,7 +297,7 @@ linux/
   tandemd.py            daemon: backend → NAL parse → GOP cache → TCP broadcast
   secure_link.py        TLS certificate, pairing key, handshake, lock-out
   phone_input.py        what admitted phones send back: touches → slots
-  uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland, niri)
+  uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland)
   backends/__init__.py  backend registry, session detection, the backend contract
   backends/hyprland.py  headless output, hyprctl Lua API, wf-recorder, touch mapping
   backends/xdph.py      NVIDIA: zero-copy capture via the Hyprland portal + GStreamer NVENC
@@ -298,12 +306,10 @@ linux/
   backends/kde.py       KWin virtual output via the helper, kscreen-doctor placement,
                         fake-input touch
   backends/kwin_helper.py  builds tandem-kwin-helper and writes its KWin desktop entry
-  backends/niri.py      niri IPC virtual output, ScreenCast, config-reload watcher,
-                        tandem.kdl touch mapping
-  backends/gstreamer.py PipeWire node → gst-launch → H.264 (GNOME, KDE, niri)
+  backends/gstreamer.py PipeWire node → gst-launch → H.264 (GNOME, KDE)
   backends/layout.py    where the phone's monitor goes beside the others
   backends/system.py    atomic file writes; which process serves a socket and how it
-                        was started (KWin's data home, niri's config path)
+                        was started (KWin's data home)
   kwin-helper/          tandem-kwin-helper.c (Wayland client for KWin's virtual output
                         and fake input), vendored protocol XML, Makefile
   start-tandem.sh       no-TUI launcher (prints the QR)
@@ -329,7 +335,9 @@ tests/                   unit tests (python3 -m unittest discover -s tests; not 
 
 - RTP over UDP with forward error correction for lossy Wi-Fi (TCP stays for USB)
 - HEVC decoding in the app
-- niri out of experimental once virtual outputs land in a niri release
+- KDE Plasma out of beta, once it has been used on real Plasma desktops
+- niri, once a niri release can create virtual outputs (the work is ready and
+  waiting on [niri pull request #3800](https://github.com/niri-wm/niri/pull/3800))
 - Sway and other wlroots compositors
 - Pen input with pressure and hover, and typing from the phone
 - A latency overlay

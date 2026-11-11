@@ -1,18 +1,16 @@
 """
 uinput_touch.py - a virtual multi-touch *touchscreen* created through /dev/uinput.
 
-Used by the Hyprland and niri backends to replay the phone's touches on the
-virtual monitor (GNOME and KDE inject touches through the compositor's own
-API instead). A touchscreen (not a mouse) is deliberate:
+Used by the Hyprland backend to replay the phone's touches on the virtual
+monitor (GNOME and KDE inject touches through the compositor's own API
+instead). A touchscreen (not a mouse) is deliberate:
 
   * Touch input goes straight to the surface under the finger, so the main
     mouse cursor never moves — you can keep using the laptop's touchpad while
     someone taps on the phone.
   * The compositor maps an absolute touch device onto one output, so the
     device's coordinate range covers exactly the phone's monitor
-    (Hyprland: `hl.device({ name = "tandem-touch", output = "EXT-1" })`;
-    niri: `input { touch { map-to-output "Tandem"; } }` in tandem.kdl, which
-    applies to every touchscreen, see backends/niri.py).
+    (Hyprland: `hl.device({ name = "tandem-touch", output = "EXT-1" })`).
 
 Pure Python (ioctl + struct), no python-evdev dependency. Speaks the kernel's
 multi-touch protocol "type B" (slots), the same one real touchscreens use:
@@ -89,7 +87,7 @@ def uinput_setup_problem():
 
     Returns {"problem": text, "fix": argv (runs with sudo)}: the udev rule
     and module-load file above. Every backend that touches through this
-    module (Hyprland, niri) offers it as its one-time touch setup.
+    module offers it as its one-time touch setup.
     """
     problem = uinput_access_problem()
     if not problem:

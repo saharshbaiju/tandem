@@ -2,16 +2,14 @@
 system.py - small local-system helpers shared by the backends.
 
 * write_atomically(): replace a file in one step. Compositors watch the files
-  Tandem writes (niri polls its config includes, KWin's KSycoca notices a
-  renamed desktop entry but not an in-place rewrite), so they must only ever
-  see the old file or the new one.
+  Tandem writes (KWin's KSycoca notices a renamed desktop entry but not an
+  in-place rewrite), so they must only ever see the old file or the new one.
 * socket_peer_pid() and read_process_launch(): which process serves a UNIX
   socket, and how it was started. A compositor's settings can live in its own
   environment and command line, which the programs it starts don't inherit
-  unchanged (niri removes NIRI_CONFIG before it starts any client; a Plasma
-  session's XDG_DATA_HOME can differ from a terminal's after a shell rc file
-  changed it), so the backends ask the compositor's process instead of
-  trusting their own environment.
+  unchanged (a Plasma session's XDG_DATA_HOME can differ from a terminal's
+  after a shell rc file changed it), so the backends ask the compositor's
+  process instead of trusting their own environment.
 
 Queries return None on any failure and never raise.
 """
@@ -68,8 +66,8 @@ def socket_peer_pid(path):
     Asked of the kernel (SO_PEERCRED on a connection to it), so it is the
     process that created the socket, whatever launched it. A process of
     another user counts as none: its files aren't ours to read or edit.
-    The connection is closed without sending anything, which Wayland and
-    niri treat as an ordinary disconnect.
+    The connection is closed without sending anything, which a Wayland
+    compositor treats as an ordinary disconnect.
     """
     if not path:
         return None
@@ -93,8 +91,8 @@ def read_process_launch(pid, proc_root=PROC_ROOT):
     """ProcessLaunch of process `pid`, or None if /proc can't tell.
 
     /proc/<pid>/environ is the environment the process *started* with:
-    unsetenv() inside the process (as niri does with NIRI_CONFIG) doesn't
-    change it, which is what makes it useful here.
+    unsetenv() or setenv() inside the process doesn't change it, which is
+    what makes it useful here.
     """
     base = os.path.join(proc_root, str(pid))
     try:

@@ -1,7 +1,8 @@
 """Tests for the parts outside the backends that depend on which desktop is
-running: the package rows for KDE Plasma and niri (names checked against the
+running: the package rows for KDE Plasma (names checked against the
 distributions' repositories), the TUI's touch-setup line and Dependencies
-notes, the desktop list in user-facing messages, and install.sh's syntax."""
+notes, the desktop list and beta labels in user-facing messages, and
+install.sh's syntax and release download."""
 
 import support  # noqa: F401  (must come first: sys.path + scratch HOME)
 
@@ -84,73 +85,38 @@ class KdePackageRowsTest(unittest.TestCase):
         self.assertNotIn("python gi", packages_by_label("kde"))
 
 
-class NiriPackageRowsTest(unittest.TestCase):
-    def test_rows(self):
-        packages = packages_by_label("niri")
-        self.assertEqual(list(packages)[:3], ["niri", "gst-launch-1.0",
-                                              "python gi"])
-        # Debian and Ubuntu have no niri package (sources.debian.org and
-        # Launchpad, 2026-11-10); Arch and Fedora do.
-        self.assertEqual(packages["niri"], {"arch": "niri",
-                                            "debian": core.NOT_PACKAGED,
-                                            "fedora": "niri"})
-        self.assertEqual(packages["python gi"]["fedora"], "python3-gobject")
-
-    def debian_rows(self, present):
-        """check_dependencies("niri") on Debian with only `present`
-        installed (by row label)."""
-        rows = [(label, (lambda label=label: label in present), packages,
-                 required, purpose)
-                for label, _check, packages, required, purpose
-                in core.DEPS["niri"]]
-        return [mock.patch.object(core, "distro", return_value="debian"),
-                mock.patch.dict(core.DEPS, {"niri": rows,
-                                            "common": []})]
-
-    def test_debian_installs_the_gstreamer_rows_but_not_niri(self):
-        patches = self.debian_rows(present={"python gi"})
-        for patch in patches:
-            patch.start()
-            self.addCleanup(patch.stop)
-        packages = core.missing_packages("niri", required_only=True)
-        self.assertNotIn("niri", packages)
-        self.assertNotIn(None, packages)
-        self.assertIn("gstreamer1.0-tools", packages)
-        self.assertIn("gstreamer1.0-pipewire", packages)
-        self.assertEqual(core.unpackaged_missing("niri"), ["niri"])
-
-    def test_debian_with_niri_built_from_source(self):
-        labels = [row[0] for row in core.DEPS["niri"]]
-        patches = self.debian_rows(present=set(labels))
-        for patch in patches:
-            patch.start()
-            self.addCleanup(patch.stop)
-        self.assertEqual(core.missing_packages("niri"), [])
-        self.assertEqual(core.unpackaged_missing("niri"), [])
-
-    def test_arch_and_fedora_install_niri(self):
-        for distro in ("arch", "fedora"):
-            with self.subTest(distro=distro), \
-                    mock.patch.object(core, "distro", return_value=distro):
-                rows = {row[0]: row[1]
-                        for row in core.check_dependencies("niri")}
-                self.assertEqual(rows["niri"], "niri")
-
-
 class DesktopListTest(unittest.TestCase):
     def test_unsupported_message_names_every_desktop(self):
         text = backends.supported_desktops()
-        for desktop in ("Hyprland", "GNOME", "KDE Plasma", "niri"):
+        for desktop in ("Hyprland", "GNOME", "KDE Plasma"):
             self.assertIn(desktop, text)
 
     def test_tui_backend_choices(self):
-        self.assertEqual(list(backends.NAMES),
-                         ["hyprland", "gnome", "kde", "niri"])
+        self.assertEqual(list(backends.NAMES), ["hyprland", "gnome", "kde"])
+
+
+class BetaLabelTest(unittest.TestCase):
+    """KDE Plasma is in beta: every place a user meets the backend says so,
+    and the stable backends say nothing of the kind."""
+
+    def test_kde_is_labelled_beta(self):
+        self.assertIn("beta", backends.describe("kde"))
+        self.assertIn("KDE Plasma on Wayland (beta)",
+                      backends.supported_desktops())
+        notice = backends.beta_notice("kde")
+        self.assertIn("KDE Plasma support is in beta", notice)
+        self.assertIn(backends.ISSUES_URL, notice)
+
+    def test_stable_backends_are_not(self):
+        for name in ("hyprland", "gnome", None, "unknown"):
+            with self.subTest(name=name):
+                self.assertIsNone(backends.beta_notice(name))
+                self.assertNotIn("beta", backends.describe(name))
 
 
 class TouchLineTest(unittest.TestCase):
     def setUp(self):
-        self.cfg = core.Config(backend="niri")
+        self.cfg = core.Config(backend="hyprland")
         self.stream = mock.Mock(touch_status="")
 
     def test_runnable_fix_says_press_t(self):
@@ -161,24 +127,23 @@ class TouchLineTest(unittest.TestCase):
         self.assertEqual(color, 4)
 
     def test_no_fix_does_not_offer_t(self):
-        setup = {"problem": "niri's config file doesn't exist yet",
+        setup = {"problem": "no permission to use /dev/uinput",
                  "fix": None}
         text, _color = tui.touch_line(self.cfg, self.stream, setup)
-        self.assertIn("niri's config file", text)
+        self.assertIn("/dev/uinput", text)
         self.assertNotIn("press t", text)
 
     def test_a_long_problem_moves_below_the_row(self):
-        setup = {"problem": "niri's config needs the line include "
-                            'optional=true "tandem.kdl" so touches land on '
-                            "the phone's monitor; niri's config file "
-                            "/home/u/.config/niri/config.kdl doesn't exist "
-                            "yet (start niri once to create it)",
+        setup = {"problem": "no permission to use /dev/uinput, so the "
+                            "phone's touches can't reach the desktop; a "
+                            "udev rule grants it to whoever is logged in "
+                            "at the seat (log out and back in afterwards)",
                  "fix": None}
         row, color, details = tui.touch_row(self.cfg, self.stream, setup, 60)
         self.assertLessEqual(len(row), 60)
         self.assertEqual(color, 4)
         self.assertTrue(all(len(line) <= 60 for line in details))
-        self.assertIn("(start niri once to create it)", " ".join(details))
+        self.assertIn("(log out and back in afterwards)", " ".join(details))
         setup["fix"] = ["sh", "-c", "true"]
         row, _color, _details = tui.touch_row(self.cfg, self.stream, setup,
                                               60)
@@ -199,21 +164,19 @@ class TouchLineTest(unittest.TestCase):
 
 class BackendNotesTest(unittest.TestCase):
     def test_kde_note_mentions_the_helper(self):
-        notes = tui.backend_notes("kde", "arch")
-        self.assertEqual(len(notes), 1)
+        notes = tui.backend_notes("kde")
+        self.assertEqual(len(notes), 2)
         self.assertIn("KWin helper", notes[0])
 
-    def test_niri_notes_depend_on_the_distro(self):
-        self.assertEqual(len(tui.backend_notes("niri", "arch")), 1)
-        self.assertIn("#3800", tui.backend_notes("niri", "arch")[0])
-        debian = tui.backend_notes("niri", "debian")
-        self.assertEqual(len(debian), 2)
-        self.assertIn("don't package niri", debian[1])
+    def test_kde_note_says_beta_and_where_to_report(self):
+        beta = tui.backend_notes("kde")[1]
+        self.assertIn("in beta", beta)
+        self.assertIn(backends.ISSUES_URL, beta)
 
     def test_no_notes_for_hyprland_and_gnome(self):
         for backend in ("hyprland", "gnome", None):
             with self.subTest(backend=backend):
-                self.assertEqual(tui.backend_notes(backend, "fedora"), [])
+                self.assertEqual(tui.backend_notes(backend), [])
 
 
 @unittest.skipUnless(shutil.which("bash"), "bash is not installed")
@@ -266,6 +229,60 @@ class InstallScriptTest(unittest.TestCase):
             text = script.read()
         self.assertIn("print(backends.supported_desktops())' 2>/dev/null "
                       '|| echo "', text)
+
+    def run_download_step(self, version):
+        """Run a copy of install.sh away from any checkout, so it downloads,
+        with a stand-in `curl` that records each URL and fails like a 404.
+        Returns (exit status, stderr, the URLs asked for). The script stops
+        at the download, before it changes anything."""
+        root = tempfile.mkdtemp(prefix="tandem-install-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        script = os.path.join(root, "install.sh")
+        shutil.copy(INSTALL_SCRIPT, script)
+        tools = os.path.join(root, "bin")
+        os.makedirs(tools)
+        urls = os.path.join(root, "urls")
+        with open(os.path.join(tools, "curl"), "w", encoding="utf-8") as curl:
+            curl.write('#!/bin/sh\nfor a; do case "$a" in https://*) '
+                       f'echo "$a" >> {urls};; esac; done\nexit 22\n')
+        os.chmod(os.path.join(tools, "curl"), 0o755)
+        environment = {"PATH": tools + os.pathsep + os.environ["PATH"],
+                       "HOME": os.path.join(root, "home"), "TMPDIR": root}
+        if version is not None:
+            environment["TANDEM_VERSION"] = version
+        result = subprocess.run(["bash", script], capture_output=True,
+                                text=True, timeout=30, env=environment)
+        asked = []
+        if os.path.exists(urls):
+            with open(urls, encoding="utf-8") as f:
+                asked = f.read().split()
+        self.assertFalse(os.path.exists(os.path.join(root, "home")))
+        return result.returncode, result.stderr, asked
+
+    def test_latest_release_then_main(self):
+        status, _stderr, asked = self.run_download_step(None)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(asked, [
+            "https://github.com/saharshbaiju/tandem/releases/latest/download/"
+            "tandem-linux.tar.gz",
+            "https://github.com/saharshbaiju/tandem/archive/refs/heads/"
+            "main.tar.gz"])
+
+    def test_tandem_version_fetches_that_release_only(self):
+        status, stderr, asked = self.run_download_step("v0.7.0-beta.1")
+        self.assertEqual(status, 1)
+        self.assertEqual(asked, [
+            "https://github.com/saharshbaiju/tandem/releases/download/"
+            "v0.7.0-beta.1/tandem-linux.tar.gz"])
+        self.assertIn("Release v0.7.0-beta.1 has no tandem-linux.tar.gz",
+                      stderr)
+
+    def test_tandem_version_must_look_like_a_tag(self):
+        for version in ("v1/../../x", "v1 2", "v1?x=1"):
+            with self.subTest(version=version):
+                status, stderr, asked = self.run_download_step(version)
+                self.assertEqual((status, asked), (1, []))
+                self.assertIn("must be a release tag", stderr)
 
     def test_uninstall_removes_the_kwin_helper_entry(self):
         with open(INSTALL_SCRIPT, encoding="utf-8") as script:
