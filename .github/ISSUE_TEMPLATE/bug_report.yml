@@ -40,6 +40,8 @@ body:
       options:
         - Hyprland
         - GNOME (Wayland)
+        - KDE Plasma (Wayland)
+        - niri
         - Other
     validations:
       required: true

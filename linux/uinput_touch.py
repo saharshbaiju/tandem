@@ -1,15 +1,18 @@
 """
 uinput_touch.py - a virtual multi-touch *touchscreen* created through /dev/uinput.
 
-Used by the Hyprland backend to replay the phone's touches on the virtual
-monitor. A touchscreen (not a mouse) is deliberate:
+Used by the Hyprland and niri backends to replay the phone's touches on the
+virtual monitor (GNOME and KDE inject touches through the compositor's own
+API instead). A touchscreen (not a mouse) is deliberate:
 
   * Touch input goes straight to the surface under the finger, so the main
     mouse cursor never moves — you can keep using the laptop's touchpad while
     someone taps on the phone.
   * The compositor maps an absolute touch device onto one output, so the
     device's coordinate range covers exactly the phone's monitor
-    (Hyprland: `hl.device({ name = "tandem-touch", output = "EXT-1" })`).
+    (Hyprland: `hl.device({ name = "tandem-touch", output = "EXT-1" })`;
+    niri: `input { touch { map-to-output "Tandem"; } }` in tandem.kdl, which
+    applies to every touchscreen, see backends/niri.py).
 
 Pure Python (ioctl + struct), no python-evdev dependency. Speaks the kernel's
 multi-touch protocol "type B" (slots), the same one real touchscreens use:
@@ -28,6 +31,7 @@ the udev rule the installer adds (KERNEL=="uinput", TAG+="uaccess").
 
 import fcntl
 import os
+import shlex
 import struct
 import time
 
@@ -68,6 +72,34 @@ def uinput_access_problem():
     if not os.access(UINPUT_PATH, os.W_OK):
         return "no permission to use /dev/uinput"
     return None
+
+
+# One-time setup that lets the user at the seat create the uinput
+# touchscreen. uaccess: logind grants the user at the seat (you, not other
+# accounts or remote logins) access to /dev/uinput. Numbered before
+# 73-seat-late.rules, which is where the tag takes effect.
+UINPUT_RULE_PATH = "/etc/udev/rules.d/70-tandem-uinput.rules"
+UINPUT_MODULE_PATH = "/etc/modules-load.d/tandem-uinput.conf"
+UINPUT_RULE = ('KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", '
+               'OPTIONS+="static_node=uinput"')
+
+
+def uinput_setup_problem():
+    """Why the uinput touchscreen can't be created, with the fix, or None.
+
+    Returns {"problem": text, "fix": argv (runs with sudo)}: the udev rule
+    and module-load file above. Every backend that touches through this
+    module (Hyprland, niri) offers it as its one-time touch setup.
+    """
+    problem = uinput_access_problem()
+    if not problem:
+        return None
+    script = (f"echo {shlex.quote(UINPUT_RULE)} > {UINPUT_RULE_PATH} && "
+              f"echo uinput > {UINPUT_MODULE_PATH} && modprobe uinput && "
+              "udevadm control --reload && "
+              "udevadm trigger --name-match=/dev/uinput && "
+              "udevadm settle")
+    return {"problem": problem, "fix": ["sudo", "sh", "-c", script]}
 
 
 class VirtualTouchscreen:

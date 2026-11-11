@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Tandem — PC installer (Ubuntu / Fedora / Arch).
+# Tandem — PC installer: Arch, Fedora, Debian / Ubuntu and their derivatives
+# (CachyOS, EndeavourOS, Kubuntu, KDE neon, Mint…), for Hyprland, GNOME,
+# KDE Plasma or niri.
 #
 #   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 #   # or, from a checkout:  ./install.sh
 #
 # Installs the Linux side into ~/.local/share/tandem, puts a `tandem` command in
 # ~/.local/bin (so `tandem` works in any terminal), adds an app-menu entry, and installs the system packages your
-# desktop needs (asks for sudo once). Re-run any time to update.
+# desktop needs (asks for sudo once). On KDE Plasma it also builds Tandem's small
+# KWin helper and registers it with KWin. Re-run any time to update.
 # Uninstall: ./install.sh --uninstall
 set -euo pipefail
 
@@ -19,7 +22,15 @@ say()  { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  rm -rf "$DEST" "$BIN/tandem" "$APPS/tandem.desktop"
+  # $DEST also holds the built KWin helper (tandem/kwin-helper/). Its desktop
+  # entry is the one other file Tandem writes, in KWin's own data directory,
+  # which backends/kwin_helper.py knows how to find; the rm below covers an
+  # install too old (or too broken) to ask.
+  if [[ -f "$DEST/linux/backends/kwin_helper.py" ]] && command -v python3 >/dev/null; then
+    (cd "$DEST/linux" && python3 -c 'from backends import kwin_helper; kwin_helper.remove_installed()') 2>/dev/null \
+      || warn "Couldn't remove the KWin helper's desktop entry (tandem-kwin-helper.desktop); delete it by hand"
+  fi
+  rm -rf "$DEST" "$BIN/tandem" "$APPS/tandem.desktop" "$APPS/tandem-kwin-helper.desktop"
   say "Removed Tandem (settings kept in ~/.config/tandem)."
   if [[ -e /etc/udev/rules.d/70-tandem-uinput.rules ]]; then
     say "Touch-input access rule left in place; remove it with:"
@@ -53,6 +64,7 @@ mkdir -p "$DEST" "$BIN" "$APPS"
 rm -rf "$DEST/linux"
 cp -r "$SRC" "$DEST/linux"
 find "$DEST/linux" -name __pycache__ -prune -exec rm -rf {} +
+rm -rf "$DEST/linux/kwin-helper/build"   # a hand-made `make` build in a checkout
 # The license travels with the program (GPL-3.0; NOTICE has the extra terms).
 for f in LICENSE NOTICE; do
   if [[ -f "$SRC/../$f" ]]; then cp "$SRC/../$f" "$DEST/$f"; fi
@@ -101,11 +113,48 @@ fi
 
 backend="$("$PY" -c 'import core; print(core.Config().resolved_backend() or "")')"
 case "$backend" in
-  gnome)    say "Desktop: GNOME (Wayland)";;
+  gnome)    say "Desktop: GNOME${WAYLAND_DISPLAY:+ (Wayland)}";;
   hyprland) say "Desktop: Hyprland";;
-  *)        warn "No supported desktop detected in this session (GNOME on Wayland or Hyprland)."
-            warn "On Ubuntu, pick \"Ubuntu\" (not \"Ubuntu on Xorg\") on the login screen.";;
+  kde)      say "Desktop: KDE Plasma${WAYLAND_DISPLAY:+ (Wayland)}";;
+  niri)     say "Desktop: niri (experimental: needs a niri build with virtual outputs)";;
+  *)        warn "No supported desktop detected in this session (run $("$PY" -c 'import backends; print(backends.supported_desktops())' 2>/dev/null || echo "Hyprland, GNOME, KDE Plasma or niri"))."
+            warn "On Ubuntu, pick \"Ubuntu\" (not \"Ubuntu on Xorg\") on the login screen; on Plasma, \"Plasma (Wayland)\".";;
 esac
+# Why this session can't make a virtual monitor (X11, a niri without virtual
+# outputs…), as the TUI's start check says it. Everything is inside the try:
+# a release tarball older than this script has no backends.module() yet.
+if [[ -n "$backend" ]]; then
+  "$PY" -c '
+import sys
+try:
+    import backends
+    hooks = backends.module(sys.argv[1])
+    lines = hooks.session_problem() if hooks else None
+except Exception:
+    lines = None
+for line in lines or []:
+    print(line)' "$backend" | while IFS= read -r line; do warn "$line"; done || true
+fi
+
+# ---- 3b. KDE Plasma: build the KWin helper and register it with KWin. The
+#          daemon would do both on its first start; doing it now surfaces a
+#          missing compiler here, and lets KWin 6.7 and older read the helper's
+#          desktop entry before Tandem first needs it.
+if [[ "$backend" == "kde" ]]; then
+  if "$PY" -c '
+import sys
+from backends import kwin_helper
+try:
+    kwin_helper.ensure_desktop_entry(kwin_helper.ensure_built())
+except RuntimeError as error:
+    print(error, file=sys.stderr)
+    sys.exit(1)'; then
+    say "KWin helper ready ($("$PY" -c 'from backends import kwin_helper; print(kwin_helper.helper_path())'))"
+  else
+    warn "Couldn't build the KWin helper (the reason is above). Tandem needs it on KDE Plasma:"
+    warn "install what 'tandem' → Dependencies lists as missing; the next start builds it."
+  fi
+fi
 
 # ---- 4. firewall: the phone connects in on TCP 5000 over Wi-Fi / tethering
 #         (the USB-debugging path goes through adb on 127.0.0.1 and needs nothing)
@@ -129,30 +178,51 @@ sys.exit(subprocess.run(f["fix"]).returncode if f else 0)'; then
   fi
 fi
 
-# ---- 5. touch input (Hyprland only): the phone's touches are replayed through a
-#         virtual touchscreen in /dev/uinput, which is root-only on most distros.
-#         A udev rule grants it to whoever is logged in at the seat (uaccess).
-#         GNOME needs nothing: Mutter's RemoteDesktop API injects the touches.
-TOUCH_FIX="$("$PY" -c '
+# ---- 5. touch input: one-time setup, as the backend reports it
+#         (core.touch_setup_check -> the backend's touch_setup_problem hook).
+#         Hyprland and niri replay touches through a virtual touchscreen in
+#         /dev/uinput, root-only on most distros: a udev rule grants it to
+#         whoever is logged in at the seat (uaccess; asks for sudo). niri then
+#         also needs one include line in its config.kdl (no sudo). GNOME and
+#         KDE Plasma need nothing. Each fix is offered in turn, at most three.
+touch_step() {
+  # Prints "<problem><TAB><fix>" (fix empty when there is nothing to run), or
+  # nothing when touch needs no setup.
+  "$PY" -c '
 import core, shlex
 t = core.touch_setup_check(core.Config())
-print(shlex.join(t["fix"]) if t and t["fix"] else "")')"
-if [[ -n "$TOUCH_FIX" ]]; then
-  warn "Touch input needs access to /dev/uinput (one-time setup, asks for sudo):"
-  warn "  $TOUCH_FIX"
-  if [[ -r /dev/tty ]]; then
-    read -r -p "Set it up now? [Y/n] " ans </dev/tty || ans=n
-    if [[ ! "$ans" =~ ^[Nn] ]]; then
-      if "$PY" -c 'import core, subprocess, sys
-t = core.touch_setup_check(core.Config())
-sys.exit(subprocess.run(t["fix"]).returncode if t else 0)'; then
-        say "Touch input ready"
-      else
-        warn "Couldn't set up touch input; run 'tandem', choose Start Tandem and press t"
-      fi
-    fi
+if t:
+    print(t["problem"] + "\t" + (shlex.join(t["fix"]) if t["fix"] else ""))' || true
+}
+previous=""
+for _ in 1 2 3; do
+  TOUCH="$(touch_step)"
+  [[ -n "$TOUCH" && "$TOUCH" != "$previous" ]] || break
+  previous="$TOUCH"
+  problem="${TOUCH%%$'\t'*}"; fix="${TOUCH#*$'\t'}"
+  if [[ -z "$fix" ]]; then
+    warn "Touch input: $problem"
+    break
   fi
-fi
+  if [[ "$fix" == sudo\ * ]]; then
+    warn "Touch input needs one-time setup ($problem; asks for sudo):"
+  else
+    warn "Touch input needs one-time setup ($problem):"
+  fi
+  warn "  $fix"
+  [[ -r /dev/tty ]] || break
+  read -r -p "Set it up now? [Y/n] " ans </dev/tty || ans=n
+  [[ ! "$ans" =~ ^[Nn] ]] || break
+  if "$PY" -c 'import core, subprocess, sys
+t = core.touch_setup_check(core.Config())
+sys.exit(subprocess.run(t["fix"]).returncode if t and t["fix"] else 0)'; then
+    say "Done"
+  else
+    warn "Couldn't set up touch input; run 'tandem', choose Start Tandem and press t"
+    break
+  fi
+done
+[[ -z "$previous" || -n "$(touch_step)" ]] || say "Touch input ready"
 
 # ---- 6. make `tandem` callable from any new terminal
 on_path=1; case ":$PATH:" in *":$BIN:"*) ;; *) on_path=0;; esac

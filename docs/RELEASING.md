@@ -11,7 +11,10 @@
 The installer does not depend on the distribution. It asks `linux/core.py` which
 packages are missing for this distribution and desktop, using the same list as the
 TUI's Dependencies screen, and installs them with apt, dnf or pacman. Nothing is
-compiled, so the same tarball works on Ubuntu, Fedora and Arch.
+compiled at release time, so the same tarball works on every distribution. The
+one native piece, the KWin helper for KDE Plasma, ships as C source in
+`linux/kwin-helper/` and is compiled on the user's machine (by the installer, or
+on the daemon's first start).
 
 Verified: `install.sh` on Ubuntu 24.04 in a fresh container installs the packages
 and the `tandem` command, which resolves in a new shell. The GNOME backend streams
@@ -70,7 +73,7 @@ The 0.5.0 release notes describe the rename.
    cp android/app/build/outputs/apk/release/app-release.apk dist/Tandem-$V.apk
    cp dist/Tandem-$V.apk dist/Tandem.apk          # the same app under a name that never changes
    cp android/app/build/outputs/apk/debug/app-debug.apk dist/Tandem-$V-debug.apk
-   tar --exclude=__pycache__ -czf dist/tandem-linux.tar.gz linux LICENSE NOTICE
+   tar --exclude=__pycache__ --exclude=linux/kwin-helper/build -czf dist/tandem-linux.tar.gz linux LICENSE NOTICE
    (cd dist && sha256sum Tandem-$V.apk Tandem.apk Tandem-$V-debug.apk tandem-linux.tar.gz > SHA256SUMS)
    ```
 

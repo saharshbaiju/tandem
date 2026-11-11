@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-tandemd - Tandem streaming daemon (Hyprland / GNOME).
+tandemd - Tandem streaming daemon (Hyprland / GNOME / KDE Plasma / niri).
 
 Pipeline:
     compositor backend (see backends/)
         hyprland : headless output -> wf-recorder (VA-API)
         gnome    : Mutter virtual monitor -> PipeWire -> GStreamer encoder
+        kde/niri : compositor virtual output -> PipeWire -> GStreamer encoder
         -> raw Annex-B H.264 on a pipe (no container, no B-frames)
         -> this daemon splits NAL units, caches SPS/PPS + the current GOP,
            and broadcasts framed NALs over TCP
@@ -1297,9 +1298,9 @@ def main():
     ap.add_argument("--codec", default="h264", choices=("h264", "hevc"),
                     help="video codec (the app decodes h264)")
     ap.add_argument("--encoder", default="auto",
-                    help="GNOME: GStreamer element (vah264enc, x264enc, ...); "
-                         "Hyprland: h264_nvenc or h264_vaapi (auto = the "
-                         "GPU the compositor renders on)")
+                    help="GNOME / KDE / niri: GStreamer element (vah264enc, "
+                         "x264enc, ...); Hyprland: h264_nvenc or h264_vaapi "
+                         "(auto = the GPU the compositor renders on)")
     ap.add_argument("--side", default="right",
                     choices=("right", "left", "up", "down"),
                     help="where the phone sits relative to the main screen")
@@ -1319,7 +1320,9 @@ def main():
                          "IPv4 and IPv6)")
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--keep-output", action="store_true",
-                    help="don't remove the Hyprland headless output on exit")
+                    help="don't remove the virtual output on exit, where it "
+                         "can outlive the daemon (Hyprland; on GNOME, KDE and "
+                         "niri it always goes with the daemon)")
     ap.add_argument("--parent-pid", type=int, default=None,
                     help="stop when this process exits, and then remove the "
                          "output even with --keep-output (the TUI passes "
@@ -1467,10 +1470,10 @@ def main():
                 touch_surface.close()
             except Exception as e:
                 log(f"warning: closing the touch device failed ({e})")
-        # A GNOME virtual monitor dies with our session anyway; only Hyprland's
-        # headless output can outlive the daemon (the TUI uses that on restart,
-        # so not once the TUI itself is gone).
-        if (not args.keep_output or backend.name == "gnome"
+        # Only an output that can outlive the daemon (Hyprland's headless
+        # output) is kept; the TUI uses that on restart, so not once the TUI
+        # itself is gone. Others die with our session anyway.
+        if (not args.keep_output or not backend.honors_keep_output
                 or parent_gone.is_set()):
             if parent_gone.is_set():
                 log("the launcher exited; removing the virtual monitor")

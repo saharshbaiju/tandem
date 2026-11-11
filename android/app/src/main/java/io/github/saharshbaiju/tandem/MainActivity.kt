@@ -626,6 +626,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         b.sheetBackend.text = when (sc?.backend) {
             "hyprland" -> "Hyprland"
             "gnome" -> "GNOME"
+            "kde" -> "KDE Plasma"
+            "niri" -> "niri"
             null, "" -> "—"
             else -> sc.backend
         }
