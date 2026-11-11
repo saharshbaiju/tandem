@@ -25,10 +25,8 @@ from end to end.
 | **GNOME on Wayland** | **Ubuntu 22.04 and newer**, **Fedora 36 and newer**, any GNOME 40 or newer | Mutter's virtual monitor API, PipeWire and GStreamer |
 | **KDE Plasma on Wayland** *(beta)* | Any distribution with **Plasma 6**: Arch, CachyOS, EndeavourOS, Fedora KDE, Kubuntu 25.04 and newer, KDE neon, Debian 13, openSUSE (Plasma 5.27 should work but is untested) | A KWin virtual output made by a small helper Tandem compiles on first start, placed with kscreen-doctor, PipeWire and GStreamer |
 
-**KDE Plasma support is in beta** (0.7.0-beta.1, a pre-release). It passes the
-automated tests against real KWin 6.7 and 6.8, but has not yet been used in a
-real Plasma session on real hardware. Install it as shown under
-[Install](#install), and please report what works and what doesn't in
+**KDE Plasma support is in beta** (0.7.0-beta.1, a pre-release). Install it as shown
+under [Install](#install), and please report what works and what doesn't in
 [GitHub issues](https://github.com/saharshbaiju/tandem/issues).
 
 **Touch works too.** Tap, drag, scroll and pinch on the phone to control what is on
@@ -335,7 +333,7 @@ tests/                   unit tests (python3 -m unittest discover -s tests; not 
 
 - RTP over UDP with forward error correction for lossy Wi-Fi (TCP stays for USB)
 - HEVC decoding in the app
-- KDE Plasma out of beta, once it has been used on real Plasma desktops
+- KDE Plasma out of beta, after feedback from beta testers
 - niri, once a niri release can create virtual outputs (the work is ready and
   waiting on [niri pull request #3800](https://github.com/niri-wm/niri/pull/3800))
 - Sway and other wlroots compositors

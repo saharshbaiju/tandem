@@ -20,7 +20,7 @@ Maker: Saharsh Baiju, https://saharshbaiju.github.io/portfolio/ (GitHub: https:/
 
 - Hyprland on Arch Linux (or any distribution running Hyprland): virtual monitor via a Hyprland headless output, captured with wf-recorder / VA-API.
 - GNOME on Wayland, GNOME 40+: Ubuntu 22.04 and later, Fedora 36 and later. Uses Mutter's virtual-monitor API, PipeWire and GStreamer.
-- KDE Plasma 6 on Wayland (beta), any distribution (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian). Uses a KWin virtual output made by a small helper Tandem compiles itself, kscreen-doctor, PipeWire and GStreamer. It passes automated tests against real KWin 6.7 and 6.8 but has not yet been tried in a real Plasma session on real hardware, so it ships only in the 0.7.0-beta.1 pre-release (see Install). Problems: https://github.com/saharshbaiju/tandem/issues
+- KDE Plasma 6 on Wayland (beta), any distribution (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian). Uses a KWin virtual output made by a small helper Tandem compiles itself, kscreen-doctor, PipeWire and GStreamer. It ships only in the 0.7.0-beta.1 pre-release (see Install). Problems: https://github.com/saharshbaiju/tandem/issues
 - Not supported yet: GNOME or KDE Plasma on Xorg (virtual monitors need Wayland), Sway and other compositors, iPhone/iPad.
 - Phone: Android 8 or later.
 

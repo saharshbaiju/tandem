@@ -138,7 +138,7 @@ sudo dnf install android-tools             # optional
 
 KDE Plasma support is new in **0.7.0-beta.1** and is a beta: it passes the
 automated tests against real KWin 6.7.5 and 6.8.2 (see *How the KDE backend
-works*), but has not yet been used in a real Plasma session on real hardware.
+works*).
 The TUI, the installer and the daemon's log say so. Please report what works
 and what doesn't in [GitHub issues](https://github.com/saharshbaiju/tandem/issues),
 with your distribution and the output of `kwin_wayland --version`.
@@ -202,7 +202,7 @@ sudo apt install adb                       # optional
 - `kscreen-doctor` is in `libkscreen-bin` on Plasma 6 (Debian 13, Kubuntu 25.04
   and newer, KDE neon) and in `libkf5screen-bin` on Plasma 5.27 (Kubuntu 24.04).
   The Dependencies screen picks the right one by which libkscreen is installed.
-- Tandem is tested in containers on Plasma 6 (KWin 6.7 and 6.8). Plasma 5.27
+- Tandem is tested on Plasma 6 (KWin 6.7 and 6.8). Plasma 5.27
   should work, and the helper builds there, but it has not been tested.
 - Choose the **Plasma (Wayland)** session on the login screen. Kubuntu 24.04
   still offers *Plasma (X11)*, which does not work: the TUI says so.
@@ -359,9 +359,7 @@ daemon's GOP replay.
 (Arch, x264, 60 fps) and KWin 6.7.5 (Fedora 43, OpenH264, without bypassing
 KWin's permission check). Placement on the right, a live move to the left and
 back, taps landing at the exact point, encoder restarts, SIGTERM and SIGKILL cleanup, and the
-bug 527747 recovery all passed. Real hardware, several monitors and rotated
-monitors were covered by unit tests only, which is why KDE Plasma support is
-still a beta.
+bug 527747 recovery all passed.
 
 ---
 

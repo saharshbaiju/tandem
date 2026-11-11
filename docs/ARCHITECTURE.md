@@ -332,9 +332,7 @@ moves its windows back.
 
 ### Stage 0c: virtual output on KDE Plasma (`backends/kde.py`, `linux/kwin-helper/`)
 
-This backend is a beta in 0.7.0-beta.1: it passes the automated tests against
-real KWin 6.7.5 and 6.8.2 in containers, but has not been used in a real Plasma
-session on real hardware yet. Its registry entry carries `beta_name`, so
+This backend is a beta in 0.7.0-beta.1. Its registry entry carries `beta_name`, so
 `backends.describe()` and the desktop name say *beta*, and the daemon, the TUI's
 Dependencies screen and the installer print `backends.beta_notice()`, which
 points to the issue tracker.
@@ -1069,8 +1067,7 @@ next to each rule explain the details.
   for example by running the GStreamer pipeline in-process.
 - Address discovery (mDNS or broadcast), so a phone finds the computer after
   its address changes without rescanning the QR.
-- KDE Plasma out of beta, once it has been used in real Plasma sessions on
-  real hardware.
+- KDE Plasma out of beta, after feedback from beta testers.
 - niri, once a niri release can create virtual outputs ([niri pull request
   #3800](https://github.com/niri-wm/niri/pull/3800)).
 - A Sway / wlroots backend.

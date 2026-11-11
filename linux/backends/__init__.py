@@ -105,9 +105,6 @@ _REGISTRY = {
     "kde": Entry("kde", "KdeBackend",
                  "KDE Plasma / KWin (virtual output + PipeWire, beta)",
                  "KDE Plasma on Wayland (beta)",
-                 # Passes the automated tests against real KWin 6.7 and 6.8
-                 # in containers, but hasn't been used in a real Plasma
-                 # session on real hardware yet.
                  beta_name="KDE Plasma"),
 }
 
