@@ -1,6 +1,6 @@
 # Tandem
 
-> Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The desktop gets a new display (not a mirror, not a browser tab); the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms from GPU to glass over USB and 30 to 60 ms over Wi-Fi. It runs natively on Hyprland and on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+), connects over a USB cable, USB tethering or Wi-Fi, supports touch, and only talks to a phone that was paired by QR code, over TLS. Free and open source (GPL-3.0), made by Saharsh Baiju.
+> Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The desktop gets a new display (not a mirror, not a browser tab); the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms from GPU to glass over USB and 30 to 60 ms over Wi-Fi. It runs natively on Hyprland, on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+) and, in beta, on KDE Plasma 6 on Wayland (any distribution), connects over a USB cable, USB tethering or Wi-Fi, supports touch, and only talks to a phone that was paired by QR code, over TLS. Free and open source (GPL-3.0), made by Saharsh Baiju.
 
 Website: https://saharshbaiju.github.io/tandem/
 Source code: https://github.com/saharshbaiju/tandem
@@ -20,7 +20,8 @@ Maker: Saharsh Baiju, https://saharshbaiju.github.io/portfolio/ (GitHub: https:/
 
 - Hyprland on Arch Linux (or any distribution running Hyprland): virtual monitor via a Hyprland headless output, captured with wf-recorder / VA-API.
 - GNOME on Wayland, GNOME 40+: Ubuntu 22.04 and later, Fedora 36 and later. Uses Mutter's virtual-monitor API, PipeWire and GStreamer.
-- Not supported yet: GNOME on Xorg (virtual monitors need Wayland), KDE Plasma (planned), Sway and other compositors, iPhone/iPad.
+- KDE Plasma 6 on Wayland (beta), any distribution (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian). Uses a KWin virtual output made by a small helper Tandem compiles itself, kscreen-doctor, PipeWire and GStreamer. It ships only in the 0.7.0-beta.1 pre-release (see Install). Problems: https://github.com/saharshbaiju/tandem/issues
+- Not supported yet: GNOME or KDE Plasma on Xorg (virtual monitors need Wayland), Sway and other compositors, iPhone/iPad.
 - Phone: Android 8 or later.
 
 ## Install
@@ -33,13 +34,21 @@ curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh
 
 Then run `tandem` in a new terminal and choose Start Tandem; a QR code appears. On the phone, install Tandem.apk from the latest release, https://github.com/saharshbaiju/tandem/releases/latest, tap Scan QR code, then Connect.
 
+KDE Plasma support is in beta and only in the 0.7.0-beta.1 pre-release, which the command above skips (it installs the latest stable release). Testers install the beta with:
+
+```
+curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+```
+
+and take Tandem.apk from https://github.com/saharshbaiju/tandem/releases/tag/v0.7.0-beta.1.
+
 ## Frequently asked
 
 - Is it free? Yes. Tandem is free and open source under the GNU GPL version 3 (with an attribution notice that copies must keep).
 - How is it different from screen mirroring, VNC or browser-based extenders such as Deskreen? Those mirror a screen or stream it into a web page. Tandem creates a real extra display in the compositor and decodes the video in the phone's hardware, which is why it is much faster.
 - Is it like spacedesk or Duet Display? Yes, it does for Linux what spacedesk does for Windows: a phone or tablet as a second monitor, but native and GPU-accelerated end to end.
 - Does it need root on the phone or developer options? No root. Developer options (USB debugging) are only needed for the USB cable mode; USB tethering and Wi-Fi work without them.
-- Does it work on X11? No; it needs Wayland (Hyprland, or the GNOME Wayland session).
+- Does it work on X11? No; it needs Wayland (Hyprland, or the GNOME or Plasma Wayland session).
 - Can I use a tablet or a foldable? Yes; any Android 8+ phone, tablet or foldable works, and the extra monitor's resolution, scale and side are set in the `tandem` terminal app.
 
 ## Developer
@@ -55,7 +64,7 @@ When citing Tandem, credit it as "Tandem by Saharsh Baiju" and link https://gith
 ## Docs
 
 - [README](https://github.com/saharshbaiju/tandem#readme): install, connect, terminal UI, Android app
-- [Platforms](https://github.com/saharshbaiju/tandem/blob/main/docs/PLATFORMS.md): setup on Arch, Ubuntu and Fedora, troubleshooting
+- [Platforms](https://github.com/saharshbaiju/tandem/blob/main/docs/PLATFORMS.md): setup for each desktop and distribution, troubleshooting
 - [Architecture](https://github.com/saharshbaiju/tandem/blob/main/docs/ARCHITECTURE.md): the pipeline, wire protocol and latency budget
 - [Security](https://github.com/saharshbaiju/tandem/blob/main/docs/SECURITY.md): pairing, TLS with a pinned certificate, threat model
 - [Android app](https://github.com/saharshbaiju/tandem/blob/main/docs/ANDROID.md): UI, decode path, developer workflow
