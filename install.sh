@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Tandem — PC installer: Arch, Fedora, Debian / Ubuntu and their derivatives
 # (CachyOS, EndeavourOS, Kubuntu, KDE neon, Mint…), for Hyprland, GNOME or
-# KDE Plasma (beta).
+# KDE Plasma.
 #
 #   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 #   # or, from a checkout:  ./install.sh
 #   # a specific release, e.g. a beta (pre-releases are never "latest"):
-#   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+#   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0/install.sh | TANDEM_VERSION=v0.7.0 bash
 #
 # Installs the Linux side into ~/.local/share/tandem, puts a `tandem` command in
 # ~/.local/bin (so `tandem` works in any terminal), adds an app-menu entry, and installs the system packages your
@@ -42,12 +42,12 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 # ---- 1. get the files: a local checkout, else the release TANDEM_VERSION
-#         names (a tag such as v0.7.0-beta.1), else the latest release, else
+#         names (a tag such as v0.7.0), else the latest release, else
 #         main. GitHub's releases/latest skips pre-releases, so naming the tag
 #         is how testers install a beta.
 VERSION="${TANDEM_VERSION:-}"
 if [[ -n "$VERSION" && ! "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  warn "TANDEM_VERSION must be a release tag such as v0.7.0-beta.1 (got: $VERSION)"
+  warn "TANDEM_VERSION must be a release tag such as v0.7.0 (got: $VERSION)"
   exit 1
 fi
 SRC=""
@@ -136,13 +136,13 @@ backend="$("$PY" -c 'import core; print(core.Config().resolved_backend() or "")'
 case "$backend" in
   gnome)    say "Desktop: GNOME${WAYLAND_DISPLAY:+ (Wayland)}";;
   hyprland) say "Desktop: Hyprland";;
-  kde)      say "Desktop: KDE Plasma${WAYLAND_DISPLAY:+ (Wayland)} (beta)";;
+  kde)      say "Desktop: KDE Plasma${WAYLAND_DISPLAY:+ (Wayland)}";;
   *)        warn "No supported desktop detected in this session (run $("$PY" -c 'import backends; print(backends.supported_desktops())' 2>/dev/null || echo "Hyprland, GNOME or KDE Plasma"))."
             warn "On Ubuntu, pick \"Ubuntu\" (not \"Ubuntu on Xorg\") on the login screen; on Plasma, \"Plasma (Wayland)\".";;
 esac
 # Why this session can't make a virtual monitor (GNOME or Plasma on X11…), as
-# the TUI's start check says it, and whether this desktop's support is still
-# in beta. Everything is inside the try: a release tarball older than this
+# the TUI's start check says it, and whether this desktop's support is in
+# beta (none is right now). Everything is inside the try: a release tarball older than this
 # script has no backends.module() or backends.beta_notice() yet.
 if [[ -n "$backend" ]]; then
   "$PY" -c '

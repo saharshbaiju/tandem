@@ -6,8 +6,7 @@ Annex-B H.264 byte stream that tandemd parses and broadcasts.
                portal + GStreamer NVENC when Hyprland renders on NVIDIA [Arch]
     gnome    : Mutter ScreenCast virtual monitor + GStreamer/PipeWire [Ubuntu, Fedora]
     kde      : KWin virtual output (tandem-kwin-helper, built by kwin_helper.py)
-               + kscreen-doctor placement + GStreamer/PipeWire [any Plasma 6,
-               beta]
+               + kscreen-doctor placement + GStreamer/PipeWire [any Plasma 6]
 
 Shared helpers (not backends): gstreamer.py (PipeWire -> H.264 through
 gst-launch), layout.py (where the phone's monitor goes), xdph.py (the
@@ -103,9 +102,8 @@ _REGISTRY = {
                    "GNOME / Mutter (virtual monitor + PipeWire)",
                    "GNOME on Wayland (Ubuntu / Fedora)"),
     "kde": Entry("kde", "KdeBackend",
-                 "KDE Plasma / KWin (virtual output + PipeWire, beta)",
-                 "KDE Plasma on Wayland (beta)",
-                 beta_name="KDE Plasma"),
+                 "KDE Plasma / KWin (virtual output + PipeWire)",
+                 "KDE Plasma on Wayland"),
 }
 
 NAMES = tuple(_REGISTRY)

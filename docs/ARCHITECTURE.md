@@ -3,7 +3,7 @@
 This document describes the whole system: how a desktop frame gets from a
 virtual monitor to the phone's screen, the exact bytes sent on the wire, and
 the rules that keep a connection reliable. Setup for each desktop (Hyprland,
-GNOME, KDE Plasma, the last in beta) and distribution is in
+GNOME, KDE Plasma) and distribution is in
 [`PLATFORMS.md`](./PLATFORMS.md). The phone app is covered in
 [`ANDROID.md`](./ANDROID.md).
 
@@ -332,10 +332,11 @@ moves its windows back.
 
 ### Stage 0c: virtual output on KDE Plasma (`backends/kde.py`, `linux/kwin-helper/`)
 
-This backend is a beta in 0.7.0-beta.1. Its registry entry carries `beta_name`, so
-`backends.describe()` and the desktop name say *beta*, and the daemon, the TUI's
-Dependencies screen and the installer print `backends.beta_notice()`, which
-points to the issue tracker.
+This backend shipped as a beta in 0.7.0-beta.1 and is stable since 0.7.0. While
+a backend is in beta, its registry entry carries `beta_name`: `backends.describe()`
+and the desktop name then say *beta*, and the daemon, the TUI's Dependencies
+screen and the installer print `backends.beta_notice()`, which points to the
+issue tracker. No backend sets it now.
 
 KWin creates virtual outputs and streams them to PipeWire through the
 `zkde_screencast_unstable_v1` Wayland protocol, and injects input through
@@ -1067,7 +1068,6 @@ next to each rule explain the details.
   for example by running the GStreamer pipeline in-process.
 - Address discovery (mDNS or broadcast), so a phone finds the computer after
   its address changes without rescanning the QR.
-- KDE Plasma out of beta, after feedback from beta testers.
 - niri, once a niri release can create virtual outputs ([niri pull request
   #3800](https://github.com/niri-wm/niri/pull/3800)).
 - A Sway / wlroots backend.

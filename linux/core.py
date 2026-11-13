@@ -8,7 +8,7 @@ Supported desktops (see backends/), on Arch, Fedora, Debian / Ubuntu and
 their derivatives (package names for each in DEPS):
     Hyprland                      -> hyprland backend
     GNOME on Wayland              -> gnome backend
-    KDE Plasma on Wayland         -> kde backend (beta)
+    KDE Plasma on Wayland         -> kde backend
 
 Anything that differs per desktop is asked of the backend's module hooks
 (backends.module(name), documented in backends/__init__.py), never decided

@@ -23,11 +23,7 @@ from end to end.
 | --- | --- | --- |
 | **Hyprland** | Arch, and anything else running Hyprland | `hyprctl output create headless`, with wf-recorder and VA-API. On NVIDIA, xdg-desktop-portal-hyprland and GStreamer NVENC, zero copy |
 | **GNOME on Wayland** | **Ubuntu 22.04 and newer**, **Fedora 36 and newer**, any GNOME 40 or newer | Mutter's virtual monitor API, PipeWire and GStreamer |
-| **KDE Plasma on Wayland** *(beta)* | Any distribution with **Plasma 6**: Arch, CachyOS, EndeavourOS, Fedora KDE, Kubuntu 25.04 and newer, KDE neon, Debian 13, openSUSE (Plasma 5.27 should work but is untested) | A KWin virtual output made by a small helper Tandem compiles on first start, placed with kscreen-doctor, PipeWire and GStreamer |
-
-**KDE Plasma support is in beta** (0.7.0-beta.1, a pre-release). Install it as shown
-under [Install](#install), and please report what works and what doesn't in
-[GitHub issues](https://github.com/saharshbaiju/tandem/issues).
+| **KDE Plasma on Wayland** | Any distribution with **Plasma 6**: Arch, CachyOS, EndeavourOS, Fedora KDE, Kubuntu 25.04 and newer, KDE neon, Debian 13, openSUSE (Plasma 5.27 should work but is untested) | A KWin virtual output made by a small helper Tandem compiles on first start, placed with kscreen-doctor, PipeWire and GStreamer |
 
 **Touch works too.** Tap, drag, scroll and pinch on the phone to control what is on
 it. Touches go through a virtual touchscreen, so your mouse pointer stays where it
@@ -83,17 +79,7 @@ git checkout, `./install.sh` installs that checkout instead.
 > encoder comes from the `fedora-cisco-openh264` repository, which is enabled by
 > default on Workstation.
 >
-> **KDE Plasma (beta):** KDE support is only in the 0.7.0-beta.1 pre-release so
-> far. The line above installs the latest stable release, so name the beta:
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
-> ```
->
-> Take the matching `Tandem.apk` for the phone from the
-> [0.7.0-beta.1 release](https://github.com/saharshbaiju/tandem/releases/tag/v0.7.0-beta.1).
->
-> Log in to the **Plasma (Wayland)** session, the default on Plasma 6. The
+> **KDE Plasma:** log in to the **Plasma (Wayland)** session, the default on Plasma 6. The
 > installer compiles a small KWin helper (it installs a C compiler and the
 > Wayland development files for that) and registers it with KWin.
 
@@ -231,7 +217,7 @@ python3 tandemd.py --help
 ```
 
 ```
---backend auto|hyprland|gnome|kde        # auto-detected from the session (kde: beta)
+--backend auto|hyprland|gnome|kde        # auto-detected from the session
 --width 2400 --height 1080 --fps 60      # virtual monitor mode
 --side right|left|up|down --scale 1.5    # placement (applied live on SIGUSR1)
 --bitrate 12M --gop 30                   # encoder (Hyprland: GOP is at least 1 s of frames)
@@ -333,7 +319,6 @@ tests/                   unit tests (python3 -m unittest discover -s tests; not 
 
 - RTP over UDP with forward error correction for lossy Wi-Fi (TCP stays for USB)
 - HEVC decoding in the app
-- KDE Plasma out of beta, after feedback from beta testers
 - niri, once a niri release can create virtual outputs (the work is ready and
   waiting on [niri pull request #3800](https://github.com/niri-wm/niri/pull/3800))
 - Sway and other wlroots compositors

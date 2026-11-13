@@ -5,7 +5,7 @@ The daemon picks a **backend** based on the running session:
 | Session | Detected by | Backend |
 | --- | --- | --- |
 | Hyprland | `$HYPRLAND_INSTANCE_SIGNATURE` | `hyprland` |
-| KDE Plasma on Wayland (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian and others) | `$XDG_CURRENT_DESKTOP` contains `KDE`, and `$WAYLAND_DISPLAY` is set | `kde` (beta, see [below](#kde-plasma-beta)) |
+| KDE Plasma on Wayland (Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian and others) | `$XDG_CURRENT_DESKTOP` contains `KDE`, and `$WAYLAND_DISPLAY` is set | `kde` (see [below](#kde-plasma)) |
 | GNOME on Wayland (Ubuntu, Fedora Workstation and similar) | `$XDG_CURRENT_DESKTOP` contains `GNOME`, and `$WAYLAND_DISPLAY` is set | `gnome` |
 | KDE Plasma or GNOME on X11 | `$XDG_CURRENT_DESKTOP` alone | Not supported, because virtual monitors need Wayland. The TUI says so and explains how to switch |
 | Sway and others | None | Not yet. See the roadmap in the README |
@@ -134,20 +134,18 @@ sudo dnf install android-tools             # optional
   Intel) or `gstreamer1-plugins-ugly` (x264). The backend picks the best encoder
   that is available.
 
-## KDE Plasma (beta)
+## KDE Plasma
 
-KDE Plasma support is new in **0.7.0-beta.1** and is a beta: it passes the
-automated tests against real KWin 6.7.5 and 6.8.2 (see *How the KDE backend
-works*).
-The TUI, the installer and the daemon's log say so. Please report what works
-and what doesn't in [GitHub issues](https://github.com/saharshbaiju/tandem/issues),
-with your distribution and the output of `kwin_wayland --version`.
+KDE Plasma support is stable since **0.7.0** (it was a beta in 0.7.0-beta.1).
+It passes the automated tests against real KWin 6.7.5 and 6.8.2 (see *How the
+KDE backend works*) and runs on real Plasma desktops. Report problems in
+[GitHub issues](https://github.com/saharshbaiju/tandem/issues), with your
+distribution and the output of `kwin_wayland --version`.
 
-The beta is a GitHub pre-release, which the default install command skips, so
-name it when installing (the same line on every distribution below):
+The default install command works on every distribution below:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 ```
 
 The sections below list the packages it installs, for installing by hand.

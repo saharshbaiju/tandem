@@ -52,7 +52,7 @@ pairing key, certificate or config.
 | `test_kde_backend.py` | the KDE backend against a fake helper that speaks the real line protocol: setup, retries, capture, touch lines, teardown |
 | `test_kde_kwin_helper.py` | `backends/kwin_helper.py`: paths, the rebuild decision, the desktop entry, and a real build when a compiler and the Wayland headers are installed |
 | `test_system.py` | `backends/system.py`: atomic file replacement, the process behind a UNIX socket, a process's command line and environment from a fake `/proc` |
-| `test_integration.py` | the TUI and installer texts that depend on the backend: touch setup with and without a runnable fix, the Dependencies notes, the KDE Plasma beta labels, `install.sh` syntax and which release it downloads (`TANDEM_VERSION`) |
+| `test_integration.py` | the TUI and installer texts that depend on the backend: touch setup with and without a runnable fix, the Dependencies notes, no backend labelled beta, `install.sh` syntax and which release it downloads (`TANDEM_VERSION`) |
 
 When you add a backend, add its module hooks to the registry tests by
 registering it (they check every entry in `backends.NAMES`), and add tests for

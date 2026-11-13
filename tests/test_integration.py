@@ -1,7 +1,7 @@
 """Tests for the parts outside the backends that depend on which desktop is
 running: the package rows for KDE Plasma (names checked against the
 distributions' repositories), the TUI's touch-setup line and Dependencies
-notes, the desktop list and beta labels in user-facing messages, and
+notes, the desktop list and (no) beta labels in user-facing messages, and
 install.sh's syntax and release download."""
 
 import support  # noqa: F401  (must come first: sys.path + scratch HOME)
@@ -96,22 +96,23 @@ class DesktopListTest(unittest.TestCase):
 
 
 class BetaLabelTest(unittest.TestCase):
-    """KDE Plasma is in beta: every place a user meets the backend says so,
-    and the stable backends say nothing of the kind."""
+    """Every backend is stable since 0.7.0 (KDE Plasma left beta), so no
+    message calls one a beta; the mechanism still works for the next one."""
 
-    def test_kde_is_labelled_beta(self):
-        self.assertIn("beta", backends.describe("kde"))
-        self.assertIn("KDE Plasma on Wayland (beta)",
-                      backends.supported_desktops())
-        notice = backends.beta_notice("kde")
-        self.assertIn("KDE Plasma support is in beta", notice)
-        self.assertIn(backends.ISSUES_URL, notice)
-
-    def test_stable_backends_are_not(self):
-        for name in ("hyprland", "gnome", None, "unknown"):
+    def test_no_backend_is_labelled_beta(self):
+        self.assertNotIn("beta", backends.supported_desktops())
+        for name in (*backends.NAMES, None, "unknown"):
             with self.subTest(name=name):
                 self.assertIsNone(backends.beta_notice(name))
                 self.assertNotIn("beta", backends.describe(name))
+
+    def test_a_beta_entry_gets_a_notice(self):
+        entry = backends.Entry("x", "X", "X backend, beta", "X (beta)",
+                               beta_name="X")
+        with mock.patch.dict(backends._REGISTRY, {"x": entry}):
+            notice = backends.beta_notice("x")
+        self.assertIn("X support is in beta", notice)
+        self.assertIn(backends.ISSUES_URL, notice)
 
 
 class TouchLineTest(unittest.TestCase):
@@ -165,13 +166,8 @@ class TouchLineTest(unittest.TestCase):
 class BackendNotesTest(unittest.TestCase):
     def test_kde_note_mentions_the_helper(self):
         notes = tui.backend_notes("kde")
-        self.assertEqual(len(notes), 2)
+        self.assertEqual(len(notes), 1)
         self.assertIn("KWin helper", notes[0])
-
-    def test_kde_note_says_beta_and_where_to_report(self):
-        beta = tui.backend_notes("kde")[1]
-        self.assertIn("in beta", beta)
-        self.assertIn(backends.ISSUES_URL, beta)
 
     def test_no_notes_for_hyprland_and_gnome(self):
         for backend in ("hyprland", "gnome", None):

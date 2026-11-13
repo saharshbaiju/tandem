@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tandem: use your Android phone as a second monitor on Linux</title>
-<meta name="description" content="Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux (about 30 ms over USB, 30 to 60 ms over Wi-Fi). Free and open source. Works on Hyprland, GNOME and KDE Plasma (in beta), on Arch, Ubuntu, Fedora and more, over USB, USB tethering or Wi-Fi, with touch input.">
+<meta name="description" content="Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux (about 30 ms over USB, 30 to 60 ms over Wi-Fi). Free and open source. Works on Hyprland, GNOME and KDE Plasma, on Arch, Ubuntu, Fedora and more, over USB, USB tethering or Wi-Fi, with touch input.">
 <meta name="theme-color" content="#000000">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="author" content="Saharsh Baiju">
@@ -23,14 +23,14 @@
 <meta property="og:site_name" content="Tandem">
 <meta property="og:url" content="https://saharshbaiju.github.io/tandem/">
 <meta property="og:title" content="Tandem: your Android phone as a second monitor for Linux">
-<meta property="og:description" content="A real, low-latency second monitor from the phone in your pocket. Native on Hyprland, GNOME and KDE Plasma (beta), over USB or Wi-Fi, with touch. Free and open source.">
+<meta property="og:description" content="A real, low-latency second monitor from the phone in your pocket. Native on Hyprland, GNOME and KDE Plasma, over USB or Wi-Fi, with touch. Free and open source.">
 <meta property="og:image" content="https://saharshbaiju.github.io/tandem/assets/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Tandem: your Android phone as a real, low-latency second monitor for Linux.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Tandem: your Android phone as a second monitor for Linux">
-<meta name="twitter:description" content="A real, low-latency second monitor from the phone in your pocket. Hyprland, GNOME and KDE Plasma (beta), USB or Wi-Fi, with touch. Free and open source.">
+<meta name="twitter:description" content="A real, low-latency second monitor from the phone in your pocket. Hyprland, GNOME and KDE Plasma, USB or Wi-Fi, with touch. Free and open source.">
 <meta name="twitter:image" content="https://saharshbaiju.github.io/tandem/assets/og.png">
 
 <!-- Structured data for search engines: what Tandem is and who makes it. -->
@@ -43,13 +43,13 @@
       "@id": "https://saharshbaiju.github.io/tandem/#app",
       "name": "Tandem",
       "alternateName": ["Tandem screen extender", "amVD", "Screen Extender"],
-      "description": "Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The compositor gets a new virtual display; the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms end to end over USB and 30 to 60 ms over Wi-Fi. Works on Hyprland, on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+) and, in beta, on KDE Plasma 6 on Wayland (any distribution), over a USB cable, USB tethering or Wi-Fi, with touch input and an encrypted, QR-paired connection.",
+      "description": "Tandem turns an Android phone or tablet into a real, low-latency second monitor for Linux. The compositor gets a new virtual display; the computer's GPU encodes it as H.264 and the phone decodes it in hardware, about 30 ms end to end over USB and 30 to 60 ms over Wi-Fi. Works on Hyprland, on GNOME on Wayland (Arch, Ubuntu 22.04+, Fedora 36+) and on KDE Plasma 6 on Wayland (any distribution), over a USB cable, USB tethering or Wi-Fi, with touch input and an encrypted, QR-paired connection.",
       "url": "https://saharshbaiju.github.io/tandem/",
       "applicationCategory": "UtilitiesApplication",
       "applicationSubCategory": "Second monitor / screen extender",
-      "operatingSystem": "Linux (Hyprland, GNOME on Wayland, KDE Plasma on Wayland in beta), Android 8+",
+      "operatingSystem": "Linux (Hyprland, GNOME on Wayland, KDE Plasma on Wayland), Android 8+",
       "downloadUrl": "https://github.com/saharshbaiju/tandem/releases/latest/download/Tandem.apk",
-      "softwareVersion": "0.6.2",
+      "softwareVersion": "0.7.0",
       "installUrl": "https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh",
       "softwareHelp": "https://github.com/saharshbaiju/tandem#readme",
       "license": "https://www.gnu.org/licenses/gpl-3.0.html",
@@ -59,7 +59,7 @@
       "featureList": [
         "Extends the Linux desktop onto an Android phone, tablet or foldable as a real monitor (not mirroring)",
         "About 30 ms latency over USB, 30 to 60 ms over Wi-Fi: GPU H.264 encoding, hardware decoding on the phone, no buffering",
-        "Hyprland (Arch) and GNOME on Wayland (Ubuntu, Fedora) backends, and KDE Plasma on Wayland (any distribution) in beta",
+        "Hyprland (Arch) and GNOME on Wayland (Ubuntu, Fedora) backends, and KDE Plasma on Wayland (any distribution)",
         "USB cable (adb), USB tethering or Wi-Fi, lowest on the phone's own hotspot",
         "Touch input: tap, drag, scroll and pinch on the phone",
         "QR-code pairing, TLS encryption with a pinned certificate",
@@ -811,7 +811,7 @@ footer { background: var(--black); }
   </div>
   <div class="facts">
     <div><b>~30 ms</b><span>from your GPU to the phone's glass over USB. About 30 to 60&nbsp;ms on Wi-Fi.</span></div>
-    <div><b>Hyprland, GNOME, KDE</b><span>on Arch, Ubuntu, Fedora and more. KDE Plasma is in beta.</span></div>
+    <div><b>Hyprland, GNOME, KDE</b><span>on Arch, Ubuntu, Fedora, Kubuntu and more.</span></div>
     <div><b>Touch</b><span>Tap, drag and scroll on the phone. Your mouse stays put.</span></div>
     <div><b>Paired + TLS</b><span>Only the phone that scanned your QR code connects.</span></div>
   </div>
@@ -882,9 +882,7 @@ footer { background: var(--black); }
     <h2 class="h2" id="installTitle" data-rv="head">One command.<br>That's the install.</h2>
     <div class="one-cmd" data-rv="row">
       <div class="cmd big"><code><span class="prompt" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash</code><button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash">Copy</button></div>
-      <p>Paste it into a terminal on Ubuntu, Fedora or Arch. It works out what your desktop is missing, asks for your password once, and adds the <b>tandem</b> command. Nothing to compile, nothing to configure. Run it again to update.</p>
-      <p><b>On KDE Plasma?</b> Support is in beta: it's in 0.7.0-beta.1, a pre-release for testers, which the command above skips. Install the beta with the line below on Fedora KDE, Kubuntu, KDE neon, Arch or any Plasma 6 desktop, get the app from the <a href="https://github.com/saharshbaiju/tandem/releases/tag/v0.7.0-beta.1">beta release</a>, and <a href="https://github.com/saharshbaiju/tandem/issues/new">tell me how it went</a>.</p>
-      <div class="cmd"><code><span class="prompt" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash</code><button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash">Copy</button></div>
+      <p>Paste it into a terminal on Ubuntu, Fedora, Arch, Kubuntu or any Plasma 6 desktop. It works out what your desktop is missing, asks for your password once, and adds the <b>tandem</b> command. Nothing to compile, nothing to configure. Run it again to update.</p>
     </div>
     <ol class="install-steps">
       <li data-rv="row">
@@ -951,7 +949,7 @@ footer { background: var(--black); }
     <table class="desk-table">
       <tr data-rv style="--i:0"><th>Hyprland</th><td>Arch, or anything running Hyprland. A headless output becomes the phone's monitor, encoded with NVENC or VA-API.</td></tr>
       <tr data-rv style="--i:1"><th>GNOME on Wayland</th><td>Ubuntu 22.04+, Fedora 36+, any GNOME 40+. Mutter makes the virtual monitor, PipeWire and GStreamer carry it.</td></tr>
-      <tr data-rv style="--i:2"><th>KDE Plasma (beta)</th><td>Plasma 6 on Wayland, on any distribution: Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian. KWin makes the virtual output, PipeWire and GStreamer carry it. In beta: it ships as the 0.7.0-beta.1 pre-release. Problems go to <a href="https://github.com/saharshbaiju/tandem/issues">GitHub issues</a>.</td></tr>
+      <tr data-rv style="--i:2"><th>KDE Plasma</th><td>Plasma 6 on Wayland, on any distribution: Arch, CachyOS, Fedora KDE, Kubuntu, KDE neon, Debian. KWin makes the virtual output, PipeWire and GStreamer carry it. Problems go to <a href="https://github.com/saharshbaiju/tandem/issues">GitHub issues</a>.</td></tr>
       <tr data-rv style="--i:3"><th>Android 8+</th><td>Phones, tablets and foldables. The app decodes in hardware and draws each frame the moment it arrives.</td></tr>
     </table>
   </div>
