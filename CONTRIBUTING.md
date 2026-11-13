@@ -10,7 +10,8 @@ combinations of distro, desktop, GPU and phone, so the details it asks for
 usually decide whether I can reproduce the problem. Please include:
 
 - the output of `tandem --version`
-- your distro, desktop (Hyprland or GNOME) and GPU
+- your distro, desktop (Hyprland, GNOME or KDE Plasma, with its version, e.g.
+  `kwin_wayland --version`) and GPU
 - your phone model and Android version
 - how the phone is connected: USB debugging, USB tethering or Wi-Fi
 - the daemon log from the TUI's live view, and if the phone side is involved,
@@ -34,13 +35,40 @@ it's already planned.
 The repository has two halves that talk over one protocol:
 
 - `linux/` is the daemon, the TUI and the desktop backends, in Python. There is
-  no build step.
+  no build step, except the small C helper for KDE Plasma
+  (`linux/kwin-helper/`), which Tandem compiles itself on first use; `make -C
+  linux/kwin-helper EXTRA_CFLAGS=-Werror` builds it by hand.
 - `android/` is the Kotlin app.
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains how they fit together,
 and [`docs/ANDROID.md`](docs/ANDROID.md) covers the app.
 
-You don't need a spare monitor or even Hyprland or GNOME to work on the app.
+### Unit tests
+
+The Linux side has unit tests in [`tests/`](tests/README.md), using only the
+standard library. They need no compositor, phone or GPU. Run them from the
+repository root before sending a pull request:
+
+```bash
+/usr/bin/python3 -m unittest discover -s tests -v
+```
+
+New backend code comes with tests: parsers and placement planning against
+sample compositor output in `tests/fixtures/`, and the registry tests pick up a
+new backend's hooks by themselves. [`tests/README.md`](tests/README.md) lists
+what each module covers.
+
+A new backend reuses the shared helpers instead of copying another backend's
+code: `backends/gstreamer.py` for the PipeWire to H.264 pipeline (its
+`missing_pipeline_tools()`, `choose_encoder()` and `start_encoder()` are what
+GNOME and KDE call), `backends/layout.py` for where the phone's monitor
+goes and for scale snapping, `backends/system.py` for atomic file writes and
+for asking the compositor's own process about its environment, and
+`uinput_touch.py` for a uinput touchscreen and its one-time udev rule.
+
+### The app without a desktop
+
+You don't need a spare monitor or any supported desktop to work on the app.
 `testsrc.py` streams a test pattern through the real daemon code:
 
 ```bash

@@ -4,14 +4,17 @@
 
 | Piece | Channel | What the user does |
 | --- | --- | --- |
-| PC side (Python, no build step) | `install.sh` from the `main` branch. It downloads the latest release's `tandem-linux.tar.gz`, or the `main` tarball if no release exists yet | `curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh \| bash`, then `tandem` |
+| PC side (Python, no build step) | `install.sh` from the `main` branch. It downloads the latest release's `tandem-linux.tar.gz`, or the `main` tarball if no release exists yet. `TANDEM_VERSION=<tag>` picks a specific release instead (see *Beta releases*) | `curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh \| bash`, then `tandem` |
 | Phone app | GitHub Releases: `Tandem-<version>.apk`, plus the same file as `Tandem.apk`, whose name never changes. The website's Download buttons open the release page, where the file is tapped. Chrome on Android can leave an APK fetched directly through GitHub's redirects stuck at 100 %. The APK is signed with the Tandem release key | Download on the phone, then install |
 | Debug app (for testers) | GitHub Releases: `Tandem-<version>-debug.apk`. Package `io.github.saharshbaiju.tandem.debug`, named *Tandem (debug)* | Installs next to the normal app. Used for logs and testing |
 
 The installer does not depend on the distribution. It asks `linux/core.py` which
 packages are missing for this distribution and desktop, using the same list as the
 TUI's Dependencies screen, and installs them with apt, dnf or pacman. Nothing is
-compiled, so the same tarball works on Ubuntu, Fedora and Arch.
+compiled at release time, so the same tarball works on every distribution. The
+one native piece, the KWin helper for KDE Plasma, ships as C source in
+`linux/kwin-helper/` and is compiled on the user's machine (by the installer, or
+on the daemon's first start).
 
 Verified: `install.sh` on Ubuntu 24.04 in a fresh container installs the packages
 and the `tandem` command, which resolves in a new shell. The GNOME backend streams
@@ -64,13 +67,13 @@ The 0.5.0 release notes describe the rename.
 2. Build and package:
 
    ```bash
-   V=0.6.2
+   V=0.7.0-beta.1
    (cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew assembleRelease assembleDebug)
    mkdir -p dist
    cp android/app/build/outputs/apk/release/app-release.apk dist/Tandem-$V.apk
    cp dist/Tandem-$V.apk dist/Tandem.apk          # the same app under a name that never changes
    cp android/app/build/outputs/apk/debug/app-debug.apk dist/Tandem-$V-debug.apk
-   tar --exclude=__pycache__ -czf dist/tandem-linux.tar.gz linux LICENSE NOTICE
+   tar --exclude=__pycache__ --exclude=linux/kwin-helper/build -czf dist/tandem-linux.tar.gz linux LICENSE NOTICE
    (cd dist && sha256sum Tandem-$V.apk Tandem.apk Tandem-$V-debug.apk tandem-linux.tar.gz > SHA256SUMS)
    ```
 
@@ -83,8 +86,31 @@ The 0.5.0 release notes describe the rename.
        --title "Tandem $V" --notes-file <notes>
    ```
 
-`install.sh` always fetches `releases/latest/download/tandem-linux.tar.gz`. A new
-release is therefore picked up by running the install command again.
+`install.sh` fetches `releases/latest/download/tandem-linux.tar.gz` unless
+`TANDEM_VERSION` names a tag. A new release is therefore picked up by running
+the install command again.
+
+## Beta releases
+
+A beta (`V=0.7.0-beta.1`, tag `v0.7.0-beta.1`) is built and tagged the same
+way, but published as a GitHub **pre-release**: add `--prerelease` to
+`gh release create`. GitHub's `releases/latest` skips pre-releases, so the
+website's Download buttons, the README's install line and plain `install.sh`
+keep giving everyone the last stable release. Testers install the beta by
+naming its tag, which makes `install.sh` download that release's
+`tandem-linux.tar.gz` (and stop with an error, rather than fall back, if the
+tag has none):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+```
+
+Fetch `install.sh` from the tag, as above, so the installer is the one that
+shipped with the release it installs (older copies of `install.sh` ignore
+`TANDEM_VERSION` and would install the latest stable release). Testers take the
+phone app from the pre-release's page (`releases/tag/v0.7.0-beta.1`), which the
+installer prints at the end. Android orders versions by `versionCode`, so a
+beta still needs its own, higher `versionCode`.
 
 ## Planned distribution channels
 

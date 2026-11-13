@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Tandem — PC installer (Ubuntu / Fedora / Arch).
+# Tandem — PC installer: Arch, Fedora, Debian / Ubuntu and their derivatives
+# (CachyOS, EndeavourOS, Kubuntu, KDE neon, Mint…), for Hyprland, GNOME or
+# KDE Plasma (beta).
 #
 #   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
 #   # or, from a checkout:  ./install.sh
+#   # a specific release, e.g. a beta (pre-releases are never "latest"):
+#   curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
 #
 # Installs the Linux side into ~/.local/share/tandem, puts a `tandem` command in
 # ~/.local/bin (so `tandem` works in any terminal), adds an app-menu entry, and installs the system packages your
-# desktop needs (asks for sudo once). Re-run any time to update.
+# desktop needs (asks for sudo once). On KDE Plasma it also builds Tandem's small
+# KWin helper and registers it with KWin. Re-run any time to update.
 # Uninstall: ./install.sh --uninstall
 set -euo pipefail
 
@@ -19,7 +24,15 @@ say()  { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  rm -rf "$DEST" "$BIN/tandem" "$APPS/tandem.desktop"
+  # $DEST also holds the built KWin helper (tandem/kwin-helper/). Its desktop
+  # entry is the one other file Tandem writes, in KWin's own data directory,
+  # which backends/kwin_helper.py knows how to find; the rm below covers an
+  # install too old (or too broken) to ask.
+  if [[ -f "$DEST/linux/backends/kwin_helper.py" ]] && command -v python3 >/dev/null; then
+    (cd "$DEST/linux" && python3 -c 'from backends import kwin_helper; kwin_helper.remove_installed()') 2>/dev/null \
+      || warn "Couldn't remove the KWin helper's desktop entry (tandem-kwin-helper.desktop); delete it by hand"
+  fi
+  rm -rf "$DEST" "$BIN/tandem" "$APPS/tandem.desktop" "$APPS/tandem-kwin-helper.desktop"
   say "Removed Tandem (settings kept in ~/.config/tandem)."
   if [[ -e /etc/udev/rules.d/70-tandem-uinput.rules ]]; then
     say "Touch-input access rule left in place; remove it with:"
@@ -28,20 +41,39 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
-# ---- 1. get the files: a local checkout, else the latest release, else main
+# ---- 1. get the files: a local checkout, else the release TANDEM_VERSION
+#         names (a tag such as v0.7.0-beta.1), else the latest release, else
+#         main. GitHub's releases/latest skips pre-releases, so naming the tag
+#         is how testers install a beta.
+VERSION="${TANDEM_VERSION:-}"
+if [[ -n "$VERSION" && ! "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  warn "TANDEM_VERSION must be a release tag such as v0.7.0-beta.1 (got: $VERSION)"
+  exit 1
+fi
 SRC=""
 here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [[ -n "$here" && -f "$here/linux/tandemd.py" ]]; then
   SRC="$here/linux"
   say "Installing from this checkout ($here)"
+  [[ -z "$VERSION" ]] || warn "TANDEM_VERSION is ignored when installing from a checkout"
 else
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-  url="https://github.com/$REPO/releases/latest/download/tandem-linux.tar.gz"
-  # A 404 here just means no release has the tarball yet: quietly fall back.
-  if ! curl -fsSL "$url" -o "$tmp/tandem.tar.gz" 2>/dev/null; then
-    url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
-    say "No release found; using the main branch"
-    curl -fsSL "$url" -o "$tmp/tandem.tar.gz"
+  if [[ -n "$VERSION" ]]; then
+    # No fallback: installing anything but the release asked for would hide
+    # a typo in the tag.
+    url="https://github.com/$REPO/releases/download/$VERSION/tandem-linux.tar.gz"
+    if ! curl -fsSL "$url" -o "$tmp/tandem.tar.gz"; then
+      warn "Release $VERSION has no tandem-linux.tar.gz; see https://github.com/$REPO/releases"
+      exit 1
+    fi
+  else
+    url="https://github.com/$REPO/releases/latest/download/tandem-linux.tar.gz"
+    # A 404 here just means no release has the tarball yet: quietly fall back.
+    if ! curl -fsSL "$url" -o "$tmp/tandem.tar.gz" 2>/dev/null; then
+      url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
+      say "No release found; using the main branch"
+      curl -fsSL "$url" -o "$tmp/tandem.tar.gz"
+    fi
   fi
   tar -xzf "$tmp/tandem.tar.gz" -C "$tmp"
   SRC="$(dirname "$(find "$tmp" -name tandemd.py -path '*linux*' | head -1)")"
@@ -53,6 +85,7 @@ mkdir -p "$DEST" "$BIN" "$APPS"
 rm -rf "$DEST/linux"
 cp -r "$SRC" "$DEST/linux"
 find "$DEST/linux" -name __pycache__ -prune -exec rm -rf {} +
+rm -rf "$DEST/linux/kwin-helper/build"   # a hand-made `make` build in a checkout
 # The license travels with the program (GPL-3.0; NOTICE has the extra terms).
 for f in LICENSE NOTICE; do
   if [[ -f "$SRC/../$f" ]]; then cp "$SRC/../$f" "$DEST/$f"; fi
@@ -101,11 +134,56 @@ fi
 
 backend="$("$PY" -c 'import core; print(core.Config().resolved_backend() or "")')"
 case "$backend" in
-  gnome)    say "Desktop: GNOME (Wayland)";;
+  gnome)    say "Desktop: GNOME${WAYLAND_DISPLAY:+ (Wayland)}";;
   hyprland) say "Desktop: Hyprland";;
-  *)        warn "No supported desktop detected in this session (GNOME on Wayland or Hyprland)."
-            warn "On Ubuntu, pick \"Ubuntu\" (not \"Ubuntu on Xorg\") on the login screen.";;
+  kde)      say "Desktop: KDE Plasma${WAYLAND_DISPLAY:+ (Wayland)} (beta)";;
+  *)        warn "No supported desktop detected in this session (run $("$PY" -c 'import backends; print(backends.supported_desktops())' 2>/dev/null || echo "Hyprland, GNOME or KDE Plasma"))."
+            warn "On Ubuntu, pick \"Ubuntu\" (not \"Ubuntu on Xorg\") on the login screen; on Plasma, \"Plasma (Wayland)\".";;
 esac
+# Why this session can't make a virtual monitor (GNOME or Plasma on X11…), as
+# the TUI's start check says it, and whether this desktop's support is still
+# in beta. Everything is inside the try: a release tarball older than this
+# script has no backends.module() or backends.beta_notice() yet.
+if [[ -n "$backend" ]]; then
+  "$PY" -c '
+import sys
+try:
+    import backends
+    hooks = backends.module(sys.argv[1])
+    lines = hooks.session_problem() if hooks else None
+except Exception:
+    lines = None
+for line in lines or []:
+    print(line)' "$backend" | while IFS= read -r line; do warn "$line"; done || true
+  beta_notice="$("$PY" -c '
+import sys
+try:
+    import backends
+    print(backends.beta_notice(sys.argv[1]) or "")
+except Exception:
+    pass' "$backend" || true)"
+  [[ -z "$beta_notice" ]] || say "Note: $beta_notice"
+fi
+
+# ---- 3b. KDE Plasma: build the KWin helper and register it with KWin. The
+#          daemon would do both on its first start; doing it now surfaces a
+#          missing compiler here, and lets KWin 6.7 and older read the helper's
+#          desktop entry before Tandem first needs it.
+if [[ "$backend" == "kde" ]]; then
+  if "$PY" -c '
+import sys
+from backends import kwin_helper
+try:
+    kwin_helper.ensure_desktop_entry(kwin_helper.ensure_built())
+except RuntimeError as error:
+    print(error, file=sys.stderr)
+    sys.exit(1)'; then
+    say "KWin helper ready ($("$PY" -c 'from backends import kwin_helper; print(kwin_helper.helper_path())'))"
+  else
+    warn "Couldn't build the KWin helper (the reason is above). Tandem needs it on KDE Plasma:"
+    warn "install what 'tandem' → Dependencies lists as missing; the next start builds it."
+  fi
+fi
 
 # ---- 4. firewall: the phone connects in on TCP 5000 over Wi-Fi / tethering
 #         (the USB-debugging path goes through adb on 127.0.0.1 and needs nothing)
@@ -129,26 +207,40 @@ sys.exit(subprocess.run(f["fix"]).returncode if f else 0)'; then
   fi
 fi
 
-# ---- 5. touch input (Hyprland only): the phone's touches are replayed through a
-#         virtual touchscreen in /dev/uinput, which is root-only on most distros.
-#         A udev rule grants it to whoever is logged in at the seat (uaccess).
-#         GNOME needs nothing: Mutter's RemoteDesktop API injects the touches.
-TOUCH_FIX="$("$PY" -c '
+# ---- 5. touch input: one-time setup, as the backend reports it
+#         (core.touch_setup_check -> the backend's touch_setup_problem hook).
+#         Hyprland replays touches through a virtual touchscreen in
+#         /dev/uinput, root-only on most distros: a udev rule grants it to
+#         whoever is logged in at the seat (uaccess; asks for sudo). GNOME and
+#         KDE Plasma inject touches through the compositor and need nothing.
+# Prints "<problem><TAB><fix>" (fix empty when there is nothing to run), or
+# nothing when touch needs no setup.
+TOUCH="$("$PY" -c '
 import core, shlex
 t = core.touch_setup_check(core.Config())
-print(shlex.join(t["fix"]) if t and t["fix"] else "")')"
-if [[ -n "$TOUCH_FIX" ]]; then
-  warn "Touch input needs access to /dev/uinput (one-time setup, asks for sudo):"
-  warn "  $TOUCH_FIX"
-  if [[ -r /dev/tty ]]; then
-    read -r -p "Set it up now? [Y/n] " ans </dev/tty || ans=n
-    if [[ ! "$ans" =~ ^[Nn] ]]; then
-      if "$PY" -c 'import core, subprocess, sys
+if t:
+    print(t["problem"] + "\t" + (shlex.join(t["fix"]) if t["fix"] else ""))' || true)"
+if [[ -n "$TOUCH" ]]; then
+  problem="${TOUCH%%$'\t'*}"; fix="${TOUCH#*$'\t'}"
+  if [[ -z "$fix" ]]; then
+    warn "Touch input: $problem"
+  else
+    if [[ "$fix" == sudo\ * ]]; then
+      warn "Touch input needs one-time setup ($problem; asks for sudo):"
+    else
+      warn "Touch input needs one-time setup ($problem):"
+    fi
+    warn "  $fix"
+    if [[ -r /dev/tty ]]; then
+      read -r -p "Set it up now? [Y/n] " ans </dev/tty || ans=n
+      if [[ ! "$ans" =~ ^[Nn] ]]; then
+        if "$PY" -c 'import core, subprocess, sys
 t = core.touch_setup_check(core.Config())
-sys.exit(subprocess.run(t["fix"]).returncode if t else 0)'; then
-        say "Touch input ready"
-      else
-        warn "Couldn't set up touch input; run 'tandem', choose Start Tandem and press t"
+sys.exit(subprocess.run(t["fix"]).returncode if t and t["fix"] else 0)'; then
+          say "Touch input ready"
+        else
+          warn "Couldn't set up touch input; run 'tandem', choose Start Tandem and press t"
+        fi
       fi
     fi
   fi
@@ -169,4 +261,8 @@ if (( ! on_path )); then
 fi
 say "Done. Open a new terminal and run:  tandem"
 (( on_path )) || say "(or right now:  $BIN/tandem)"
-say "Phone app: https://github.com/$REPO/releases/latest  (tap Tandem.apk)"
+if [[ -n "$VERSION" ]]; then
+  say "Phone app: https://github.com/$REPO/releases/tag/$VERSION  (tap Tandem.apk)"
+else
+  say "Phone app: https://github.com/$REPO/releases/latest  (tap Tandem.apk)"
+fi

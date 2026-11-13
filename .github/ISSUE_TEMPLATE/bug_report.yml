@@ -21,7 +21,7 @@ body:
     attributes:
       label: Tandem version
       description: Output of `tandem --version`, and the app version if it differs.
-      placeholder: "0.6.2"
+      placeholder: "0.7.0-beta.1"
     validations:
       required: true
 
@@ -40,6 +40,7 @@ body:
       options:
         - Hyprland
         - GNOME (Wayland)
+        - KDE Plasma (Wayland, beta)
         - Other
     validations:
       required: true

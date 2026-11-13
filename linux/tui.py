@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-tui.py - terminal UI for Tandem (Hyprland on Arch, GNOME on
-Ubuntu / Fedora).
+tui.py - terminal UI for Tandem (Hyprland, GNOME or KDE Plasma, on Arch,
+Fedora, Debian / Ubuntu and their derivatives).
 
 A self-contained curses app (no third-party deps) that:
   * checks/installs required packages for your distro + desktop on first run,
@@ -108,9 +108,11 @@ LIVE_KEYS = ("side", "scale")
 class Stream:
     """Owns the streaming daemon so it survives leaving the live view.
 
-    The daemon is launched with --keep-output, so the virtual monitor (and the
-    windows on it) persist across restarts triggered by realtime config edits.
-    The monitor is only removed on an explicit disconnect.
+    The daemon is launched with --keep-output. Where the backend honors it
+    (backend.honors_keep_output: Hyprland), the virtual monitor and the
+    windows on it persist across restarts triggered by realtime config edits
+    and are only removed on an explicit disconnect. Elsewhere (GNOME, KDE)
+    the monitor dies with the daemon, and a restart recreates it.
     """
 
     def __init__(self, cfg):
@@ -209,7 +211,8 @@ class Stream:
         self.stop.set()
 
     def _stop_daemon(self):
-        """Terminate the daemon; the virtual output stays (--keep-output).
+        """Terminate the daemon. The virtual output stays where the backend
+        honors --keep-output (Hyprland); elsewhere it goes with the daemon.
 
         The daemon needs up to ~3.5 s (encoder stop + touch device teardown),
         so the grace period is generous: SIGKILLing it early is what used to
@@ -243,14 +246,15 @@ class Stream:
         """Full teardown: stop the daemon and remove the virtual monitor.
 
         Strictly in that order — remove_virtual_output also makes sure no
-        capture is left on the monitor before Hyprland removes it. Takes a few
+        capture is left on the monitor before the compositor removes it (on
+        Hyprland; elsewhere the monitor went with the daemon). Takes a few
         seconds, so `win` (if given) shows progress instead of a frozen UI.
         """
         if win is not None:
             show_busy(win, "Disconnecting… stopping the stream")
         self._stop_daemon()
         if win is not None:
-            show_busy(win, f"Disconnecting… removing {self.cfg.output}")
+            show_busy(win, "Disconnecting… removing the virtual monitor")
         core.remove_virtual_output(self.cfg)
         self.needs_teardown = False
 
@@ -345,6 +349,19 @@ def main_menu(win, cfg, stream):
 # dependencies screen
 # --------------------------------------------------------------------------- #
 
+def backend_notes(backend):
+    """Lines shown under the Dependencies list: what the package rows alone
+    can't say for this backend."""
+    notes = []
+    if backend == "kde":
+        notes.append("KDE: the compiler and Wayland rows build Tandem's small "
+                     "KWin helper (once, and after updates).")
+    beta_notice = backends.beta_notice(backend)
+    if beta_notice:
+        notes.append(f"Note: {beta_notice}.")
+    return notes
+
+
 def deps_screen(win, cfg):
     backend = cfg.resolved_backend()
     dist = core.distro()
@@ -371,23 +388,31 @@ def deps_screen(win, cfg):
                    curses.color_pair(4))
             addstr(win, row + 1, 2, "Press 'i' to run it now.",
                    curses.color_pair(5))
+            row += 2
             if dist == "fedora":
-                addstr(win, row + 2, 2,
+                addstr(win, row, 2,
                        "Fedora: openh264 comes from the fedora-cisco-openh264 "
                        "repo (enabled by default on Workstation).",
                        curses.color_pair(5))
+                row += 1
             if not core.system_python():
-                addstr(win, row + 3, 2,
+                addstr(win, row, 2,
                        f"Note: running under {sys.executable}; distro packages "
                        "install into /usr/bin/python3. Start with 'tandem'.",
                        curses.color_pair(4))
+                row += 1
         elif missing:
             addstr(win, row, 2, f"Missing: {', '.join(missing)} "
                                 "(unknown distro — install them manually)",
                    curses.color_pair(4))
+            row += 1
         else:
             addstr(win, row, 2, "All dependencies satisfied.",
                    curses.color_pair(3))
+            row += 1
+        for note in backend_notes(backend):
+            addstr(win, row, 2, note, curses.color_pair(5))
+            row += 1
         footer(win, "i install missing   r refresh   Esc back")
         win.refresh()
 
@@ -413,6 +438,8 @@ def hardware_screen(win, cfg):
         from backends import hyprland as hb
         enc = hb.pick_encoder("auto", core.detect_va_device())[3]
     else:
+        # Every other backend encodes a PipeWire node with gst-launch
+        # (backends/gstreamer.py).
         enc = "GStreamer (best of vah264enc / x264enc / openh264enc)"
     phone = core.detect_phone_size(landscape=True)
     ip = core.lan_ip()
@@ -486,7 +513,7 @@ def configure_screen(win, cfg, live=False):
     cfg = copy.copy(cfg)            # edit a copy so cancel truly discards
     # each entry: (label, kind, key, choices)
     rows = [
-        ("Desktop backend", "choice", "backend", ["auto", "hyprland", "gnome"]),
+        ("Desktop backend", "choice", "backend", ["auto"] + list(backends.NAMES)),
         ("Screen side", "choice", "side", ["right", "left", "up", "down"]),
         ("Resolution", "resolution", None, None),
         ("Refresh (FPS)", "choice", "fps", [30, 60, 120]),
@@ -594,17 +621,25 @@ def _apply_resolution(win, cfg, res_idx):
 # start / live status screen
 # --------------------------------------------------------------------------- #
 
+def session_problem(backend):
+    """Lines saying why this session can't run `backend` (GNOME on X11), or
+    None. Asked of the backend itself; a failing hook doesn't block."""
+    hooks = backends.module(backend)
+    try:
+        return hooks.session_problem() if hooks else None
+    except Exception:
+        return None
+
+
 def preflight(win, cfg):
     """Refuse to start (with a clear reason) when the desktop can't work."""
     backend = cfg.resolved_backend()
     problem = None
     if backend is None:
         problem = ["This desktop isn't supported.",
-                   "Run Hyprland, or GNOME on Wayland (Ubuntu / Fedora)."]
-    elif backend == "gnome" and not backends.gnome.is_gnome_wayland():
-        problem = ["GNOME is running on X11 — virtual monitors need Wayland.",
-                   "Log out, click the gear on the login screen and pick "
-                   "'Ubuntu' / 'GNOME' (not 'on Xorg')."]
+                   f"Run {backends.supported_desktops()}."]
+    elif (unusable := session_problem(backend)):
+        problem = unusable
     elif core.missing_packages(backend, required_only=True):
         deps_screen(win, cfg)
         if core.missing_packages(backend, required_only=True):
@@ -619,9 +654,15 @@ def preflight(win, cfg):
             problem = ["Couldn't set up the encrypted connection.", str(e)]
     if problem:
         header(win)
+        _h, w = win.getmaxyx()
+        y = 3
+        # Wrapped, not clipped: the list of supported desktops alone is
+        # wider than an 80-column terminal.
         for i, line in enumerate(problem):
-            addstr(win, 3 + i, 2, line, curses.color_pair(4 if i == 0 else 5))
-        addstr(win, 4 + len(problem), 2, "Press any key to return.",
+            for piece in textwrap.wrap(line, max(20, w - 4)) or [""]:
+                addstr(win, y, 2, piece, curses.color_pair(4 if i == 0 else 5))
+                y += 1
+        addstr(win, y + 1, 2, "Press any key to return.",
                curses.color_pair(5))
         win.refresh()
         win.getch()
@@ -667,13 +708,32 @@ def touch_line(cfg, stream, touch_setup):
     if not cfg.touch:
         return "off (Configure → Touch input)", 5
     if touch_setup:
-        return f"needs one-time setup ({touch_setup['problem']}) — press t", 4
+        if touch_setup["fix"]:
+            return (f"needs one-time setup ({touch_setup['problem']}) — "
+                    "press t", 4)
+        return f"needs one-time setup ({touch_setup['problem']})", 4
     status = stream.touch_status
     if status.startswith("ready"):
         return "on — paired phones can tap", 3
     if status:
         return status, 4
     return "starting…", 5
+
+
+def touch_row(cfg, stream, touch_setup, width):
+    """(row text, color pair, detail lines) for the Touch row in `width`
+    columns. A setup problem too long for the row moves to wrapped detail
+    lines, drawn lower down, so the reason and the 'press t' hint are never
+    cut off."""
+    text, color = touch_line(cfg, stream, touch_setup)
+    row = f"Touch   : {text}"
+    if len(row) <= width or not cfg.touch or not touch_setup:
+        return row[:width], color, []
+    short = ("needs one-time setup (see below)"
+             + (" — press t" if touch_setup["fix"] else ""))
+    details = textwrap.wrap(f"touch setup: {touch_setup['problem']}",
+                            max(20, width))
+    return f"Touch   : {short}"[:width], color, details
 
 
 def live_screen(win, stream):
@@ -737,9 +797,9 @@ def live_screen(win, stream):
                 qr_uri = uri
             qr_x = 64 if w > 64 + len(qr_lines[0]) else 2
             left_w = (qr_x - 4) if qr_x > 2 else w - 6   # keep text off the QR
-            touch_text, touch_color = touch_line(cfg, stream, touch_setup)
-            addstr(win, 8, 2, f"Touch   : {touch_text}"[:left_w],
-                   curses.color_pair(touch_color))
+            touch_text, touch_color, touch_details = touch_row(
+                cfg, stream, touch_setup, left_w)
+            addstr(win, 8, 2, touch_text, curses.color_pair(touch_color))
             qr_y = 3 if qr_x > 2 else 10
             if qr_x > 2:
                 addstr(win, 9, 2, "Scan the QR code with the phone app  →",
@@ -768,6 +828,9 @@ def live_screen(win, stream):
             y = code_y + 2
             if not live and not exited:
                 y = draw_checks(win, y, left_w, fw, usb) + 1
+            for line in touch_details:
+                addstr(win, y, 2, line, curses.color_pair(4))
+                y += 1
 
             for line in textwrap.wrap(stream.notice, max(20, left_w)):
                 addstr(win, y, 2, line, curses.color_pair(5))
@@ -785,7 +848,8 @@ def live_screen(win, stream):
                         "monitor" + ("   f open firewall" if fw and not live
                                      else "")
                         + ("   u fix USB link" if usb[2] and not live else "")
-                        + ("   t set up touch" if touch_setup else "")
+                        + ("   t set up touch"
+                           if touch_setup and touch_setup["fix"] else "")
                         + ("   — daemon stopped, any key" if exited else ""))
             win.refresh()
 
@@ -798,7 +862,8 @@ def live_screen(win, stream):
                     # nft/iptables: not re-detectable, so remember it
                     fw_fixed_port, fw = cfg.port, None
                 continue
-            if c in (ord("t"), ord("T")) and touch_setup:
+            if c in (ord("t"), ord("T")) and touch_setup and touch_setup["fix"]:
+                # run_shell shows the command (and any sudo) as it runs.
                 if run_shell(win, touch_setup["fix"]) == 0:
                     stream.restart(cfg)           # daemon re-creates the device
                 checked = 0.0

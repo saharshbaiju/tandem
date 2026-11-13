@@ -23,6 +23,11 @@ from end to end.
 | --- | --- | --- |
 | **Hyprland** | Arch, and anything else running Hyprland | `hyprctl output create headless`, with wf-recorder and VA-API. On NVIDIA, xdg-desktop-portal-hyprland and GStreamer NVENC, zero copy |
 | **GNOME on Wayland** | **Ubuntu 22.04 and newer**, **Fedora 36 and newer**, any GNOME 40 or newer | Mutter's virtual monitor API, PipeWire and GStreamer |
+| **KDE Plasma on Wayland** *(beta)* | Any distribution with **Plasma 6**: Arch, CachyOS, EndeavourOS, Fedora KDE, Kubuntu 25.04 and newer, KDE neon, Debian 13, openSUSE (Plasma 5.27 should work but is untested) | A KWin virtual output made by a small helper Tandem compiles on first start, placed with kscreen-doctor, PipeWire and GStreamer |
+
+**KDE Plasma support is in beta** (0.7.0-beta.1, a pre-release). Install it as shown
+under [Install](#install), and please report what works and what doesn't in
+[GitHub issues](https://github.com/saharshbaiju/tandem/issues).
 
 **Touch works too.** Tap, drag, scroll and pinch on the phone to control what is on
 it. Touches go through a virtual touchscreen, so your mouse pointer stays where it
@@ -31,14 +36,18 @@ Pair by scanning the QR code shown in the terminal. Connect over a **USB cable**
 (through adb, automatically when USB debugging is on), **USB tethering** (no USB
 debugging needed), or **Wi-Fi**.
 
-**Your monitors stay as they are.** Tandem never modifies your existing monitors:
-it adds the phone beside them and only ever changes its own virtual monitor
-and, on Hyprland, the one workspace it gives the phone.
+**Your monitors stay as they are.** Tandem adds the phone beside your existing
+monitors and only ever changes its own virtual monitor and, on Hyprland, the one
+workspace it gives the phone. One exception: KWin does not allow negative
+positions, so on KDE Plasma putting the phone on the left or above shifts your
+monitors right or down by the phone's size. Their modes, scales and arrangement
+stay the same, and they move back when the phone moves back or goes away.
 
 ## Documentation
 
-- [`docs/PLATFORMS.md`](docs/PLATFORMS.md): install and setup on Arch, Ubuntu and
-  Fedora, how the GNOME backend works, and troubleshooting.
+- [`docs/PLATFORMS.md`](docs/PLATFORMS.md): install and setup for each desktop and
+  distribution (Hyprland, GNOME, KDE Plasma), how the GNOME and KDE backends
+  work, and troubleshooting.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the whole pipeline, the wire
   protocol, the reliability rules, and the latency budget.
 - [`docs/ANDROID.md`](docs/ANDROID.md): the phone app, covering the UI, its
@@ -54,7 +63,7 @@ and, on Hyprland, the one workspace it gives the phone.
 
 ## Install
 
-### On the computer (Ubuntu, Fedora, Arch)
+### On the computer (Arch, Fedora, Ubuntu, Debian and their derivatives)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh | bash
@@ -73,6 +82,20 @@ git checkout, `./install.sh` installs that checkout instead.
 > default. On Ubuntu, choose "Ubuntu", not "Ubuntu on Xorg". On Fedora, the H.264
 > encoder comes from the `fedora-cisco-openh264` repository, which is enabled by
 > default on Workstation.
+>
+> **KDE Plasma (beta):** KDE support is only in the 0.7.0-beta.1 pre-release so
+> far. The line above installs the latest stable release, so name the beta:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/saharshbaiju/tandem/v0.7.0-beta.1/install.sh | TANDEM_VERSION=v0.7.0-beta.1 bash
+> ```
+>
+> Take the matching `Tandem.apk` for the phone from the
+> [0.7.0-beta.1 release](https://github.com/saharshbaiju/tandem/releases/tag/v0.7.0-beta.1).
+>
+> Log in to the **Plasma (Wayland)** session, the default on Plasma 6. The
+> installer compiles a small KWin helper (it installs a C compiler and the
+> Wayland development files for that) and registers it with KWin.
 
 ### On the phone (Android 8 and newer)
 
@@ -112,7 +135,8 @@ phone, open it, and allow installs from your browser when asked.
    your extended desktop.
 4. Touch the phone's screen to use it. On **Hyprland**, touch needs a one-time
    permission for `/dev/uinput`. The installer offers to set it up, or you can press
-   **t** in the live view. On **GNOME**, nothing needs to be set up.
+   **t** in the live view. On **GNOME** and **KDE Plasma**, nothing needs to be set
+   up.
 
 The phone's stock camera works too. Point it at the QR code, and it opens a
 `tandem://` link in the app, which asks you to confirm the computer.
@@ -130,10 +154,11 @@ the same QR code and runs the daemon in the foreground.
 ## How it works
 
 ```
-virtual monitor (Hyprland headless output / Mutter virtual monitor)
+virtual monitor (Hyprland headless output / Mutter virtual monitor /
+                 KWin virtual output)
         │  zero-copy capture
    H.264 encode on the compositor's GPU (NVENC / VA-API, x264 / openh264 fallback;
-                GStreamer VA / x264 / openh264 on GNOME)
+                GStreamer VA / x264 / openh264 on GNOME and KDE)
         │  no B-frames, one slice per frame, CBR with a 2-frame buffer
    tandemd.py   splits NAL units, caches the current GOP, one I/O
         │         thread per phone, 1 s heartbeats, keyframe on request (KEYQ),
@@ -144,7 +169,8 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor)
    Android app → MediaCodec → Surface            │ touches, keyframe requests
                 hardware decode, rendered on arrival    (paired phones only)
                                                  │
-   phone_input.py → virtual touchscreen: uinput (Hyprland) / Mutter RemoteDesktop (GNOME)
+   phone_input.py → virtual touchscreen: uinput (Hyprland) /
+                    Mutter RemoteDesktop (GNOME) / KWin fake input (KDE)
 ```
 
 Target latency from glass to glass is about **25 to 45 ms** over USB and about
@@ -182,7 +208,7 @@ tandem
   the pairing **QR code**, the plain addresses, the touch status and the daemon log.
   `q` returns to the menu and keeps the stream running. `d` disconnects and removes
   the monitor.
-- **Configure** sets the desktop backend (auto, hyprland or gnome), the screen
+- **Configure** sets the desktop backend (auto, hyprland, gnome or kde), the screen
   **side** (left, right, up or down), the **resolution** (presets, or *Match connected
   phone* through adb), the **FPS**, the desktop **scale**, the **quality** (bitrate),
   the keyframe interval, the **preferred link** (which address comes first in the
@@ -205,15 +231,16 @@ python3 tandemd.py --help
 ```
 
 ```
---backend auto|hyprland|gnome            # auto-detected from the session
+--backend auto|hyprland|gnome|kde        # auto-detected from the session (kde: beta)
 --width 2400 --height 1080 --fps 60      # virtual monitor mode
 --side right|left|up|down --scale 1.5    # placement (applied live on SIGUSR1)
 --bitrate 12M --gop 30                   # encoder (Hyprland: GOP is at least 1 s of frames)
---encoder auto|vah264enc|x264enc|…       # GNOME: GStreamer element to use
+--encoder auto|vah264enc|x264enc|…       # GNOME, KDE: GStreamer element to use
 --encoder auto|h264_nvenc|h264_vaapi|libx264|libopenh264  # Hyprland: compositor GPU, CPU fallback
 --device /dev/dri/renderD128             # Hyprland: VA-API node (h264_vaapi)
 --host 0.0.0.0 --port 5000               # default: every interface, IPv4 and IPv6
 --keep-output                            # Hyprland: keep the monitor when the daemon exits
+                                         #   (GNOME, KDE: it always goes with the daemon)
 --parent-pid PID                         # stop, and remove the monitor, when PID exits
 --pairing-key-file ~/.config/tandem/pairing-key   # phones must prove this key (default)
 --tls-dir ~/.config/tandem/tls                    # TLS certificate (default; created if missing)
@@ -248,6 +275,7 @@ python3 linux/testsrc.py --width 2400 --height 1080   # fake desktop, real daemo
 python3 linux/testsrc.py --log-touch                  # …and print the touches it receives
 adb shell am start -a android.intent.action.VIEW -d "'tandem://c?h=10.0.2.2&p=5000'"   # emulator
 adb logcat -s StreamSession
+/usr/bin/python3 -m unittest discover -s tests -v     # unit tests for linux/ (no compositor needed)
 ```
 
 `testsrc.py` streams a test pattern through the real broadcaster without creating a
@@ -268,10 +296,20 @@ linux/
   secure_link.py        TLS certificate, pairing key, handshake, lock-out
   phone_input.py        what admitted phones send back: touches → slots
   uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland)
+  backends/__init__.py  backend registry, session detection, the backend contract
   backends/hyprland.py  headless output, hyprctl Lua API, wf-recorder, touch mapping
   backends/xdph.py      NVIDIA: zero-copy capture via the Hyprland portal + GStreamer NVENC
-  backends/gnome.py     Mutter ScreenCast virtual monitor, DisplayConfig, GStreamer,
+  backends/gnome.py     Mutter ScreenCast virtual monitor, DisplayConfig,
                         RemoteDesktop touch
+  backends/kde.py       KWin virtual output via the helper, kscreen-doctor placement,
+                        fake-input touch
+  backends/kwin_helper.py  builds tandem-kwin-helper and writes its KWin desktop entry
+  backends/gstreamer.py PipeWire node → gst-launch → H.264 (GNOME, KDE)
+  backends/layout.py    where the phone's monitor goes beside the others
+  backends/system.py    atomic file writes; which process serves a socket and how it
+                        was started (KWin's data home)
+  kwin-helper/          tandem-kwin-helper.c (Wayland client for KWin's virtual output
+                        and fake input), vendored protocol XML, Makefile
   start-tandem.sh       no-TUI launcher (prints the QR)
   testsrc.py            test-pattern server for app development
   about.py              the credit line and license notice (printed by --version)
@@ -288,13 +326,17 @@ android/app/src/main/java/io/github/saharshbaiju/tandem/
 LICENSE, NOTICE          GPL-3.0 and its additional terms (see License below)
 docs/                    PLATFORMS, ARCHITECTURE, ANDROID, SECURITY, RELEASING
 install.sh               one-line installer (any distribution), adds the `tandem` command
+tests/                   unit tests (python3 -m unittest discover -s tests; not installed)
 ```
 
 ## Roadmap
 
 - RTP over UDP with forward error correction for lossy Wi-Fi (TCP stays for USB)
 - HEVC decoding in the app
-- A KDE Plasma backend
+- KDE Plasma out of beta, after feedback from beta testers
+- niri, once a niri release can create virtual outputs (the work is ready and
+  waiting on [niri pull request #3800](https://github.com/niri-wm/niri/pull/3800))
+- Sway and other wlroots compositors
 - Pen input with pressure and hover, and typing from the phone
 - A latency overlay
 

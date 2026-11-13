@@ -5,4 +5,4 @@ contact_links:
     about: Please report security problems privately here, not as an issue.
   - name: Setup and troubleshooting docs
     url: https://github.com/saharshbaiju/tandem/blob/main/docs/PLATFORMS.md
-    about: Install steps for Arch, Ubuntu and Fedora, and fixes for common connection problems.
+    about: Install steps for each desktop and distribution, and fixes for common connection problems.

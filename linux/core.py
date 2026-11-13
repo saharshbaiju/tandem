@@ -4,10 +4,15 @@ core.py - shared config, detection and dependency logic for Tandem.
 Used by the TUI (tui.py). The streaming engine (tandemd.py) stays a standalone
 CLI that the TUI launches with explicit flags built from a Config here.
 
-Supported desktops (see backends/):
-    Arch      + Hyprland          -> hyprland backend
-    Ubuntu    + GNOME (Wayland)   -> gnome backend
-    Fedora    + GNOME (Wayland)   -> gnome backend
+Supported desktops (see backends/), on Arch, Fedora, Debian / Ubuntu and
+their derivatives (package names for each in DEPS):
+    Hyprland                      -> hyprland backend
+    GNOME on Wayland              -> gnome backend
+    KDE Plasma on Wayland         -> kde backend (beta)
+
+Anything that differs per desktop is asked of the backend's module hooks
+(backends.module(name), documented in backends/__init__.py), never decided
+here by backend name.
 """
 
 import glob
@@ -15,7 +20,6 @@ import importlib.util
 import json
 import os
 import re
-import shlex
 import shutil
 import socket
 import subprocess
@@ -26,8 +30,8 @@ from urllib.parse import quote
 
 import backends
 import secure_link
-import uinput_touch
-from backends import gnome as gnome_backend
+from backends import gstreamer
+from backends import kwin_helper
 from backends import hyprland as hypr_backend
 
 CONFIG_DIR = secure_link.CONFIG_DIR
@@ -55,7 +59,7 @@ RES_PRESETS = [
 
 @dataclass
 class Config:
-    backend: str = "auto"          # auto / hyprland / gnome
+    backend: str = "auto"          # auto or a name in backends.NAMES
     output: str = "EXT-1"
     side: str = "right"            # right / left / up / down
     width: int = 1920
@@ -182,7 +186,7 @@ def _bin(name):
 
 def _gst(element):
     return lambda: bool(shutil.which("gst-inspect-1.0")
-                        and gnome_backend.gst_inspect(element))
+                        and gstreamer.gst_inspect(element))
 
 
 def _va_encode_driver():
@@ -244,8 +248,74 @@ def _va_driver_present(name):
 
 
 def _any_h264_encoder():
-    return bool(shutil.which("gst-inspect-1.0") and gnome_backend.pick_encoder())
+    return bool(shutil.which("gst-inspect-1.0") and gstreamer.pick_encoder())
 
+
+def _python_gi(purpose, required=True):
+    return ("python gi", lambda: importlib.util.find_spec("gi") is not None,
+            {"arch": "python-gobject", "debian": "python3-gi",
+             "fedora": "python3-gobject"}, required, purpose)
+
+
+# What every PipeWire backend needs to encode its virtual monitor with
+# gst-launch (backends/gstreamer.py): the launcher, then the elements.
+_GST_LAUNCH_ROW = (
+    "gst-launch-1.0", _bin("gst-launch-1.0"),
+    {"arch": "gstreamer", "debian": "gstreamer1.0-tools",
+     "fedora": "gstreamer1"}, True, "runs the capture/encode pipeline")
+_GSTREAMER_ELEMENT_ROWS = [
+    ("pipewiresrc", _gst("pipewiresrc"),
+     {"arch": "gst-plugin-pipewire", "debian": "gstreamer1.0-pipewire",
+      "fedora": "pipewire-gstreamer"}, True, "reads the virtual monitor"),
+    ("videoconvert", _gst("videoconvert"),
+     {"arch": "gst-plugins-base", "debian": "gstreamer1.0-plugins-base",
+      "fedora": "gstreamer1-plugins-base"}, True, "pixel format conversion"),
+    ("h264parse", _gst("h264parse"),
+     {"arch": "gst-plugins-bad", "debian": "gstreamer1.0-plugins-bad",
+      "fedora": "gstreamer1-plugins-bad-free"}, True,
+     "H.264 framing (+ VA-API encoders)"),
+    ("H.264 encoder", _any_h264_encoder,
+     {"arch": "gst-plugins-ugly", "debian": "gstreamer1.0-plugins-ugly",
+      "fedora": "gstreamer1-plugin-openh264"}, True,
+     "x264 / openh264 (VA-API used automatically if present)"),
+]
+_GSTREAMER_PIPELINE_ROWS = [_GST_LAUNCH_ROW] + _GSTREAMER_ELEMENT_ROWS
+
+
+def _kscreen_doctor_debian_package():
+    """The Debian / Ubuntu package with kscreen-doctor: libkscreen-bin for
+    Plasma 6 (Debian 13, Ubuntu 25.04 and later), libkf5screen-bin for
+    Plasma 5.27 (Ubuntu 24.04). Picked by which libkscreen is installed,
+    since Plasma itself depends on it."""
+    if (glob.glob("/usr/lib/*/libKF5Screen.so.*")
+            and not glob.glob("/usr/lib/*/libKF6Screen.so.*")):
+        return "libkf5screen-bin"
+    return "libkscreen-bin"
+
+
+def _kwin_helper_tool(tool):
+    """Check for one tool that builds tandem-kwin-helper. Also passes when
+    the helper is already built from the current sources: then nothing
+    needs compiling."""
+    return lambda: (kwin_helper.is_current()
+                    or kwin_helper.has_build_tool(tool))
+
+
+# KDE: the KWin helper is compiled on first use (backends/kwin_helper.py).
+_KWIN_HELPER_BUILD_ROWS = [
+    ("C compiler", _kwin_helper_tool("cc"),
+     {"arch": "gcc", "debian": "gcc", "fedora": "gcc"}, True,
+     "builds the KWin helper (once, and after updates)"),
+    ("pkg-config", _kwin_helper_tool("pkg-config"),
+     {"arch": "pkgconf", "debian": "pkgconf", "fedora": "pkgconf-pkg-config"},
+     True, "finds libwayland-client for the KWin helper build"),
+    ("wayland-scanner", _kwin_helper_tool("wayland-scanner"),
+     {"arch": "wayland", "debian": "libwayland-bin", "fedora": "wayland-devel"},
+     True, "generates the KWin helper's Wayland protocol code"),
+    ("wayland-client headers", _kwin_helper_tool("wayland-client"),
+     {"arch": "wayland", "debian": "libwayland-dev", "fedora": "wayland-devel"},
+     True, "libwayland-client for the KWin helper build"),
+]
 
 # (label, check, {distro: package}, required, purpose)
 DEPS = {
@@ -262,28 +332,13 @@ DEPS = {
            "hardware H.264 encode on Intel/AMD (else x264 on the CPU)")]
          if (_VA := _va_encode_driver()) else [])
       + (_NVIDIA_ZERO_COPY if _hyprland_on_nvidia() else []),
-    "gnome": [
-        ("gst-launch-1.0", _bin("gst-launch-1.0"),
-         {"arch": "gstreamer", "debian": "gstreamer1.0-tools",
-          "fedora": "gstreamer1"}, True, "runs the capture/encode pipeline"),
-        ("python gi", lambda: importlib.util.find_spec("gi") is not None,
-         {"arch": "python-gobject", "debian": "python3-gi",
-          "fedora": "python3-gobject"}, True, "talks to Mutter over D-Bus"),
-        ("pipewiresrc", _gst("pipewiresrc"),
-         {"arch": "gst-plugin-pipewire", "debian": "gstreamer1.0-pipewire",
-          "fedora": "pipewire-gstreamer"}, True, "reads the virtual monitor"),
-        ("videoconvert", _gst("videoconvert"),
-         {"arch": "gst-plugins-base", "debian": "gstreamer1.0-plugins-base",
-          "fedora": "gstreamer1-plugins-base"}, True, "pixel format conversion"),
-        ("h264parse", _gst("h264parse"),
-         {"arch": "gst-plugins-bad", "debian": "gstreamer1.0-plugins-bad",
-          "fedora": "gstreamer1-plugins-bad-free"}, True,
-         "H.264 framing (+ VA-API encoders)"),
-        ("H.264 encoder", _any_h264_encoder,
-         {"arch": "gst-plugins-ugly", "debian": "gstreamer1.0-plugins-ugly",
-          "fedora": "gstreamer1-plugin-openh264"}, True,
-         "x264 / openh264 (VA-API used automatically if present)"),
-    ],
+    "gnome": [_GST_LAUNCH_ROW, _python_gi("talks to Mutter over D-Bus")]
+             + _GSTREAMER_ELEMENT_ROWS,
+    "kde": [("kscreen-doctor", _bin("kscreen-doctor"),
+             {"arch": "libkscreen", "debian": _kscreen_doctor_debian_package(),
+              "fedora": "libkscreen"}, True,
+             "places and scales the phone's monitor")]
+           + _KWIN_HELPER_BUILD_ROWS + _GSTREAMER_PIPELINE_ROWS,
     "common": [
         ("openssl", _bin("openssl"),
          {"arch": "openssl", "debian": "openssl", "fedora": "openssl"}, True,
@@ -308,7 +363,10 @@ def system_python() -> bool:
 
 
 def check_dependencies(backend=None) -> list:
-    """[(label, package, purpose, required, present), ...] for this backend."""
+    """[(label, package, purpose, required, present), ...] for this backend.
+
+    A distro without a package name of its own gets the first one listed.
+    """
     d = distro()
     rows = []
     for label, check, pkgs, req, purpose in (DEPS.get(backend, [])
@@ -317,12 +375,13 @@ def check_dependencies(backend=None) -> list:
             present = bool(check())
         except Exception:
             present = False
-        rows.append((label, pkgs.get(d, next(iter(pkgs.values()))), purpose,
-                     req, present))
+        package = pkgs[d] if d in pkgs else next(iter(pkgs.values()))
+        rows.append((label, package, purpose, req, present))
     return rows
 
 
 def missing_packages(backend=None, required_only=False) -> list:
+    """Packages to install for what's missing."""
     pkgs = []
     for _l, pkg, _p, req, present in check_dependencies(backend):
         if not present and (req or not required_only) and pkg not in pkgs:
@@ -341,31 +400,28 @@ def install_command(packages) -> list:
 
 def primary_monitor_desc(backend) -> str:
     """One-line description of the main display, for the hardware screen."""
-    if backend == "hyprland":
-        m = hypr_backend.primary_for("EXT-1")
-        if m:
-            return (f"{m['name']}  {m['width']}x{m['height']}"
-                    f"@{m.get('refreshRate', 0):.0f}  scale {m.get('scale', 1)}")
-    elif backend == "gnome":
+    hooks = backends.module(backend)
+    description = None
+    if hooks:
         try:
-            from gi.repository import Gio
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            _s, _mons, logicals, _p = gnome_backend.display_state(bus)
-            for x, y, sc, _t, primary, specs, _lp in logicals:
-                if primary:
-                    return f"{specs[0][0]}  at {x},{y}  scale {sc:g}"
+            description = hooks.describe_primary_monitor()
         except Exception:
-            pass
-    return "(none found)"
+            description = None
+    return description or "(none found)"
 
 
 def remove_virtual_output(cfg: Config) -> None:
-    """Hyprland: move windows off EXT and remove it (the TUI launches the daemon
-    with --keep-output so the monitor survives restarts). GNOME's virtual
-    monitor disappears by itself when the daemon stops."""
-    if cfg.resolved_backend() == "hyprland":
+    """Remove a virtual monitor the daemon left behind.
+
+    The TUI launches the daemon with --keep-output, so on Hyprland the
+    headless output survives a restart and this removes it (windows moved to
+    the main monitor first). Where the monitor dies with the daemon (GNOME,
+    KDE) the backend's hook does nothing.
+    """
+    hooks = backends.module(cfg.resolved_backend())
+    if hooks:
         try:
-            hypr_backend.remove_output(cfg.output)
+            hooks.remove_leftover_output(cfg.output)
         except Exception:
             pass
 
@@ -859,30 +915,21 @@ def reset_pairing_key() -> str:
 # Touch input
 # --------------------------------------------------------------------------- #
 
-UINPUT_RULE_PATH = "/etc/udev/rules.d/70-tandem-uinput.rules"
-UINPUT_MODULE_PATH = "/etc/modules-load.d/tandem-uinput.conf"
-# uaccess: logind grants the user at the seat (you, not other accounts or
-# remote logins) access to /dev/uinput. Numbered before 73-seat-late.rules,
-# which is where the tag takes effect.
-UINPUT_RULE = ('KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", '
-               'OPTIONS+="static_node=uinput"')
-
-
 def touch_setup_check(cfg: Config):
     """What stops touch input from working on this computer, or None.
 
-    Returns {"problem": text, "fix": argv (run with sudo) or None}. Only the
-    Hyprland backend needs setup (a uinput device); GNOME injects touches
-    through Mutter's RemoteDesktop API without any permissions.
+    Returns {"problem": text, "fix": argv or None}, as the backend's
+    touch_setup_problem() hook reports it. Hyprland needs a one-time udev
+    rule for its uinput device (the fix runs with sudo). GNOME and KDE
+    inject touches through the compositor's own API and need nothing.
+    Callers show the fix as given and must not assume it uses sudo.
     """
-    if not cfg.touch or cfg.resolved_backend() != "hyprland":
+    if not cfg.touch:
         return None
-    problem = uinput_touch.uinput_access_problem()
-    if not problem:
+    hooks = backends.module(cfg.resolved_backend())
+    if not hooks:
         return None
-    script = (f"echo {shlex.quote(UINPUT_RULE)} > {UINPUT_RULE_PATH} && "
-              f"echo uinput > {UINPUT_MODULE_PATH} && modprobe uinput && "
-              "udevadm control --reload && "
-              "udevadm trigger --name-match=/dev/uinput && "
-              "udevadm settle")
-    return {"problem": problem, "fix": ["sudo", "sh", "-c", script]}
+    try:
+        return hooks.touch_setup_problem()
+    except Exception:
+        return None

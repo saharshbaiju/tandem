@@ -17,6 +17,9 @@ our GStreamer caps literally decide the virtual monitor's resolution:
         ! <H.264 encoder> ! h264parse ! byte-stream AU ! fdsink fd=3
         -> raw Annex-B on a pipe -> tandemd's parser (same as Hyprland)
 
+The pipeline itself (encoder choice, gst-launch, its log) is shared with the
+other PipeWire backends and lives in gstreamer.py.
+
 The virtual monitor lives exactly as long as our D-Bus connection: when the
 daemon exits, Mutter removes it and moves its windows back automatically.
 
@@ -35,8 +38,6 @@ works, touch is reported as unavailable).
 """
 
 import os
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -45,6 +46,32 @@ try:
     from gi.repository import Gio, GLib
 except Exception:              # reported via missing()
     Gio = GLib = None
+
+# The GStreamer and layout helpers started out in this module and moved out
+# so the other PipeWire backends share them. They are re-exported by name:
+# xdph.py, hyprland.py, core.py and testsrc.py use them as gnome.<name>.
+from .gstreamer import (  # noqa: F401  (re-exported)
+    ENCODERS,
+    LEAKY_QUEUE,
+    VBV_FRAMES,
+    _inspect_cache,
+    _with_props,
+    bitrate_kbps,
+    build_pipeline,
+    encoder_chain,
+    gst_inspect,
+    gst_launch,
+    has_prop,
+    pick_encoder,
+    pipewiresrc,
+    spawn_pipeline,
+    stop_pipeline,
+    vbv_kbits,
+    vbv_ms,
+    videoconvert,
+)
+from .gstreamer import choose_encoder, missing_pipeline_tools, start_encoder
+from .layout import _overlaps, place_beside  # noqa: F401  (re-exported)
 
 SC_BUS = "org.gnome.Mutter.ScreenCast"
 SC_PATH = "/org/gnome/Mutter/ScreenCast"
@@ -60,15 +87,11 @@ DC_IFACE = "org.gnome.Mutter.DisplayConfig"
 CURSOR_EMBEDDED = 1            # draw the pointer into the frames
 APPLY_TEMPORARY = 1            # DisplayConfig method: don't persist, no dialog
 
-# Hardware encoders first; the VA plugins only register an element when the
-# driver can really encode H.264, so "element exists" is a usable probe.
-ENCODERS = ("vah264enc", "vah264lpenc", "vaapih264enc", "x264enc", "openh264enc")
-
 
 def log(*a):
     # Never raise: once the terminal or the TUI reading our stderr is gone,
-    # a print would throw, and in the gst log thread that would stop the
-    # draining of gst-launch's stderr until its pipe fills and it stalls.
+    # a print would throw, and in a helper thread (placement, touch replies)
+    # that would end the thread with the work half done.
     try:
         print("[tandemd]", *a, file=sys.stderr, flush=True)
     except (OSError, ValueError):
@@ -81,158 +104,54 @@ def is_gnome_wayland():
 
 
 # --------------------------------------------------------------------------- #
-# GStreamer probing
+# Module hooks (see backends/__init__.py): used without a backend instance
 # --------------------------------------------------------------------------- #
 
-_inspect_cache = {}
+def session_confidence():
+    """2 in a GNOME Wayland session; 1 when XDG_CURRENT_DESKTOP names GNOME
+    without Wayland (X11: setup fails, session_problem() explains); else 0."""
+    if is_gnome_wayland():
+        return 2
+    if "gnome" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower():
+        return 1
+    return 0
 
 
-def gst_inspect(element):
-    """`gst-inspect-1.0 element` output, or "" if the element is missing."""
-    if element not in _inspect_cache:
-        try:
-            r = subprocess.run(["gst-inspect-1.0", element], capture_output=True,
-                               text=True, timeout=10)
-            _inspect_cache[element] = r.stdout if r.returncode == 0 else ""
-        except Exception:
-            _inspect_cache[element] = ""
-    return _inspect_cache[element]
+def session_problem():
+    """Why this session can't host a virtual monitor (lines for the TUI)."""
+    if is_gnome_wayland():
+        return None
+    return ["GNOME is running on X11 — virtual monitors need Wayland.",
+            "Log out, click the gear on the login screen and pick "
+            "'Ubuntu' / 'GNOME' (not 'on Xorg')."]
 
 
-def has_prop(element, prop):
-    """True if `element` has property `prop` (per gst-inspect-1.0).
-
-    gst-inspect pads names to a column, but a long name runs straight into
-    the colon ("repeat-sequence-header: ..."), so accept either separator.
-    """
-    return any(line.strip().startswith((prop + " ", prop + ":"))
-               for line in gst_inspect(element).splitlines())
-
-
-def pick_encoder(preferred=None):
-    if preferred and preferred != "auto":
-        return preferred if gst_inspect(preferred) else None
-    return next((e for e in ENCODERS if gst_inspect(e)), None)
-
-
-def bitrate_kbps(bitrate):
-    """'12M' / '800K' / '12000000' -> kbit/s."""
-    s = str(bitrate).strip().upper()
-    if s.endswith("M"):
-        return int(float(s[:-1]) * 1000)
-    if s.endswith("K"):
-        return int(float(s[:-1]))
-    return max(1, int(float(s)) // 1000)
+def describe_primary_monitor():
+    """'<connector>  at x,y  scale s' for the primary monitor, or None."""
+    if Gio is None:
+        return None
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        _serial, _monitors, logicals, _props = display_state(bus)
+        for x, y, scale, _transform, primary, specs, _lprops in logicals:
+            if primary:
+                return f"{specs[0][0]}  at {x},{y}  scale {scale:g}"
+    except Exception:
+        pass
+    return None
 
 
-# Rate-control buffer (VBV / CPB) length, in frames. Encoders default to
-# 0.6-1.5 s, which lets one IDR grow to many times an average frame and
-# serialise the Wi-Fi link for its whole length: a latency spike every GOP.
-# Two frames keeps every frame, IDRs included, near the average size.
-VBV_FRAMES = 2
+def remove_leftover_output(output_name):
+    """Nothing to do: Mutter removes the virtual monitor (and moves its
+    windows back) as soon as the daemon's D-Bus connection closes, so none
+    can outlive the daemon."""
+    return None
 
 
-def vbv_ms(fps):
-    """VBV length in milliseconds (for encoders that size it in time)."""
-    return max(1, round(1000 * VBV_FRAMES / max(1, fps)))
-
-
-def vbv_kbits(kbps, fps):
-    """VBV size in kbit (for encoders that size it in bits)."""
-    return max(1, kbps * VBV_FRAMES // max(1, fps))
-
-
-def _with_props(element, *required, **optional):
-    """`element req... key=value...`, keeping only optional props it has.
-
-    Optional props are given with "_" for "-" (cpb_size -> cpb-size) and are
-    probed with has_prop, so an older plugin without one still parses.
-    """
-    parts = [element, *required]
-    for key, value in optional.items():
-        prop = key.replace("_", "-")
-        if has_prop(element, prop):
-            parts.append(f"{prop}={value}")
-    return " ".join(parts)
-
-
-def videoconvert():
-    """CPU colour conversion, threaded where supported (default is 1 thread,
-    which is a few ms per 1080p frame of avoidable latency)."""
-    return _with_props("videoconvert", n_threads=min(4, os.cpu_count() or 1))
-
-
-def encoder_chain(enc, kbps, gop, fps=60):
-    """GStreamer elements from raw frames to H.264 for `enc`.
-
-    Every chain is single-slice and B-frame free: the phone's hardware decoder
-    wants exactly one complete access unit per input buffer. Each one is also
-    set up for low latency: fastest preset, no lookahead, and a VBV of
-    VBV_FRAMES frames where the element exposes one.
-    """
-    if enc in ("vah264enc", "vah264lpenc"):
-        conv = ("vapostproc ! video/x-raw(memory:VAMemory),format=NV12"
-                if gst_inspect("vapostproc")
-                else f"{videoconvert()} ! video/x-raw,format=NV12")
-        return f"{conv} ! " + _with_props(
-            enc, "rate-control=cbr", f"bitrate={kbps}",
-            f"key-int-max={gop}", "b-frames=0", "target-usage=7",
-            cpb_size=vbv_kbits(kbps, fps))
-    if enc == "vaapih264enc":
-        return (f"{videoconvert()} ! video/x-raw,format=NV12 ! " + _with_props(
-            enc, "rate-control=cbr", f"bitrate={kbps}",
-            f"keyframe-period={gop}", "max-bframes=0",
-            cpb_length=vbv_ms(fps)))
-    if enc == "x264enc":
-        # sliced-threads=false keeps one slice per frame; 2 frame threads cost
-        # ~1 frame of latency but keep 1080p60 realtime on modest CPUs.
-        return (f"{videoconvert()} ! video/x-raw,format=I420 ! " + _with_props(
-            enc, "tune=zerolatency", "speed-preset=ultrafast",
-            f"bitrate={kbps}", f"key-int-max={gop}", "bframes=0", "threads=2",
-            "sliced-threads=false", "byte-stream=true",
-            vbv_buf_capacity=vbv_ms(fps)))
-    if enc == "openh264enc":
-        # openh264 has no VBV-size property; its bitrate mode is already
-        # frame-level and skips frames rather than buffering them.
-        return (f"{videoconvert()} ! video/x-raw,format=I420 ! openh264enc "
-                f"usage-type=screen rate-control=bitrate bitrate={kbps * 1000} "
-                f"gop-size={gop} complexity=low")
-    raise ValueError(f"unsupported encoder {enc}")
-
-
-# The single frame of buffering between capture and encoder: when the
-# encoder falls behind, drop the oldest raw frame instead of queueing
-# (a queue's default 200 buffers / 1 s would hold seconds of lag).
-LEAKY_QUEUE = ("queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 "
-               "leaky=downstream")
-
-
-def pipewiresrc(node, extra=""):
-    """pipewiresrc for `node`, re-sending the last frame every second where
-    the plugin supports it: compositors only send frames on damage, and a
-    newly joined phone shouldn't wait on a static desktop for its first one."""
-    src = f"pipewiresrc path={node} do-timestamp=true"
-    if has_prop("pipewiresrc", "keepalive-time"):
-        src += " keepalive-time=1000"
-    return f"{src} {extra}".strip()
-
-
-def gst_launch(desc):
-    """argv for gst-launch-1.0. No -e: it makes SIGINT wait for an EOS to
-    drain through the pipeline, which can hang a stop on a stalled source;
-    our frames are an endless live stream with nothing to finalise."""
-    return ["gst-launch-1.0", "-q"] + desc.split()
-
-
-def build_pipeline(node, width, height, kbps, gop, enc, fd=3, fps=60):
-    """gst-launch argv: PipeWire node -> H.264 Annex-B access units on `fd`."""
-    desc = (f"{pipewiresrc(node)} ! video/x-raw,width={width},height={height} "
-            f"! {LEAKY_QUEUE} "
-            f"! {encoder_chain(enc, kbps, gop, fps)} "
-            f"! h264parse config-interval=-1 "
-            f"! video/x-h264,stream-format=byte-stream,alignment=au "
-            f"! fdsink fd={fd} sync=false")
-    return gst_launch(desc)
+def touch_setup_problem():
+    """None: touches go through Mutter's RemoteDesktop API, which needs no
+    permissions or one-time setup."""
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -273,57 +192,6 @@ def _apply_props(mprops):
             value = mprops[reported]
             out[key] = GLib.Variant(sig, bool(value) if sig == "b" else value)
     return out
-
-
-def _overlaps(a, b):
-    """True if rectangles (x, y, w, h) share any area (touching is fine)."""
-    ax, ay, aw, ah = a
-    bx, by, bw, bh = b
-    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
-
-
-def place_beside(anchor, others, ext_size, side):
-    """Top-left for a w x h monitor on `side` of `anchor`, overlapping none.
-
-    `anchor` and `others` are (x, y, w, h) rectangles (anchor among others).
-    Flush against the anchor, top/left-aligned with it, when that spot is
-    free. If another monitor is in the way, go to the outermost edge of the
-    whole layout on that side instead and line up with the monitor that
-    forms that edge (the one nearest the anchor), so the new monitor still
-    shares an edge with something (Mutter rejects detached monitors).
-    """
-    ax, ay, aw, ah = anchor
-    ew, eh = ext_size
-    horizontal = side in ("left", "right")
-    if side == "left":
-        spot = (ax - ew, ay)
-    elif side == "up":
-        spot = (ax, ay - eh)
-    elif side == "down":
-        spot = (ax, ay + ah)
-    else:
-        spot = (ax + aw, ay)
-    if not any(_overlaps((*spot, ew, eh), r) for r in others):
-        return spot
-
-    # Monitor edge on `side` of each rectangle; the outermost one wins.
-    def edge(r):
-        x, y, w, h = r
-        return {"left": x, "up": y, "down": y + h}.get(side, x + w)
-
-    outer = (min if side in ("left", "up") else max)(edge(r) for r in others)
-    # Line up with the edge-forming monitor closest to the anchor, along
-    # the edge: same row for left/right, same column for up/down.
-    along = (lambda r: abs(r[1] - ay)) if horizontal else \
-        (lambda r: abs(r[0] - ax))
-    rx, ry, _rw, _rh = min((r for r in others if edge(r) == outer), key=along)
-    if side == "left":
-        return outer - ew, ry
-    if side == "up":
-        return rx, outer - eh
-    if side == "down":
-        return rx, outer
-    return outer, ry
 
 
 def place_monitor(bus, connector, side, scale):
@@ -571,6 +439,9 @@ class MutterTouchscreen:
 
 class GnomeBackend:
     name = "gnome"
+    # The virtual monitor dies with our D-Bus connection, so --keep-output
+    # can't keep it: teardown() always runs.
+    honors_keep_output = False
 
     def __init__(self, args):
         self.a = args
@@ -589,16 +460,9 @@ class GnomeBackend:
 
     @staticmethod
     def missing():
-        miss = [t for t in ("gst-launch-1.0", "gst-inspect-1.0")
-                if not shutil.which(t)]
+        miss = missing_pipeline_tools()
         if Gio is None:
             miss.append("python-gobject (gi)")
-        if shutil.which("gst-inspect-1.0"):
-            for el in ("pipewiresrc", "h264parse", "videoconvert"):
-                if not gst_inspect(el):
-                    miss.append(f"gstreamer:{el}")
-            if not pick_encoder():
-                miss.append("gstreamer:h264-encoder")
         return miss
 
     def setup(self):
@@ -682,48 +546,16 @@ class GnomeBackend:
         on its own, e.g. a renegotiation) within one session: the virtual
         monitor and touch session belong to setup()/teardown(), not to this.
         """
-        a = self.a
-        if a.codec != "h264":
-            log("note: GNOME backend encodes h264 only; ignoring codec "
-                f"'{a.codec}'")
-        enc = pick_encoder(getattr(a, "encoder", None))
-        if not enc:
-            raise RuntimeError("no usable GStreamer H.264 encoder found")
+        encoder = choose_encoder(self.a, "GNOME")
         self.stop_capture()                 # never two encoders on one node
-        rfd, wfd = os.pipe()
-        cmd = build_pipeline(self.node, a.width, a.height,
-                             bitrate_kbps(a.bitrate), a.gop, enc, fd=wfd,
-                             fps=getattr(a, "fps", 60) or 60)
-        log(f"encoder {enc}; capture cmd: " + " ".join(cmd))
-        try:
-            # Own session: a Ctrl-C or hangup on the launching terminal
-            # must not kill the encoder behind the daemon's back. It still
-            # dies with the daemon: its next write to the pipe gets EPIPE,
-            # and the PipeWire node goes when our D-Bus connection closes.
-            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.PIPE, pass_fds=(wfd,),
-                                    start_new_session=True)
-        except BaseException:
-            os.close(rfd)
-            raise
-        finally:
-            os.close(wfd)          # our copy; EOF arrives when gst exits
+        proc, stream = start_encoder(self.node, self.a, encoder)
         self.proc = proc
-        # Both threads get *this* process: after a restart, self.proc is the
-        # next one and the old threads must finish with the old one.
-        threading.Thread(target=self._gst_log, args=(proc,),
-                         daemon=True).start()
+        # The placement thread gets *this* process: after a restart,
+        # self.proc is the next one and the old thread must finish with the
+        # old one.
         threading.Thread(target=self._place_when_ready, args=(proc,),
                          daemon=True).start()
-        return os.fdopen(rfd, "rb", buffering=0)
-
-    @staticmethod
-    def _gst_log(proc):
-        for line in proc.stderr:
-            line = line.decode("utf-8", "replace").rstrip()
-            if line:
-                log("gst: " + line)
+        return stream
 
     def _place_when_ready(self, proc):
         """Wait for Mutter to add the monitor (after caps negotiate), place it.
@@ -781,14 +613,8 @@ class GnomeBackend:
 
     def stop_capture(self):
         """Stop the encoder only (the virtual monitor stays). Idempotent."""
-        p, self.proc = self.proc, None
-        if p and p.poll() is None:
-            p.terminate()
-            try:
-                p.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.wait()
+        proc, self.proc = self.proc, None
+        stop_pipeline(proc)
 
     def teardown(self):
         """Stop the session: Mutter removes the monitor and rehomes windows.

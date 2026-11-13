@@ -13,6 +13,10 @@ android/app/*.iml
 __pycache__/
 *.pyc
 
+# --- KWin helper (make in linux/kwin-helper; Tandem builds its own copy
+# under ~/.local/share/tandem) ---
+linux/kwin-helper/build/
+
 # --- Harness / runtime ---
 .claude/
 

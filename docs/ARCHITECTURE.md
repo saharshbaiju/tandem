@@ -2,8 +2,9 @@
 
 This document describes the whole system: how a desktop frame gets from a
 virtual monitor to the phone's screen, the exact bytes sent on the wire, and
-the rules that keep a connection reliable. Platform setup for Arch, Ubuntu and
-Fedora is in [`PLATFORMS.md`](./PLATFORMS.md). The phone app is covered in
+the rules that keep a connection reliable. Setup for each desktop (Hyprland,
+GNOME, KDE Plasma, the last in beta) and distribution is in
+[`PLATFORMS.md`](./PLATFORMS.md). The phone app is covered in
 [`ANDROID.md`](./ANDROID.md).
 
 ---
@@ -29,24 +30,25 @@ The phone is a thin client. It decodes video and reports touches. The
 monitor logic lives on the Linux side, in a backend for each compositor:
 
 ```
- ┌──────────────── Linux ─────────────────────────────┐        ┌── Android ──┐
- │                                                     │        │             │
- │  backend: hyprland            backend: gnome        │        │             │
- │  hyprctl output create        Mutter ScreenCast     │        │             │
- │  headless EXT-1               RecordVirtual         │        │             │
- │        │ wlr-screencopy             │ PipeWire       │        │             │
- │  wf-recorder + VA-API         GStreamer + VA/x264/  │        │             │
- │        │                      openh264              │        │             │
- │        └────────── raw Annex-B H.264 ──┘            │        │             │
- │                       │ pipe                        │        │             │
- │             tandemd.py  (parse, GOP cache,        │  TCP   │ MediaCodec  │
- │             per-client senders, heartbeats) ────────┼───────▶│  → Surface  │
- │             phone_input.py (pairing, touches) ◀─────┼────────┤ touches     │
- │               → uinput touchscreen  (Hyprland)      │        │             │
- │               → Mutter RemoteDesktop (GNOME)        │        │             │
- │                       ▲                             │        │             │
- │             tui.py (config, QR pairing, lifecycle)  │        │             │
- └─────────────────────────────────────────────────────┘        └─────────────┘
+ ┌──────────────── Linux ───────────────────────────────────────┐        ┌── Android ──┐
+ │                                                              │        │             │
+ │  backend: hyprland         backend: gnome / kde              │        │             │
+ │  hyprctl output create     Mutter RecordVirtual,             │        │             │
+ │  headless EXT-1            KWin virtual output (helper)      │        │             │
+ │        │ wlr-screencopy          │ PipeWire                  │        │             │
+ │  wf-recorder + VA-API      GStreamer + VA / x264 / openh264  │        │             │
+ │        │                         │                           │        │             │
+ │        └─────── raw Annex-B H.264 ─┘                         │        │             │
+ │                       │ pipe                                 │        │             │
+ │             tandemd.py  (parse, GOP cache,                   │  TCP   │ MediaCodec  │
+ │             per-client senders, heartbeats) ─────────────────┼───────▶│  → Surface  │
+ │             phone_input.py (pairing, touches) ◀──────────────┼────────┤ touches     │
+ │               → uinput touchscreen     (Hyprland)            │        │             │
+ │               → Mutter RemoteDesktop   (GNOME)               │        │             │
+ │               → KWin fake input        (KDE, via the helper) │        │             │
+ │                       ▲                                      │        │             │
+ │             tui.py (config, QR pairing, lifecycle)           │        │             │
+ └──────────────────────────────────────────────────────────────┘        └─────────────┘
 ```
 
 ---
@@ -328,6 +330,82 @@ The virtual monitor lives exactly as long as the daemon's D-Bus connection.
 When the daemon exits, even if it was killed, Mutter removes the monitor and
 moves its windows back.
 
+### Stage 0c: virtual output on KDE Plasma (`backends/kde.py`, `linux/kwin-helper/`)
+
+This backend is a beta in 0.7.0-beta.1. Its registry entry carries `beta_name`, so
+`backends.describe()` and the desktop name say *beta*, and the daemon, the TUI's
+Dependencies screen and the installer print `backends.beta_notice()`, which
+points to the issue tracker.
+
+KWin creates virtual outputs and streams them to PipeWire through the
+`zkde_screencast_unstable_v1` Wayland protocol, and injects input through
+`org_kde_kwin_fake_input`. Python's standard library cannot speak Wayland, so a
+small C client, `tandem-kwin-helper`, makes those requests and talks to the
+daemon in lines over its stdin and stdout:
+
+```
+tandem-kwin-helper --name Tandem --width W --height H
+  stdout: ready screencast=<version> fake_input=<version>
+          created <pipewire node>          KWin made "Virtual-Tandem"
+          geometry <x> <y> <logical w> <logical h>   (each xdg-output change)
+          failed <KWin's reason> | closed | error <local failure>
+  stdin:  down <slot> <fx> <fy> | move <slot> <fx> <fy> | up <slot> | cancel
+```
+
+- **Building.** `backends/kwin_helper.py` compiles the helper on first use
+  (`wayland-scanner` client-header and private-code from the vendored protocol
+  XML in `kwin-helper/protocols/`, then `cc -std=c11 -O2 -Wall -Wextra` with
+  `pkg-config --cflags --libs wayland-client`). It builds in a temporary
+  directory under a lock and renames the binary into
+  `~/.local/share/tandem/kwin-helper/`, outside the directory the installer
+  replaces. A SHA-256 of the sources and flags decides when to rebuild.
+- **Permission.** KWin 6.0 to 6.7 (and 5.27) only offer those protocols to a
+  binary named by the `Exec=` of a desktop entry that lists them in
+  `X-KDE-Wayland-Interfaces`, matched by canonical path against
+  `/proc/<pid>/exe`. Tandem writes `tandem-kwin-helper.desktop` into the
+  `applications` folder of KWin's own data directory (`XDG_DATA_HOME` as KWin
+  has it, read from `/proc` of the process serving the Wayland socket, since a
+  shell rc file can give a terminal a different one; usually
+  `~/.local/share`), through a temporary file and a rename, because KWin does
+  not notice a file rewritten in place.
+  KWin 6.8 restricts only sandboxed clients and ignores the entry. When KWin
+  has not seen a freshly written entry yet (`ready screencast=0`), the daemon
+  retries once after 2 s.
+- **Versions.** The helper binds the screencast protocol at version 5 at most:
+  version 6 deprecates the `created` event that carries the node id. It asks for
+  scale 1, because KWin's virtual backend multiplies the requested size by the
+  scale and re-applies a scale it saved for that name anyway, and the pointer
+  embedded in the frames.
+- **Placement.** `kscreen-doctor -j` gives every output's position (logical),
+  pixel size, scale, rotation and priority (a missing `enabled` key means
+  enabled). `plan_layout` snaps the scale to whole logical pixels, puts the
+  phone beside the primary (priority 1, else the top-left output) with
+  `place_beside`, and gives the primary role back to the anchor if KWin made
+  the phone primary. Everything is applied in one `kscreen-doctor` call, then
+  read back for up to 1.5 s. `kscreen-doctor` exits 0 even when KWin refuses a
+  configuration, so its output is checked for `failed` and `not found`.
+- **No negative positions.** KWin refuses them (`Position of enabled output … is
+  negative`). For the left or up side, every other enabled output moves right
+  or down by the same offset in that call, keeping its mode, scale, rotation
+  and relative position, so the layout's top-left corner is 0,0. Moving the
+  phone back, or stopping, reverses the shift. This is the only case where
+  Tandem moves the user's monitors, and the log says so.
+- **KDE bug 527747.** On KWin 6.7, once an output has been disabled, every later
+  output of that name fails with `Could not find output`. The daemon then tries
+  `Tandem-2` … `Tandem-5` and logs why. KWin sends that reason through
+  `i18n()`, in the session's language (German Plasma says *Ausgabe kann nicht
+  gefunden werden*), so the daemon never matches the text: any `failed` on a
+  granted protocol moves on to the next name, and KWin's own words are only
+  passed on in the log and the final error. The one other reason KWin gives
+  there (*Unsupported compositing type*) then fails five quick times instead
+  of one. Tested in English and German on KWin 6.7.5.
+- **Lifetime.** The output lives exactly as long as the helper's Wayland
+  connection. The helper asks the kernel for SIGTERM when the daemon dies
+  (`PR_SET_PDEATHSIG`) and exits on end of input, so KWin removes the output and
+  moves its windows back however the daemon ends. If the user disables the output
+  mid-session, the helper reports `closed`, capture restarts fail with *the KWin
+  virtual output was closed*, and the daemon exits.
+
 ### Stage 1: capture and encode
 
 On Hyprland, `wf-recorder` (wlr-screencopy, DMA-BUF) feeds FFmpeg `h264_vaapi`
@@ -390,11 +468,13 @@ substitutes its own guess, and the side position, computed from 1.5, overlaps
 the laptop screen (*"Monitor EXT-1 overlaps with other monitor(s)"*). The daemon
 uses the nearest valid scale instead (4/3 here) and logs the substitution.
 
-On GNOME, `gst-launch-1.0` reads the PipeWire node:
+On GNOME and KDE, `gst-launch-1.0` reads the PipeWire node
+(`backends/gstreamer.py`). The node comes from Mutter's `RecordVirtual` on
+GNOME, and from the helper's `created` line on KDE:
 
 ```
 pipewiresrc path=<node> do-timestamp=true keepalive-time=1000   ← keepalive only if the plugin has it
-  ! video/x-raw,width=W,height=H            ← sizes the virtual monitor
+  ! video/x-raw,width=W,height=H            ← sizes the monitor (GNOME, KWin 6.8)
   ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream
   ! <encoder chain>
   ! h264parse config-interval=-1             ← SPS/PPS before every IDR
@@ -408,8 +488,13 @@ default of 200 buffers or 1 s would hold seconds of lag. `videoconvert` gets
 `n-threads=min(4, CPUs)` where the element has it. gst-launch is started in its
 own session (`start_new_session=True`), so Ctrl+C or a hangup on the launching
 terminal cannot kill capture behind the daemon's back. It still dies with the
-daemon: its next write to the pipe fails, and Mutter drops the PipeWire node
-when the daemon's D-Bus connection closes.
+daemon: its next write to the pipe fails, and the compositor drops the PipeWire
+node when the daemon's D-Bus connection (GNOME) or the helper's Wayland
+connection (KDE) closes.
+
+The encoder chain converts to I420 or NV12 before the encoder. Without that,
+`x264enc` picks the High 4:4:4 profile for KWin's RGB frames, which phone
+decoders refuse.
 
 The encoder is chosen by checking which GStreamer elements exist, hardware
 first: `vah264enc`, then `vah264lpenc`, `vaapih264enc`, `x264enc` and
@@ -417,17 +502,28 @@ first: `vah264enc`, then `vah264lpenc`, `vaapih264enc`, `x264enc` and
 really encode H.264, so "the element exists" is a reliable test. `--encoder`
 overrides the choice.
 
+Both backends start the encoder through the same two calls in
+`backends/gstreamer.py`, so the pipeline, its log line and the
+"no usable GStreamer H.264 encoder" error are written once:
+`choose_encoder(args, label)` picks the element (and notes that only H.264 is
+encoded when `--codec` asks for more), then `start_encoder(node, args, encoder)`
+builds the pipeline for the node at the requested size and starts it. Each
+backend keeps only its own steps around them: GNOME starts its placement
+watcher afterwards, and KDE first checks that KWin's output still exists.
+Their `missing()` lists share
+`missing_pipeline_tools()` the same way.
+
 Every encoder is configured the same way, for the same reasons:
 
 | Setting | Reason |
 | --- | --- |
 | No B-frames | B-frames need future frames, which adds reorder delay |
-| A keyframe every `max(gop, fps)` frames, about 1 s (Hyprland and xdph), or every `gop` frames (GNOME) | Fast joins. A lost frame is recovered by `KEYQ` and GOP replay, not by frequent keyframes |
+| A keyframe every `max(gop, fps)` frames, about 1 s (Hyprland and xdph), or every `gop` frames (GNOME, KDE) | Fast joins. A lost frame is recovered by `KEYQ` and GOP replay, not by frequent keyframes |
 | CBR at the quality preset's bitrate | No bitrate spikes that stall the link |
 | A rate-control buffer of 2 frames (`cpb-size` on `vah264enc`/`vah264lpenc`, `cpb-length` on `vaapih264enc`, `vbv-buf-capacity` on `x264enc`, `vbv-buffer-size` on `nvh264enc`), each set only if the element has it | Encoders defaulted to 0.6 to 1.5 s, which let each keyframe arrive as one big burst and caused a latency spike every GOP. `openh264enc` has no such property |
 | One slice per frame (`sliced-threads=false` for x264) | The phone's hardware decoder wants one complete access unit per input buffer |
 | Raw Annex-B, no container | The decoder reads it directly |
-| `keepalive-time=1000` (GNOME) | Mutter only sends frames when something changes, so the last frame is resent every second |
+| `keepalive-time=1000` (GNOME, KDE) | These compositors only send frames when something changes, so the last frame is resent every second. KWin 6.7 with PipeWire 1.4 ignores it, and an idle phone monitor there gets almost no frames; the GOP replay still gives a joining phone the picture |
 
 ### Stage 2: NAL parsing and broadcast (`tandemd.py`)
 
@@ -744,7 +840,9 @@ at boot:
 ```
 
 The installer offers this step. When it is missing, the TUI's live view shows
-*Touch: needs one-time setup, press t*, and `core.touch_setup_check` detects it.
+*Touch: needs one-time setup, press t*. `core.touch_setup_check` asks the
+backend's `touch_setup_problem()` hook, which returns the problem and the
+command that fixes it (here `sudo sh -c …`).
 
 **GNOME: Mutter RemoteDesktop** (`backends/gnome.py`). This path needs neither
 root nor uinput. The backend first creates an `org.gnome.Mutter.RemoteDesktop`
@@ -767,6 +865,18 @@ held-back move goes first so its last position is not lost. While four calls
 Closing the surface lifts every finger and waits up to 1 s for the queue to
 empty.
 
+**KDE Plasma: KWin fake input** (`backends/kde.py`). This path needs neither
+root nor uinput either. `KwinTouchscreen` writes `down <slot> <fx> <fy>`,
+`move …`, `up <slot>` and `cancel` lines to the helper's stdin under a lock,
+with fractions clamped to 0..1, and ignores moves and lifts of fingers that are
+not down. The helper converts the fractions to global logical coordinates from
+the output's `xdg-output` geometry, which it tracks as the phone moves or
+rescales, and sends `touch_down`, `touch_motion`, `touch_up` or `touch_cancel`
+on `org_kde_kwin_fake_input`, each followed by `touch_frame`. KWin grants fake
+input through the same desktop entry as the screencast protocol, so the setup
+of stage 0c covers it. If KWin refused it (`ready … fake_input=0`), video still
+works and phones are told *KWin refused touch input*.
+
 **What it can and cannot do.** Taps, drags, scrolling, long-press menus and
 pinch-zoom work in apps that support touch on Wayland. That includes GTK, Qt,
 Chromium and Electron, and Firefox. The apps interpret the gestures, exactly as
@@ -778,8 +888,10 @@ ignores the phone too.
 right logical position on EXT-1, two fingers get separate slots, disconnecting
 lifts a finger that was left down, and the cursor does not move. On GNOME, in
 containers on Mutter 46.2 (Ubuntu 24.04) and 48.8 (Fedora 42), observed with
-`wev`. A wrong pairing key gets `touch: false` and injects nothing. On a real
-phone, over USB with `adb reverse` and Hyprland with NVENC at 2560×1440 and 120
+`wev`. A wrong pairing key gets `touch: false` and injects nothing. On KDE, in
+containers on KWin 6.8.2 and 6.7.5 with the real daemon: taps at the corners,
+the centre and a quarter point land on the exact logical pixel on the phone's
+monitor, also after it moved to the left side. On a real phone, over USB with `adb reverse` and Hyprland with NVENC at 2560×1440 and 120
 Hz: taps, scrolling and pinch all work smoothly. The test recorded 138 touches,
 and every finger-down had a matching finger-up.
 
@@ -818,14 +930,16 @@ tui.py ──spawns──▶ tandemd.py --keep-output --banner-file … --parent
                        │                           (same interpreter, its own session)
                        ├─ backend.setup()          create the virtual monitor
                        ├─ backend.start_capture()  wf-recorder | gst-launch-1.0  → pipe
+                       │                           (KDE: tandem-kwin-helper runs beside it)
                        ├─ supervise_capture()      parse the pipe; restart the encoder if it exits
-                       ├─ start_touch()            virtual touchscreen (uinput / RemoteDesktop) + InputWorker
+                       ├─ start_touch()            touch surface (uinput / RemoteDesktop / KWin fake input) + InputWorker
                        ├─ accept thread            TCP [::]:5000, one I/O thread per phone
                        ├─ keyframe thread          request_keyframe() / encoder restart for stuck phones
                        ├─ control thread           SIGUSR1 → re-read banner → apply side/scale live
                        └─ on exit                  stop capture, close clients, close the input worker,
                                                    remove the touch device, remove monitor
-                                                   (unless --keep-output on Hyprland)
+                                                   (unless --keep-output on Hyprland; the
+                                                   backend's honors_keep_output says so)
 ```
 
 **Signals.**
@@ -892,7 +1006,13 @@ has waited 4 s for a keyframe (stage 3).
   daemon's control thread moves and rescales the monitor through the backend,
   then pushes a fresh `ASX1` frame to connected phones. Changes to resolution,
   fps, quality, GOP, port or backend restart the daemon. On Hyprland the monitor
-  survives (`--keep-output`). On GNOME it is recreated.
+  survives (`--keep-output`). On GNOME and KDE it is recreated: both remove it
+  with the daemon's connection.
+- The TUI and the installer never decide anything by backend name. They ask
+  the backend module's hooks (`backends.module(name)`): `session_problem()` for
+  the start check (GNOME or Plasma on X11),
+  `describe_primary_monitor()`, `remove_leftover_output()` for the cleanup after
+  a daemon, and `touch_setup_problem()` for the **t** key and the installer.
 - A stale daemon from an earlier run is found and killed by inspecting `/proc`
   argv. The daemon never uses `pkill -f`, which would also match the parent shell.
 
@@ -907,7 +1027,7 @@ next to each rule explain the details.
 | --- | --- | --- |
 | App loops between connecting and disconnecting | A finished session cleared the current session. The reconnect then created a second decoder on the same Surface, which failed, and the cycle repeated | Every callback carries its session, and stale callbacks are ignored. The Surface is released synchronously in `surfaceDestroyed` |
 | Drops under load or on weak Wi-Fi | A resync cut off a half-sent frame, so the phone read garbage lengths | Queues hold whole frames. Only frames that have not been sent yet are dropped |
-| Black screen when joining an idle desktop | No damage, so no frames and no keyframe for the new client | GOP cache replayed on connect. `keepalive-time` on GNOME |
+| Black screen when joining an idle desktop | No damage, so no frames and no keyframe for the new client | GOP cache replayed on connect. `keepalive-time` on GNOME and KDE (KWin 6.7 with PipeWire 1.4 ignores it, so the replay is what covers it there) |
 | Last frame of a motion missing until the next change | The tail NAL was held until the next start code | Quiet-pipe tail flush |
 | Silent hangs | No liveness check at either end | `PING` heartbeats both ways, read timeouts on both ends, TCP keepalive and `TCP_USER_TIMEOUT` |
 | Freezes at native phone resolution | Decoder input buffers were sized for a 1080p guess, so large IDRs were dropped | `KEY_MAX_INPUT_SIZE` comes from the real stream resolution in the banner |
@@ -928,6 +1048,12 @@ next to each rule explain the details.
 | The stream stops for good when the encoder exits | Capture ended the daemon | `supervise_capture` restarts the encoder with backoff, keeping the monitor and the phones |
 | Ctrl+C or a closed terminal leaves the virtual monitor behind | The daemon and encoder shared the terminal's process group, and cleanup ran only while the daemon was alive | The daemon runs in its own session, `--parent-pid` stops it with the TUI, and `needs_teardown` drives cleanup |
 | Touches stall the video | Touch injection ran on the phone's I/O thread, and Mutter's D-Bus replies blocked it | `InputWorker` on Hyprland and `_DBusWorker` on GNOME inject on their own threads |
+| KDE: the phone's monitor cannot be created again after it was disabled (KWin 6.7) | KDE bug 527747: KWin remembers the disabled output's name and answers `Could not find output` | Retry as `Tandem-2` … `Tandem-5`, logging why; the error names `~/.config/kwinoutputconfig.json` if all five fail |
+| KDE: `applying config failed! Position of enabled output … is negative` | KWin refuses negative positions, so the phone cannot go left of or above a monitor at 0,0 | Shift the other outputs right or down in the same `kscreen-doctor` call, keeping their modes and arrangement, and shift them back when the phone returns or leaves |
+| KDE: KWin 6.7 gives the helper neither protocol | KWin 6.0 to 6.7 only grant them to a binary named in a desktop entry, and ignore an entry rewritten in place | Write the entry by temp file and rename, with an absolute `Exec=`, and retry once after 2 s |
+| KDE: the phone's monitor comes out at 1.5× the requested size, or with a stale scale | KWin's virtual backend multiplies the size by the requested scale, and restores the scale it saved for that output name | Always request scale 1, then set scale and position with `kscreen-doctor` |
+| KDE: placement reported as done but not applied | `kscreen-doctor` exits 0 even when KWin rejects the configuration | Check its output for `failed` and `not found`, and read the layout back |
+| KDE: a static desktop sends no frames | KWin sends frames only on damage | `pipewiresrc keepalive-time` where the plugin and PipeWire honour it, and the GOP replay for joining phones |
 
 ---
 
@@ -941,6 +1067,9 @@ next to each rule explain the details.
   for example by running the GStreamer pipeline in-process.
 - Address discovery (mDNS or broadcast), so a phone finds the computer after
   its address changes without rescanning the QR.
-- A KDE Plasma backend, using KWin virtual outputs through `kwin_wayland` screencast.
+- KDE Plasma out of beta, after feedback from beta testers.
+- niri, once a niri release can create virtual outputs ([niri pull request
+  #3800](https://github.com/niri-wm/niri/pull/3800)).
+- A Sway / wlroots backend.
 - Pen input with pressure and hover, and a keyboard on the phone.
 - A latency overlay for tuning.
