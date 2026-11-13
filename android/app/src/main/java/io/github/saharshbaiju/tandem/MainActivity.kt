@@ -37,7 +37,12 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.Socket
+import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -62,6 +67,12 @@ import java.util.concurrent.ConcurrentHashMap
  * refresh rate is requested (so a 120 Hz phone doesn't sit at 60), and
  * a network change (Wi-Fi back, cable plugged) retries a pending reconnect
  * at once instead of waiting out the backoff.
+ *
+ * Link upgrade: a stream that runs over Wi-Fi while the computer is also
+ * reachable over a direct link (the USB cable plugged back in after a
+ * reconnect fell back to Wi-Fi) moves to the direct link by itself; see
+ * [checkDirectLink]. USB tethering never shows up as a network callback (the
+ * phone is the router there), so this is checked every [DIRECT_CHECK_MS].
  *
  * Security: a computer is only ever connected to with its pairing key (and,
  * from a QR, its certificate fingerprint); see [SecureChannel]. A link from
@@ -98,6 +109,12 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     private var retryNotBefore = 0L        // uptimeMillis: the computer asked us to wait until then
     private var wifiLock: WifiManager.WifiLock? = null
     private val networks by lazy { NetworkWatcher(this) { lost -> ui.post { onNetworksChanged(lost) } } }
+    private val prober = Executors.newSingleThreadExecutor { r -> Thread(r, "link-probe").apply { isDaemon = true } }
+    private var probing = false
+    private var directSwitchNotBefore = 0L  // uptimeMillis: a switch just failed, don't loop
+    private var switchingToDirect = false   // the current session is being ended to move to USB
+    private var switchedFrom = ""           // the Wi-Fi address that switch left
+    private val directCheck = Runnable { checkDirectLink() }
 
     private val autoHide = Runnable { fadeChrome() }
     private val reconnect = Runnable { launchSession() }
@@ -340,7 +357,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         if (!surfaceReady || !wantConnected || session != null) return
         setTouchState(false, "")       // until the new session's INPT arrives
         acquireWifiLock()
-        session = StreamSession(t, appVersion(), b.surface.holder.surface, this, networks::networkFor)
+        session = StreamSession(t, appVersion(), b.surface.holder.surface, this,
+            networks::networkFor, networks::isDirect)
     }
 
     private fun userDisconnect(why: String) {
@@ -392,6 +410,15 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         everStreamed = true
         reconnectAttempt = 0
         stopNote = ""
+        if (switchingToDirect) {
+            switchingToDirect = false
+            // The reconnect landed back on the same address, not the direct
+            // link (it failed TLS, say): stay put a while instead of switching
+            // back and forth.
+            if (linkHost == switchedFrom) directSwitchNotBefore = SystemClock.uptimeMillis() + DIRECT_RETRY_MS
+        }
+        ui.removeCallbacks(directCheck)
+        ui.postDelayed(directCheck, DIRECT_CHECK_MS)
         val wasConnecting = state == State.CONNECTING
         setState(State.LIVE)
         if (wasConnecting) {
@@ -462,7 +489,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         }
         // It worked before: keep the last frame up and retry with backoff
         // (cable re-plugged, Wi-Fi roam, daemon restarted for a config change).
-        stopNote = reason.orEmpty()
+        stopNote = if (switchingToDirect) "moving to the USB link" else reason.orEmpty()
         setState(State.RECONNECTING)
         // the computer may ask us to wait longer (e.g. all phone slots taken)
         val delay = maxOf(BACKOFF_MS[reconnectAttempt.coerceAtMost(BACKOFF_MS.size - 1)], retryAfterMs)
@@ -741,6 +768,46 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     }
 
     /**
+     * While LIVE over Wi-Fi: if one of the computer's addresses is now on a
+     * direct link (USB tethering, adb) and Tandem answers there, end this
+     * session; the reconnect prefers the direct link (StreamSession.connectAny).
+     * The probe is a bare TCP connect that is closed at once, which the daemon
+     * treats as a lost connect race: not logged, not counted as a failed
+     * pairing. Runs every [DIRECT_CHECK_MS] and stops once on a direct link.
+     */
+    private fun checkDirectLink() {
+        ui.removeCallbacks(directCheck)
+        val t = target
+        val current = session
+        if (state != State.LIVE || t == null || current == null || !wantConnected) return
+        ui.postDelayed(directCheck, DIRECT_CHECK_MS)
+        if (probing || SystemClock.uptimeMillis() < directSwitchNotBefore) return
+        val onHost = linkHost
+        probing = true
+        prober.execute {
+            val found = try {
+                if (networks.isDirect(onHost)) null
+                else t.candidateHosts.firstOrNull { it != onHost && networks.isDirect(it) && reachable(it, t.port) }
+            } catch (_: Exception) { null }
+            ui.post {
+                probing = false
+                if (found != null && session === current && state == State.LIVE && linkHost == onHost) {
+                    Log.i(TAG, "$found is reachable over a direct link; moving off $onHost")
+                    switchingToDirect = true
+                    switchedFrom = onHost
+                    reconnectAttempt = 0
+                    current.stop()   // onStopped reconnects; connectAny prefers the direct link
+                }
+            }
+        }
+    }
+
+    private fun reachable(host: String, port: Int): Boolean = try {
+        Socket().use { it.connect(InetSocketAddress(InetAddress.getByName(host), port), PROBE_TIMEOUT_MS) }
+        true
+    } catch (_: Exception) { false }
+
+    /**
      * A network came or went. A pending reconnect retries at once (Wi-Fi
      * back, cable plugged in). If the network carrying a live stream went
      * away, end that session now rather than after the read timeout.
@@ -807,6 +874,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         session?.stop()
         releaseWifiLock()
         networks.stop()
+        prober.shutdownNow()
     }
 
     companion object {
@@ -814,6 +882,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         private const val MIN_RIPPLE_MS = 550L
         private val BACKOFF_MS = longArrayOf(300, 800, 1500, 2500, 3000)
         private const val NETWORK_SETTLE_MS = 300L     // let routes / DHCP settle first
+        private const val DIRECT_CHECK_MS = 2000L      // how often a Wi-Fi stream looks for USB
+        private const val DIRECT_RETRY_MS = 30_000L    // after a switch that didn't stick
+        private const val PROBE_TIMEOUT_MS = 500
         private const val EDGE_EXCLUSION_WIDTH_DP = 32f
         private const val EDGE_EXCLUSION_HEIGHT_DP = 200f
         private val EMPHASIZED = PathInterpolator(0.2f, 0f, 0f, 1f)
@@ -853,6 +924,38 @@ private class NetworkWatcher(
     fun networkFor(address: InetAddress): Network? =
         links.entries.firstOrNull { (_, lp) -> lp.linkAddresses.any { onSubnet(it, address) } }?.key
 
+    /**
+     * True if [host] (an IP literal) is reached over a link the phone provides
+     * itself: USB tethering (or the phone's own hotspot), or 127.0.0.1 through
+     * adb. Such a link is the phone's *downstream* interface, which Android
+     * never reports as a [Network]. So: an interface that is up, has [host]
+     * on its subnet, and is not the interface of any network the system knows.
+     * Works for any tether subnet and interface name (rndis0, usb0, ncm0...).
+     * Does blocking interface enumeration: call it off the UI thread.
+     */
+    fun isDirect(host: String): Boolean {
+        val address = literal(host) ?: return false
+        if (address.isLoopbackAddress) return true
+        val known = HashSet<String>()
+        try {
+            @Suppress("DEPRECATION")
+            cm?.allNetworks?.forEach { n -> cm.getLinkProperties(n)?.interfaceName?.let(known::add) }
+        } catch (_: Exception) {}
+        links.values.mapNotNullTo(known) { it.interfaceName }
+        val interfaces = try { NetworkInterface.getNetworkInterfaces()?.toList() } catch (_: Exception) { null }
+            ?: return false
+        return interfaces.any { nif ->
+            try {
+                nif.isUp && !nif.isLoopback && nif.name !in known &&
+                    nif.interfaceAddresses.any { ia ->
+                        val a = ia.address
+                        a != null && (a is Inet4Address) == (address is Inet4Address) &&
+                            onSubnet(a.address, ia.networkPrefixLength.toInt(), address)
+                    }
+            } catch (_: Exception) { false }
+        }
+    }
+
     override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
         val before = links.put(network, lp)
         if (before?.linkAddresses != lp.linkAddresses) onChange(null)
@@ -865,18 +968,24 @@ private class NetworkWatcher(
     companion object {
         /** [host] (an IP literal) is on one of [lp]'s subnets. */
         fun holds(lp: LinkProperties, host: String): Boolean {
-            // literals only: never a DNS lookup on the UI thread
-            val literal = host.isNotEmpty() && (host.all { it.isDigit() || it == '.' } || ':' in host)
-            if (!literal) return false
-            val address = try { InetAddress.getByName(host) } catch (_: Exception) { return false }
+            val address = literal(host) ?: return false
             return lp.linkAddresses.any { onSubnet(it, address) }
         }
 
-        private fun onSubnet(link: LinkAddress, address: InetAddress): Boolean {
-            val a = link.address.address
+        /** [host] as an address if it is an IP literal: never a DNS lookup. */
+        private fun literal(host: String): InetAddress? {
+            val isLiteral = host.isNotEmpty() && (host.all { it.isDigit() || it == '.' } || ':' in host)
+            if (!isLiteral) return null
+            return try { InetAddress.getByName(host) } catch (_: Exception) { null }
+        }
+
+        private fun onSubnet(link: LinkAddress, address: InetAddress): Boolean =
+            onSubnet(link.address.address, link.prefixLength, address)
+
+        private fun onSubnet(a: ByteArray, prefixLength: Int, address: InetAddress): Boolean {
             val b = address.address
             if (a.size != b.size || address.isLoopbackAddress) return false
-            val bits = link.prefixLength.coerceIn(0, a.size * 8)
+            val bits = prefixLength.coerceIn(0, a.size * 8)
             for (i in 0 until bits / 8) if (a[i] != b[i]) return false
             val rest = bits % 8
             if (rest == 0) return true

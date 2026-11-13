@@ -87,7 +87,10 @@ named token in `values/colors.xml`, mapped onto the Material roles in
 3. **Enter address manually**, such as `192.168.42.129` or `192.168.42.129:5000`.
 
 The QR code lists every address the computer has, including USB tethering and
-Wi-Fi. The app tries them all in parallel and keeps the first one that answers.
+Wi-Fi. The app tries them all in parallel and keeps the first one that answers,
+except that the USB cable wins over Wi-Fi when both answer. If the cable is pulled
+mid-stream the app carries on over Wi-Fi, and when it is plugged back in the
+stream moves back to the cable by itself within a few seconds.
 
 **Launch splash** (`AsciiSplashView`). It matches the website's splash. "Tandem"
 appears in ASCII characters on black. Drops spread from the centre, or from
@@ -204,6 +207,20 @@ The activity moves through `IDLE → CONNECTING → LIVE ⇄ RECONNECTING → ID
   after 300 ms, but never sooner than the computer's `retry_after`. Losing the
   network that carries a live stream ends that session at once, instead of
   waiting for the read timeout.
+- **Moving back to the cable** (`checkDirectLink`). A stream over Wi-Fi checks
+  every 2 s whether one of the computer's addresses is on a *direct* link
+  (`NetworkWatcher.isDirect`: USB tethering or the phone's own hotspot, or adb
+  on 127.0.0.1). The phone is the router on such a link, so Android never
+  reports it as a `Network` and no callback fires when the cable comes back:
+  a direct link is an interface that is up, holds the address on its subnet and
+  is not the interface of any known network, which works for every tether
+  subnet and interface name. If Tandem answers there (a bare TCP connect,
+  closed at once, which the daemon treats as a lost connect race: not logged,
+  not counted as a failed pairing), the session ends and the reconnect lands on
+  the cable. Before this, a stream that fell back to Wi-Fi when the cable was
+  pulled stayed on Wi-Fi after it was plugged back in, with Wi-Fi's higher
+  latency. If a switch lands back on the same Wi-Fi address (the direct link
+  failed TLS, say), the check pauses for 30 s so it can't flap.
 - **Wi-Fi lock.** The low-latency Wi-Fi lock is taken when a session is
   launched and released in `surfaceDestroyed`, when connecting fails, and on
   disconnect.
@@ -243,7 +260,10 @@ straight away is not lost.
 **Connect.** TCP connects are raced on every candidate host (the last address
 that worked first, then the QR's list), with a 3 s timeout for each. A host that
 fails TLS or the certificate pin falls through to the next one, and losing and
-late sockets are closed. Each socket is bound to the Android network whose
+late sockets are closed. A direct link (`isDirect`, see *Moving back to the
+cable*) beats Wi-Fi: a Wi-Fi socket that answers while a direct attempt is
+still running is held for up to 400 ms (`DIRECT_GRACE_MS`) and used only if
+the direct one fails or stays silent. Each socket is bound to the Android network whose
 subnet holds the address (`networkFor`), so a Wi-Fi address goes over Wi-Fi
 even when mobile data is the default network. Loopback is not bound, and if
 binding fails the socket stays unbound. Each socket is marked DSCP AF41
