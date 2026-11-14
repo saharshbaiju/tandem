@@ -343,4 +343,10 @@ Copyright (C) 2026 Saharsh Baiju.
 
 ## Star history
 
-[![Star History Chart](https://api.star-history.com/svg?repos=saharshbaiju/tandem&type=Date)](https://star-history.com/#saharshbaiju/tandem&Date)
+<a href="https://star-history.com/#saharshbaiju/tandem&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=saharshbaiju/tandem&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=saharshbaiju/tandem&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=saharshbaiju/tandem&type=Date&theme=dark" />
+  </picture>
+</a>
