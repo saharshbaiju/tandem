@@ -340,3 +340,7 @@ additional terms allowed by its section 7. They are written out in [NOTICE](NOTI
   Google Play services, which is not free software. Linking with it is permitted.
 
 Copyright (C) 2026 Saharsh Baiju.
+
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=saharshbaiju/tandem&type=Date)](https://star-history.com/#saharshbaiju/tandem&Date)
