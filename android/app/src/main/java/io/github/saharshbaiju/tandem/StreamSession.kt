@@ -1166,6 +1166,7 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
     private var unansweredInputs = 0
     private var lastInputNs = 0L
     private var lastPtsUs = 0L
+    private var presentationClock = FramePresentationClock(0)
 
     private var candidates: List<MediaCodecInfo> = emptyList()
     private var candidatesFor = ""
@@ -1181,8 +1182,7 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
         override fun onOutputBufferAvailable(mc: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
             if (mc !== codec) return
             try {
-                // render = true: shown at the next vsync. The input PTS is the
-                // monotonic clock at queue time, so it is never in the future.
+                // Preserve the bounded presentation deadline attached to this input.
                 mc.releaseOutputBuffer(index, true)
             } catch (_: IllegalStateException) {
                 return   // released meanwhile
@@ -1219,6 +1219,8 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
      */
     fun configure(sps: ByteArray, pps: ByteArray, hintWidth: Int, hintHeight: Int, fps: Int) {
         release()
+        presentationClock = FramePresentationClock(fps)
+        lastPtsUs = 0L
         val (spsW, spsH) = H264.codedSize(sps) ?: (0 to 0)
         val w = spsW.takeIf { it > 0 } ?: hintWidth.takeIf { it > 0 } ?: 1920
         val h = spsH.takeIf { it > 0 } ?: hintHeight.takeIf { it > 0 } ?: 1080
@@ -1310,7 +1312,7 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
 
     /** Monotonic, strictly increasing: the platform reads it as the render time. */
     private fun nextPtsUs(): Long {
-        lastPtsUs = maxOf(System.nanoTime() / 1000, lastPtsUs + 1)
+        lastPtsUs = maxOf(presentationClock.nextNs(System.nanoTime()) / 1000, lastPtsUs + 1)
         return lastPtsUs
     }
 

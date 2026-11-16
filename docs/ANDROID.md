@@ -1,8 +1,8 @@
 # Tandem Android app
 
 The phone is a thin client. It connects, decodes H.264 with the hardware
-decoder, puts each frame on screen as soon as it is ready, and sends touches back
-so the phone works as a touch monitor. This document covers the UI, the
+decoder, schedules high-refresh frames with bounded headroom, and sends touches
+back so the phone works as a touch monitor. This document covers the UI, the
 components, how a frame moves through the app, and how to develop and debug it.
 The Linux side is described in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
@@ -339,14 +339,25 @@ exynos, amlogic, hisi). Tuned also sets `KEY_MAX_INPUT_SIZE` to the largest of
 width × height × 3/2, the largest access unit seen so far, and 1 MiB, capped at
 24 MiB. Input buffers sized for a guessed 1080p resolution would silently drop
 large keyframes at a phone's native resolution. A decoder that fails without
-producing a single frame is skipped next time. Input timestamps are
-`System.nanoTime()/1000`, strictly increasing. A new SPS, such as one from a
-resolution change after a daemon restart, releases the decoder and rebuilds it
-at the next keyframe.
+producing a single frame is skipped next time. Input timestamps use the monotonic
+clock and are strictly increasing. For advertised source rates of 90–240 fps,
+`FramePresentationClock` schedules about three frame periods ahead: deadlines
+advance by one period, reanchor when fewer than two periods remain, and stay
+within four periods of input arrival. Idle input and codec reconfiguration start
+a fresh schedule; a cached GOP burst cannot build an unbounded display queue.
+Lower, unknown and out-of-range rates keep immediate timestamps. This trades a
+small amount of latency for fewer frames competing for the same display vsync.
+At 120 fps the nominal requested lead is 25 ms; this is not additional measured
+end-to-end latency. Bounded deadlines alone do not guarantee smoother output
+or bound total pipeline latency.
+A new SPS, such as one from a resolution change after a daemon restart, releases
+the decoder and rebuilds it at the next keyframe.
 
 **Output.** Each output buffer is released with `render = true` as soon as it is
-decoded, on the decoder's own thread. The first one fires `onFirstFrame`, which
-starts the water reveal. `INFO_OUTPUT_FORMAT_CHANGED` reports the cropped size
+decoded, on the decoder's own thread. Android uses its input PTS as the surface's
+presentation deadline, including the bounded headroom above. Releasing a decoded
+buffer is not proof that the display presented it. The first one fires
+`onFirstFrame`, which starts the water reveal. `INFO_OUTPUT_FORMAT_CHANGED` reports the cropped size
 (1080 rather than the encoder's padded 1088), so the letterbox is exact.
 
 **Recovery** (`checkHealth`, `resetDecoder`, `startResync`). Every case ends the
@@ -496,7 +507,7 @@ from the current session's `INPT`, so a stale answer cannot switch it on.
 | --- | --- |
 | Hardware `MediaCodec` into a `Surface` | No copies into app memory, and decoding runs on the video block |
 | `KEY_LOW_LATENCY` and no B-frames | The decoder skips its reorder buffer |
-| Render on arrival (`releaseOutputBuffer(i, true)` in the decoder callback) | No frame pacing and no jitter buffer |
+| Release decoded buffers immediately with `render = true` | The surface follows input PTS; 90–240 fps streams have bounded presentation headroom |
 | Whole access units per buffer, split on `first_mb_in_slice` | The decoder never waits for the rest of a frame |
 | Reader, decoder and sender on separate threads | A slow decoder never stops the socket from being read, and touches never wait behind video |
 | Skip a stale backlog, then `KEYQ` | After a stall the phone jumps back to "now" instead of playing seconds of old frames |
@@ -515,7 +526,7 @@ socket bytes ─▶ FrameReader.next() ─▶ "NALU" body (00 00 00 01 41 …)  
    ─▶ AccessUnitAssembler: new AU at first_mb_in_slice = 0 ─▶ AU            [Feeder]
    ─▶ free input index (onInputBufferAvailable) → put → queueInputBuffer
    ─▶ onOutputBufferAvailable → releaseOutputBuffer(render = true)          [decoder thread]
-   ─▶ SurfaceFlinger composes it at the next vsync ─▶ your eyes
+   ─▶ SurfaceFlinger composes it at/after its presentation deadline ─▶ your eyes
 ```
 
 ---
@@ -591,6 +602,21 @@ On Android 10 or older, run `adb -d tcpip 5555`, unplug the phone, and run
 video still goes straight to the PC.
 
 ---
+
+
+### 7.6 Local presentation-clock tests
+
+The pure Kotlin scheduling tests need no phone or compositor:
+
+```bash
+cd android
+JAVA_HOME=/path/to/jdk-17-or-21 ./gradlew :app:testDebugUnitTest
+```
+
+They cover arrival jitter, cached bursts, idle and late input, supported-rate
+boundaries, near-nominal cadence, and independent clock instances. Codec
+configuration resets are checked at the integration call site, not by these
+pure helper tests.
 
 ## 8. Limitations and next steps
 
