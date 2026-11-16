@@ -114,6 +114,7 @@
 <style>
 /* Black and white. Grays only where something needs to step back. */
 :root {
+  --gold: #F5B800;
   --black: #000000;
   --white: #F8FAFD;
   --gray-1: #8E918F;   /* secondary text */
@@ -627,37 +628,79 @@ main, footer { position: relative; z-index: 1; }
 .gh-stars { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .gh-stars svg { width: 12px; height: 12px; }
 
-/* Star nudge: right after the splash, a small gold star pops out of
- * the grey star by the star count in the nav, hangs there for a moment and
- * drops back in. (Before the count loads, it uses the GitHub icon.) A quiet
- * reminder that starring helps. Once per visit, never with reduced motion. */
+/* Star nudge: right after the splash, a gold star comes out of the grey
+ * star by the star count in the nav, comes forward toward you in place
+ * with a spin and a
+ * shine, and goes back in. (Before the count loads, it uses the GitHub
+ * icon.) Then a small "Why star?" tag drops down under it for a few
+ * seconds; clicking it scrolls to the line in "Built in the open" that
+ * explains why, which lights up and fades. With reduced
+ * motion there is no star, only the tag. Plays on every load. */
 .gh-link { position: relative; }
 .star-nudge {
-  position: absolute; left: 10px; top: 50%; width: 18px; height: 18px;
-  margin: -9px 0 0 -9px; color: #F5B800; pointer-events: none;
-  opacity: 0; transform: translate(0, 0) scale(0);
-  filter: drop-shadow(0 0 6px rgba(245, 184, 0, .55));
+  position: absolute; left: 10px; top: 50%; width: 16px; height: 16px;
+  margin: -8px 0 0 -8px; color: var(--gold); pointer-events: none; z-index: 2;
+  opacity: 0; transform: scale(0);
 }
-.star-nudge svg { width: 100%; height: 100%; display: block; }
-.gh-link.nudge .star-nudge { animation: star-nudge 2.4s cubic-bezier(.3, 1.4, .5, 1) both; }
-.gh-link.nudge .nudge-from { animation: gh-bump 2.4s ease both; }
-.gh-link.nudge .gh-stars .nudge-from { color: #F5B800; transition: color .2s; }
-@keyframes star-nudge {
-  0%   { opacity: 0; transform: translate(0, 0) scale(0) rotate(-90deg); }
-  18%  { opacity: 1; transform: translate(0, 30px) scale(1.25) rotate(10deg); }
-  26%  { transform: translate(0, 28px) scale(1) rotate(0deg); }
-  36%  { transform: translate(0, 28px) scale(1.12) rotate(0deg); }
-  44%  { transform: translate(0, 28px) scale(1) rotate(0deg); }
-  70%  { opacity: 1; transform: translate(0, 28px) scale(1) rotate(0deg); }
-  100% { opacity: 0; transform: translate(0, 0) scale(0) rotate(90deg); }
+.star-nudge > svg:not(.rays) { position: relative; width: 100%; height: 100%; display: block; }
+/* The shine: a burst of solid gold rays around the star, crisp like the
+ * star itself (no blur). */
+.star-nudge .rays { position: absolute; inset: -9px; width: auto; height: auto; opacity: 0; overflow: visible; }
+.star-nudge .rays line { stroke: var(--gold); stroke-width: 1.4; stroke-linecap: round; }
+.gh-link.nudge .star-nudge { animation: star-fly 2.2s cubic-bezier(.3, 1.3, .5, 1) both; }
+.gh-link.nudge .star-nudge .rays { animation: star-rays 2.2s ease-out both; }
+.gh-link.nudge .nudge-from { animation: gh-bump 2.2s ease both; }
+.gh-link.nudge .gh-stars .nudge-from { color: var(--gold); transition: color .2s; }
+@keyframes star-fly {
+  0%   { opacity: 0; transform: scale(.3) rotate(-200deg); }
+  24%  { opacity: 1; transform: scale(2.9) rotate(12deg); }
+  32%  { transform: scale(2.5) rotate(0deg); }
+  64%  { opacity: 1; transform: scale(2.5) rotate(0deg); }
+  100% { opacity: 0; transform: scale(.3) rotate(220deg); }
+}
+/* Two crisp bursts: rays shoot out from the star and vanish. */
+@keyframes star-rays {
+  0%, 22% { opacity: 0; transform: scale(.5) rotate(0deg); }
+  28%     { opacity: 1; transform: scale(.9) rotate(0deg); }
+  38%     { opacity: 0; transform: scale(1.25) rotate(0deg); }
+  44%     { opacity: 0; transform: scale(.5) rotate(22.5deg); }
+  50%     { opacity: 1; transform: scale(.9) rotate(22.5deg); }
+  60%, 100% { opacity: 0; transform: scale(1.25) rotate(22.5deg); }
 }
 @keyframes gh-bump {
   0%, 100% { transform: scale(1); }
-  8%  { transform: scale(.85); }
-  16% { transform: scale(1.08); }
+  8%  { transform: scale(.8); }
+  16% { transform: scale(1.15); }
   24% { transform: scale(1); }
-  92% { transform: scale(1); }
-  96% { transform: scale(1.1); }
+  90% { transform: scale(1); }
+  95% { transform: scale(1.25); }
+}
+
+/* "Why star?": a small rounded tag centred under the nav's star count,
+ * pointing up at it. JS sets --x to the star's centre. */
+.nav li.has-why { position: relative; }
+.why-star-tag {
+  position: absolute; left: var(--x, 50%); top: calc(100% + 11px); white-space: nowrap;
+  font: 500 11px/1 var(--text); letter-spacing: .01em;
+  padding: 5px 9px; border-radius: 5px;
+  color: var(--nav-ink) !important; text-decoration: none;
+  background: var(--nav-bg); border: 1px solid var(--nav-ink);
+  opacity: 0; transform: translate(-50%, -5px); pointer-events: none;
+  transition: opacity .3s, transform .3s var(--ease);
+}
+.why-star-tag::before {   /* the pointer, at the middle of the top edge */
+  content: ""; position: absolute; top: -4px; left: 50%; width: 7px; height: 7px;
+  margin-left: -3.5px; background: inherit; border: inherit; border-width: 1px 0 0 1px;
+  border-radius: 1.5px 0 0 0; transform: rotate(45deg);
+}
+.why-star-tag.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.why-star-tag:hover { background: color-mix(in srgb, var(--nav-ink) 12%, var(--nav-bg)); }
+
+/* The line it points to lights up, then fades back. */
+.why-star.flash { animation: why-flash 3.2s ease-out both; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+@keyframes why-flash {
+  0%, 35% { background: rgb(245 184 0 / .32); box-shadow: 0 0 0 3px rgb(245 184 0 / .32); color: inherit; }
+  100%    { background: rgb(245 184 0 / 0);   box-shadow: 0 0 0 3px rgb(245 184 0 / 0); }
 }
 
 /* Buy me a chai: the UPI QR dialog (computers only) ----------------------------- */
@@ -813,7 +856,7 @@ footer { background: var(--black); }
     <li><a class="nav-chai" href="#chai" data-chai aria-label="Buy me a chai"><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg><span>Buy me a chai</span></a></li>
     <li class="opt"><a href="#demo">See it work</a></li>
     <li class="opt"><a href="#install">Install</a></li>
-    <li><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><span class="star-nudge" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg></span><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a></li>
+    <li class="has-why"><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><span class="star-nudge" aria-hidden="true"><svg class="rays" viewBox="-20 -20 40 40"><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(0)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(45)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(90)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(135)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(180)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(225)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(270)"/><line x1="0" y1="-11" x2="0" y2="-17" transform="rotate(315)"/></svg><svg viewBox="0 0 16 16"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg></span><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a><a class="why-star-tag" href="#why-star" tabindex="-1">Why star?</a></li>
     <li><button class="theme-btn" type="button" id="themeBtn" aria-label="Switch to light theme">Light</button></li>
   </ul>
 </nav>
@@ -994,7 +1037,7 @@ footer { background: var(--black); }
   <div class="wrap oss-grid">
     <div data-rv="ask">
       <h2 class="h2" id="ossTitle" data-rv="head">Built in the open.</h2>
-      <p class="lede">Every line of Tandem is on GitHub. <b>A <em class="claim star-mark">star</em> helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it. Share it with anyone who has a spare phone, or send a fix. <b>Found a bug?</b> Please <a href="https://github.com/saharshbaiju/tandem/issues/new">open an issue on GitHub</a> with your distro, desktop and phone, so it gets fixed for everyone. If it saved you buying a monitor, buy me a chai.</p>
+      <p class="lede"><span class="why-star" id="why-star">Every line of Tandem is on GitHub. <b>A <em class="claim star-mark">star</em> helps more than you'd think:</b> it pushes Tandem in front of a much wider audience, and the community grows with it.</span> Share it with anyone who has a spare phone, or send a fix. <b>Found a bug?</b> Please <a href="https://github.com/saharshbaiju/tandem/issues/new">open an issue on GitHub</a> with your distro, desktop and phone, so it gets fixed for everyone. If it saved you buying a monitor, buy me a chai.</p>
       <div class="ctas">
         <a class="btn solid btn-star" href="https://github.com/saharshbaiju/tandem" aria-label="Star Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg>Star<span class="count" data-stars hidden></span></a>
         <button class="btn" type="button" data-share>Share Tandem</button>
@@ -2510,17 +2553,57 @@ const Footer = (() => {
 })();
 
 /* ===================================================================
- * Star nudge: once per visit, right after the splash, the gold
- * star pops out of the nav's GitHub link and drops back in (CSS above).
- * ?nudge in the URL replays it on every load, for previewing. */
+ * Star nudge: on every load, right after the splash, a gold star flies out
+ * of the nav's star count and back (CSS above), then a "Why star?" tag shows
+ * under it for a few seconds. The tag scrolls to the line that explains
+ * why, which lights up and fades. */
 const StarNudge = (() => {
-  const KEY = "tandem-star-nudge";
   const DELAY = 300;              // right after the splash, once the page has appeared
-  function seen() { try { return sessionStorage.getItem(KEY) === "1"; } catch { return false; } }
-  function remember() { try { sessionStorage.setItem(KEY, "1"); } catch { /* private mode */ } }
+  const TAG_FOR = 8000;           // how long the tag stays
+
+  const tag = document.querySelector(".why-star-tag");
+  let tagTimer = 0;
+  function showTag() {
+    if (!tag) return;
+    // Centre it under the grey star (the GitHub icon until the count loads).
+    const link = tag.parentElement.querySelector(".gh-link");
+    const wrap = link.querySelector("[data-stars-wrap]");
+    const at = wrap && !wrap.hidden ? wrap.querySelector("svg") : link.querySelector(":scope > svg");
+    if (at) {
+      const r = at.getBoundingClientRect(), li = tag.parentElement.getBoundingClientRect();
+      tag.style.setProperty("--x", (r.left - li.left + r.width / 2) + "px");
+    }
+    tag.classList.add("show");
+    tag.tabIndex = 0;
+    clearTimeout(tagTimer);
+    tagTimer = setTimeout(hideTag, TAG_FOR);
+  }
+  function hideTag() {
+    if (!tag) return;
+    tag.classList.remove("show");
+    tag.tabIndex = -1;
+  }
+  // Keep the tag while the pointer is on it.
+  tag?.addEventListener("pointerenter", () => clearTimeout(tagTimer));
+  tag?.addEventListener("pointerleave", () => { if (tag.classList.contains("show")) tagTimer = setTimeout(hideTag, 2500); });
+  tag?.addEventListener("click", e => {
+    e.preventDefault();
+    hideTag();
+    const line = document.getElementById("why-star");
+    if (!line) return;
+    line.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+    // Light it up once the scroll has (about) arrived.
+    setTimeout(() => {
+      line.classList.remove("flash");
+      void line.offsetWidth;
+      line.classList.add("flash");
+    }, reduceMotion ? 0 : 700);
+  });
+
   function play() {
     const link = document.querySelector(".nav .gh-link");
     if (!link) return;
+    if (reduceMotion) { showTag(); return; }
     // Start from the grey star by the count; the GitHub icon until it loads.
     const wrap = link.querySelector("[data-stars-wrap]");
     const from = wrap && !wrap.hidden ? wrap.querySelector("svg") : link.querySelector(":scope > svg");
@@ -2535,15 +2618,15 @@ const StarNudge = (() => {
     link.classList.remove("nudge");
     void link.offsetWidth;          // restart the animation if it already ran
     link.classList.add("nudge");
-    // Clean up when the gold star is back in, so the grey star is grey again.
-    star?.addEventListener("animationend", () => link.classList.remove("nudge"), { once: true });
   }
-  function later() {
-    const preview = new URLSearchParams(location.search).has("nudge");
-    if (reduceMotion || (seen() && !preview)) return;
-    remember();
-    setTimeout(play, DELAY);
-  }
+  // When the star is back in: grey star grey again, and the tag drops down.
+  const star = document.querySelector(".nav .star-nudge");
+  star?.addEventListener("animationend", e => {
+    if (e.target !== star) return;          // the rays end too; wait for the star
+    star.closest(".gh-link").classList.remove("nudge");
+    showTag();
+  });
+  function later() { setTimeout(play, DELAY); }
   return { later, play };
 })();
 
