@@ -34,6 +34,9 @@ atexit.register(shutil.rmtree, SCRATCH_HOME, ignore_errors=True)
 os.environ["HOME"] = SCRATCH_HOME
 os.environ["XDG_CONFIG_HOME"] = os.path.join(SCRATCH_HOME, ".config")
 os.environ["XDG_DATA_HOME"] = os.path.join(SCRATCH_HOME, ".local", "share")
+os.environ["XDG_CACHE_HOME"] = os.path.join(SCRATCH_HOME, ".cache")
+# The TUI's update check never reaches GitHub from a test.
+os.environ["TANDEM_NO_UPDATE_CHECK"] = "1"
 # Tests run inside a desktop session must not reach the real compositor (the
 # KDE backend asks its process where its desktop entries live): no Wayland
 # display, and a runtime directory of our own. Tests that need one set these

@@ -122,6 +122,15 @@ Disconnecting is a deliberate tap in the sheet. Back while connecting cancels th
 attempt. A status pill appears only while the picture may be frozen: *Connecting…*
 while connecting, and *Reconnecting…* when a working link drops.
 
+**Screen size.** Right after pairing, the app sends the computer its window size
+in pixels (`SIZE`): the whole screen as held, since the app draws under the system
+bars. It sends it again when that changes (a foldable unfolds, split screen). With
+*Fit to device* on, the computer gives its virtual monitor that size, so the
+picture fills the screen with no black bars. The app needs nothing else for it: a
+new size arrives as a new SPS, and the decoder and the letterbox follow it as they
+do for any resolution change. See *Fit to device* in
+[`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
 **Touch.** When the computer has touch input on, every touch on the video goes
 to the computer (section 4.6). Tap, drag, scroll, long-press and pinch are handled
 by the desktop apps, as they would be on a real touchscreen. The computer's mouse
@@ -159,9 +168,10 @@ app/src/main/java/io/github/saharshbaiju/tandem/
   SecureChannel.kt         TLS with certificate pinning, pairing-key proofs (HMAC),
                            pairing-code format (mirrors linux/secure_link.py)
   FrameReader.kt           the daemon's framed protocol: NALU / ASX1 / PING / INPT
-  FrameWriter.kt           phone-to-computer frames: HELO / AUTH / TUCH / KEYQ / PING
+  FrameWriter.kt           phone-to-computer frames: HELO / AUTH / TUCH / KEYQ / PING / SIZE
   TouchForwarder.kt        MotionEvent → TUCH (fractions of the video picture); TouchQueue
   ConnectTarget.kt         tandem:// QR and deep-link parsing, manual entry, persistence
+  UpdateCheck.kt           "a newer Tandem is out": latest GitHub release, once a day
   RippleRevealLayout.kt    water ripple and reveal (AGSL on Android 13+, canvas fallback)
   AsciiSplashView.kt       launch splash: ASCII wordmark, ripples, reveal (a port of the website's)
   AsciiWordmarkView.kt     the connect screen's "Tandem" in ASCII (static)
@@ -252,7 +262,7 @@ A session runs on four threads, so that no stage waits on another:
 | Socket reader (`StreamSession.run`) | `DISPLAY` | Connects, runs the handshake, then only reads frames. It never waits on the decoder |
 | `Feeder` (`stream-decode`) | `URGENT_DISPLAY` | Owns the codec. Builds access units, feeds the decoder, recovers locally |
 | `VideoDecoder` callbacks (`stream-decoder`, a `HandlerThread`) | `URGENT_DISPLAY` | `MediaCodec` in asynchronous mode. Each decoded frame is released to the Surface at once |
-| `Sender` | | Writes touches, `KEYQ` and `PING` in batches |
+| `Sender` | | Writes touches, `KEYQ`, `PING` and `SIZE` in batches |
 
 The Sender is started before the Feeder, so a keyframe request the Feeder makes
 straight away is not lost.
@@ -600,3 +610,41 @@ video still goes straight to the PC.
   that worked. If the computer's address changes, scan the QR code again.
 - The QR scanner needs Google Play services. Without them, use the stock camera or
   enter the address manually.
+
+## Update check (`UpdateCheck.kt`)
+
+The app is installed from GitHub Releases, not a store, so nothing would tell a
+user that a new version exists. From 0.8.0 the app checks by itself:
+
+- **When:** at launch, at most once a day. The answer (the newest stable
+  release and the newest pre-release, with their pages) is kept in the app's
+  preferences, so later launches that day show the card without going online.
+- **What is sent:** one HTTPS `GET` to
+  `api.github.com/repos/saharshbaiju/tandem/releases?per_page=20`, with the
+  generic User-Agent `Tandem-update-check`. No identifiers, no settings, nothing
+  about the paired computer. It runs on its own thread, so a slow network never
+  holds up the connect screen or the link probes.
+- **What the user sees**, in a card under the credit on the connect screen:
+  - **Update available** when the newest stable release is newer than the app:
+    "Tandem 0.8.1 is out. You have 0.8.0." **Update** opens the release page;
+    **Later** hides the card until a newer release.
+  - Otherwise **Want to try the beta?** when a pre-release is newer than both
+    the app and the newest stable release: "Tandem 0.9.0-beta.1 is out for
+    testing. It has the newest features, and may still have bugs." **Try it**
+    opens its release page; **No thanks** hides the card until a newer beta.
+  - Every release and beta is signed with the same key, so its `Tandem.apk`
+    installs over the app and keeps the pairing. A beta has a higher
+    `versionCode` than the release before it, and its final release a higher
+    one again, so a beta user moves on to the release as a normal update.
+- **Never offered:** drafts, an old beta (one whose release is out, or older
+  than the app), and anything when GitHub can't be reached, rate-limits, or
+  answers with something unexpected. Those cases are logged at info level and
+  otherwise ignored.
+- **Ordering:** numbers compare as numbers (`0.10.0` is newer than `0.9.9`), a
+  pre-release comes before its release (`0.9.0-beta.2` < `0.9.0`), and a
+  `-debug` suffix is ignored. GitHub's *pre-release* flag decides whether a
+  release is a beta. Covered by `app/src/test/…/UpdateCheckTest.kt`
+  (`./gradlew testDebugUnitTest`).
+
+The PC side checks stable releases only (`linux/update_check.py`): betas there
+are installed by naming their tag, see [RELEASING.md](RELEASING.md#beta-releases).

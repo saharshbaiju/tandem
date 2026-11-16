@@ -16,6 +16,7 @@ Run:  python3 tui.py     (or tandem)
 import copy
 import curses
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -26,6 +27,7 @@ import time
 from collections import deque
 
 import about
+import update_check
 import backends
 import core
 import qr
@@ -100,9 +102,12 @@ def run_shell(win, cmd, prompt="press Enter to return"):
 # Config keys that change the capture/encode pipeline: changing any of these
 # needs the daemon restarted. side/scale are applied live by the daemon itself
 # (SIGUSR1 -> backend.apply_live); transport only changes the QR's host order.
-RESTART_KEYS = ("backend", "output", "width", "height", "fps", "quality",
-                "encoder", "codec", "gop", "port", "touch")
+RESTART_KEYS = ("backend", "output", "width", "height", "fit_device", "fps",
+                "quality", "encoder", "codec", "gop", "port", "touch")
 LIVE_KEYS = ("side", "scale")
+# The daemon's lines saying the monitor's size changed (device_fit.py).
+MONITOR_SIZE_LINE = re.compile(r"(?:virtual monitor is now|starting at the "
+                               r"last device's size) (\d+)x(\d+)")
 # Daemon log lines kept for the live view (all of them go to the log file).
 LOG_LINES_KEPT = 200
 
@@ -125,6 +130,7 @@ class Stream:
         self.state = {"live": 0, "ever": False}
         self.error = None
         self.touch_status = ""          # daemon's "touch input: ..." verdict
+        self.monitor_size = None        # (w, h) once fitted to a phone
         self.notice = ""                # e.g. "port 5000 is used by …"
         self.stop = threading.Event()
         # True from start() until disconnect() removed the monitor. A daemon
@@ -233,6 +239,9 @@ class Stream:
                 self.state["ever"] = True
             elif "client disconnected" in line:
                 self.state["live"] = max(0, self.state["live"] - 1)
+            elif MONITOR_SIZE_LINE.search(line):
+                match = MONITOR_SIZE_LINE.search(line)
+                self.monitor_size = (int(match[1]), int(match[2]))
             elif "touch input:" in line:
                 self.touch_status = line.split("touch input:", 1)[1].strip()
             elif "error:" in line:
@@ -329,9 +338,19 @@ MENU = [
 ]
 
 
-def main_menu(win, cfg, stream):
+def main_menu(win, cfg, stream, updates=None):
     sel = 0
     running = stream is not None and stream.running()
+    # Redraw every half second while idle, so the update line appears as
+    # soon as the background check answers.
+    win.timeout(500)
+    try:
+        return _main_menu_loop(win, cfg, stream, updates, sel, running)
+    finally:
+        win.timeout(-1)
+
+
+def _main_menu_loop(win, cfg, stream, updates, sel, running):
     while True:
         header(win)
         addstr(win, 3, 2, "What do you want to do?", curses.A_BOLD)
@@ -357,9 +376,18 @@ def main_menu(win, cfg, stream):
             addstr(win, row, 2, "○ Tandem stopped", curses.color_pair(5))
 
         summ = (f"{backends.describe(cfg.resolved_backend())}   "
-                f"side={cfg.side}  {cfg.width}x{cfg.height}@{cfg.fps}  "
+                f"side={cfg.side}  {resolution_text(cfg)}@{cfg.fps}  "
                 f"quality={cfg.quality}  port={cfg.port}")
         addstr(win, row + 1, 2, summ, curses.color_pair(5))
+        if updates is not None and updates.available:
+            addstr(win, row + 3, 2,
+                   f"↑ Tandem {updates.available} is out (you have "
+                   f"{about.VERSION}). To update, quit and run:",
+                   curses.color_pair(3) | curses.A_BOLD)
+            addstr(win, row + 4, 4, update_check.UPDATE_COMMAND)
+            addstr(win, row + 5, 4, "Then update the phone app from the "
+                   "release page (github.com/saharshbaiju/tandem/releases).",
+                   curses.color_pair(5))
         footer(win, "↑/↓ move   Enter select   q quit")
         win.refresh()
 
@@ -555,16 +583,17 @@ def configure_screen(win, cfg, live=False):
         ("Touch input", "choice", "touch", [True, False]),
         ("Paired phones", "forget", None, None),
     ]
-    res_idx = next((i for i, (_lbl, dims) in enumerate(core.RES_PRESETS)
-                    if dims == (cfg.width, cfg.height)), 0)
+    res_idx = 0 if cfg.fit_device else next(
+        (i for i, (_lbl, dims) in enumerate(core.RES_PRESETS)
+         if dims == (cfg.width, cfg.height)), None)
     sel = 0
     while True:
         header(win)
         addstr(win, 3, 2, "Configuration  (←/→ to change a value)", curses.A_BOLD)
         for i, (label, kind, key, choices) in enumerate(rows):
             if kind == "resolution":
-                preset = core.RES_PRESETS[res_idx][0]
-                value = f"{cfg.width}x{cfg.height}   [{preset}]"
+                value = (resolution_text(cfg) if cfg.fit_device
+                         else f"{cfg.width}x{cfg.height}")
             elif kind == "port":
                 value = str(cfg.port)
             elif key == "quality":
@@ -621,8 +650,9 @@ def configure_screen(win, cfg, live=False):
                 # The choices depend on the backend row above, so ask anew.
                 cfg.encoder = cycle(cfg.encoder_choices(), cfg.encoder, step)
             elif kind == "resolution":
-                res_idx = (res_idx + step) % len(core.RES_PRESETS)
-                _apply_resolution(win, cfg, res_idx)
+                res_idx = ((res_idx if res_idx is not None else 0) + step) \
+                    % len(core.RES_PRESETS)
+                _apply_resolution(cfg, res_idx)
             elif kind == "port":
                 raw = text_prompt(win, "Port", cfg.port)
                 if raw.isdigit():
@@ -638,21 +668,23 @@ def configure_screen(win, cfg, live=False):
             return False, None
 
 
-def _apply_resolution(win, cfg, res_idx):
-    label, dims = core.RES_PRESETS[res_idx]
-    if dims is None:  # "match phone"
-        size = core.detect_phone_size(landscape=True)
-        if size:
-            cfg.width, cfg.height = size
-        else:
-            h, w = win.getmaxyx()
-            addstr(win, h - 2, 2,
-                   "No USB phone detected (needs USB debugging) — "
-                   "connect it and try again.", curses.color_pair(4))
-            win.refresh()
-            curses.napms(1200)
-    else:
+def _apply_resolution(cfg, res_idx):
+    """Set the Resolution row to preset `res_idx`. Fit to device keeps
+    width x height as the size the monitor starts at."""
+    dims = core.RES_PRESETS[res_idx][1]
+    cfg.fit_device = dims is None
+    if dims:
         cfg.width, cfg.height = dims
+
+
+def resolution_text(cfg, fitted=None):
+    """The Resolution setting in words; `fitted` is the size the daemon
+    gave the monitor, when it says."""
+    if not cfg.fit_device:
+        return f"{cfg.width}x{cfg.height}"
+    if fitted:
+        return f"{fitted[0]}x{fitted[1]} (fit to device)"
+    return "fit to device"
 
 
 # --------------------------------------------------------------------------- #
@@ -849,7 +881,8 @@ def live_screen(win, stream):
                        curses.color_pair(5) | curses.A_BOLD)
 
             addstr(win, 5, 2, f"Desktop : {backends.describe(cfg.resolved_backend())}")
-            addstr(win, 6, 2, f"Monitor : {cfg.width}x{cfg.height}@{cfg.fps}  "
+            size = resolution_text(cfg, stream.monitor_size)
+            addstr(win, 6, 2, f"Monitor : {size}@{cfg.fps}  "
                               f"side={cfg.side}  scale={cfg.scale}")
             addstr(win, 7, 2, f"Stream  : h264 @ {cfg.bitrate()}  port {cfg.port}")
 
@@ -981,13 +1014,14 @@ def app(stdscr):
     init_colors()
     cfg = core.load_config()
     stream = None
+    updates = update_check.UpdateCheck()   # once a day, in the background
 
     # first run: go straight to dependencies if anything required is missing
     if core.missing_packages(cfg.resolved_backend(), required_only=True):
         deps_screen(stdscr, cfg)
 
     while True:
-        choice = main_menu(stdscr, cfg, stream)
+        choice = main_menu(stdscr, cfg, stream, updates)
         if choice == "quit":
             # Also after the daemon died: its monitor (--keep-output) is
             # still there. `stream` is None by then; _active still has it.

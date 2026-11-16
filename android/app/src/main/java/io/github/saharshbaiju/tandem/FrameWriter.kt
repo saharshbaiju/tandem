@@ -16,6 +16,9 @@ import java.io.OutputStream
  *           keyframe or asks the encoder for one; older daemons ignore it.
  *   "PING"  empty: sent after 1 s without anything else, so the computer can
  *           tell a live phone from a vanished one. Older daemons ignore it.
+ *   "SIZE"  JSON {"width":W,"height":H}: this screen in pixels, as held, so the
+ *           computer can size its monitor to it (linux/device_fit.py). Sent
+ *           after pairing and when it changes. Older daemons ignore it.
  *
  * Each call goes out in a single write so the bytes of two frames can never
  * interleave; [send] / [sendAll] are synchronized for the same reason.
@@ -49,5 +52,6 @@ class FrameWriter(private val out: OutputStream) {
         const val TYPE_TOUCH = "TUCH"
         const val TYPE_KEYFRAME_REQUEST = "KEYQ"
         const val TYPE_PING = "PING"
+        const val TYPE_SCREEN_SIZE = "SIZE"
     }
 }

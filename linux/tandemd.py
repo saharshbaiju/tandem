@@ -67,6 +67,7 @@ from collections import deque
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import about  # noqa: E402
 import backends  # noqa: E402
+import device_fit  # noqa: E402
 import secure_link  # noqa: E402
 from phone_input import MAX_INCOMING_FRAME, PhoneInput  # noqa: E402
 
@@ -159,6 +160,8 @@ def kill_stale():
 #           to decode something). Answered with a GOP replay / new IDR.
 #   PING -> empty heartbeat. A phone that sends them is timed out after
 #           READ_TIMEOUT of silence (older apps never send one: no timeout).
+#   SIZE -> JSON {"width", "height"}: the phone's screen, so the monitor can
+#           be fitted to it (device_fit.py, with --fit-device).
 # Before any of these, the handshake frames HELO / CHAL / AUTH / OKAY / DENY
 # (secure_link.py). Unknown types are ignored on both ends, so new ones stay
 # compatible.
@@ -206,6 +209,9 @@ def load_banner_payload(args, backend_name=""):
             if data:
                 data.setdefault("host", socket.gethostname())
                 data.setdefault("backend", backend_name)
+                # The file holds the size set in Configure; the monitor may
+                # have been fitted to the phone since (device_fit.py).
+                data["width"], data["height"] = args.width, args.height
                 return json.dumps(data).encode("utf-8")
         except (OSError, ValueError):
             pass
@@ -595,6 +601,9 @@ class Broadcaster:
         self._clients = []
         self.phone_input = phone_input      # handles TUCH / INPT, or None
         self.keyframes = None               # KeyframeSource, set by main()
+        # (who, width, height, only_phone) -> None: a phone's SIZE report,
+        # set by main() when the monitor is fitted to the device.
+        self.on_device_size = None
         self._lock = threading.Lock()
         self.sps = None             # framed
         self.pps = None             # framed
@@ -657,9 +666,18 @@ class Broadcaster:
             c.close()
 
     def _on_client_message(self, client, frame_type, body):
-        """Frames a phone sends: keyframe requests here, the rest is input."""
+        """Frames a phone sends: keyframe requests and screen sizes here, the
+        rest is input."""
         if frame_type == FRAME_KEYFRAME_REQUEST:
             self.resync(client, "phone asked for a keyframe", rate_limit=True)
+        elif frame_type == device_fit.FRAME_SIZE:
+            size = device_fit.parse_size(body)
+            if size is None:
+                log(f"client {client.addr[0]} sent an unreadable screen size")
+            elif self.on_device_size:
+                with self._lock:
+                    only_phone = self._clients == [client]
+                self.on_device_size(client.addr[0], *size, only_phone)
         elif self.phone_input:
             self.phone_input.on_message(client, frame_type, body)
 
@@ -962,7 +980,8 @@ def _close_quietly(stream):
         pass
 
 
-def supervise_capture(backend, stream, broadcaster, stop_evt, restart_evt):
+def supervise_capture(backend, stream, broadcaster, stop_evt, restart_evt,
+                      between_runs=None):
     """Parse the encoder's output; restart the encoder if it exits.
 
     Encoders die mid-session for ordinary reasons (PipeWire renegotiates
@@ -970,6 +989,10 @@ def supervise_capture(backend, stream, broadcaster, stop_evt, restart_evt):
     virtual monitor, the listener and connected phones are kept; phones are
     resynced onto the new stream. Returns True when stop_evt is set, False
     after repeated quick failures (stop_evt is then set too, error logged).
+
+    `between_runs()` is called with the encoder stopped, before it starts
+    again: the moment to resize the monitor (device_fit.py). If it raises,
+    the monitor is unusable and the daemon stops.
     """
     quick_failures = 0
     while True:
@@ -984,6 +1007,13 @@ def supervise_capture(backend, stream, broadcaster, stop_evt, restart_evt):
         _close_quietly(stream)
         stream = None
         broadcaster.stream_restarted()
+        if between_runs:
+            try:
+                between_runs()
+            except Exception as e:
+                log(f"error: {e}")
+                stop_evt.set()
+                return False
         if time.monotonic() - started >= STABLE_RUN or reason != "eof":
             quick_failures = 0
         while stream is None:
@@ -1007,6 +1037,35 @@ def supervise_capture(backend, stream, broadcaster, stop_evt, restart_evt):
                 if stream is None:
                     log("warning: capture restart produced no stream")
         log("capture restarted")
+
+
+def resize_monitor(backend, args, size, broadcaster, save=device_fit.save_last_size):
+    """Give the virtual monitor `size` (the encoder is stopped).
+
+    Each backend resizes its own way (Hyprland changes the mode, GNOME and
+    KDE create the monitor anew at the new size); touch follows on its own.
+    Connected phones get the new size in a fresh banner and decode the new
+    stream from its first keyframe. If the backend can't, the old size is
+    put back; RuntimeError when even that fails (no monitor left).
+    """
+    old = (args.width, args.height)
+    args.width, args.height = size
+    try:
+        backend.resize(*size)
+    except Exception as e:
+        log("warning: could not resize the virtual monitor to {}x{} ({}); "
+            "keeping {}x{}".format(*size, e, *old))
+        args.width, args.height = old
+        try:
+            backend.resize(*old)
+        except Exception as e2:
+            raise RuntimeError("the virtual monitor could not be restored "
+                               f"after a failed resize ({e2})") from e2
+        return False
+    log("virtual monitor is now {}x{}".format(*size))
+    broadcaster.set_banner(load_banner_payload(args, backend.name))
+    save(size)
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -1340,6 +1399,10 @@ def main():
                          "(created if missing)")
     ap.add_argument("--no-touch", dest="touch", action="store_false",
                     help="don't accept touch input from phones")
+    ap.add_argument("--fit-device", action="store_true",
+                    help="size the monitor to the screen of the phone "
+                         "watching it (when it is the only one); --width "
+                         "and --height are the size until a phone says")
     args = ap.parse_args()
 
     # Handlers first: a stop or reload that arrives during the (seconds-long)
@@ -1397,6 +1460,18 @@ def main():
         log(f"warning: --codec {args.codec}: the Tandem app and this daemon's "
             "keyframe handling only support h264; phones will show nothing")
 
+    if args.fit_device and not hasattr(backend, "resize"):
+        log(f"note: the {backend.name} backend can't resize its monitor; "
+            "keeping {}x{}".format(args.width, args.height))
+        args.fit_device = False
+    if args.fit_device:
+        last = device_fit.load_last_size()
+        if last and last != (args.width, args.height):
+            # The same device reconnecting then finds the monitor right.
+            log("fit to device: starting at the last device's size "
+                "{}x{}".format(*last))
+            args.width, args.height = last
+
     kill_stale()
     try:
         backend.setup()
@@ -1408,6 +1483,7 @@ def main():
     touch_surface = None
     phone_input = None
     broadcaster = None
+    fit = None
     failed = False
     try:
         if stop_evt.is_set():
@@ -1428,6 +1504,16 @@ def main():
                                   phone_input)
         restart_evt = threading.Event()
         broadcaster.keyframes = KeyframeSource(backend, restart_evt.set)
+        between_runs = None
+        if args.fit_device:
+            fit = device_fit.DeviceFit(lambda: (args.width, args.height),
+                                       restart_evt.set, log)
+            broadcaster.on_device_size = fit.on_size
+
+            def between_runs():
+                size = fit.take_wanted()
+                if size and size != (args.width, args.height):
+                    resize_monitor(backend, args, size, broadcaster)
 
         threading.Thread(target=accept_loop,
                          args=(args.host, args.port, broadcaster, gatekeeper,
@@ -1463,9 +1549,11 @@ def main():
         threading.Thread(target=control_loop, daemon=True).start()
 
         failed = not supervise_capture(backend, stream, broadcaster,
-                                       stop_evt, restart_evt)
+                                       stop_evt, restart_evt, between_runs)
     finally:
         shutdown()
+        if fit:
+            fit.stop()
         _stop_capture(backend)
         _close_quietly(stream)
         if broadcaster:

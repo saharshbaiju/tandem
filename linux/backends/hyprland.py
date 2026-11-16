@@ -58,6 +58,10 @@ FIRST_EXT_WORKSPACE = 11
 # How long to wait for Hyprland to apply a monitor rule. The Lua API only
 # schedules the reload for the next frame, so the layout is read back after.
 SETTLE_TIMEOUT = 1.5
+# After a mode change, the screencast that starts next can still meet the old
+# mode and fail ("no more input formats" from pipewiresrc). Seen with
+# xdph + NVENC right after a fit-to-device resize; this pause avoids it.
+MODE_CHANGE_SETTLE = 0.5
 
 
 def log(*a):
@@ -1182,6 +1186,24 @@ class HyprlandBackend:
         self._watcher.mute()            # our own change, not the user's
         log(f"moved {a.output} side={side} scale={scale}")
         return ok
+
+    def resize(self, width, height):
+        """Give the output a new mode (device_fit.py); the encoder is stopped.
+
+        The headless output changes size in place, so windows on it stay.
+        Touch needs nothing: the touchscreen is mapped to the output, and
+        Hyprland spreads its range over whatever size the output has.
+        tandemd has already set args.width/height, which _reapply uses.
+        """
+        a = self.a
+        with self._layout_lock:
+            if not place_output(a.output, width, height, a.fps,
+                                valid_scale(width, height, a.scale), a.side):
+                raise RuntimeError(f"Hyprland refused the mode {width}x{height}")
+            if self._touch_mapped:
+                map_touch_device(uinput_touch.DEVICE_NAME, a.output)
+        self._watcher.mute()            # our own change, not the user's
+        time.sleep(MODE_CHANGE_SETTLE)  # before the encoder starts again
 
     def stop_capture(self):
         """Stop the encoder, then end the screencast (before any removal).

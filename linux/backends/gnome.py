@@ -392,6 +392,19 @@ class MutterTouchscreen:
         for slot in sorted(self._active_slots):
             self.up(slot)
 
+    def retarget(self, rd_session, stream_path, width, height):
+        """Send touches to a new session and stream from now on: the monitor
+        was created anew at another size (GnomeBackend.resize). Fingers
+        still down belonged to the old monitor and are forgotten; a later
+        move of one is dropped like any move without a down."""
+        self._active_slots.clear()
+        self._width, self._height = width, height
+
+        def switch():               # on the worker, after calls already queued
+            self._pending_motion.clear()
+            self._session, self._stream = rd_session, stream_path
+        self._worker.run(switch)
+
     def close(self):
         """Lift every finger and let the calls go out before the session is
         stopped in teardown(), then end the worker thread."""
@@ -423,6 +436,8 @@ class MutterTouchscreen:
         self._call(method, signature, values)
 
     def _call(self, method, signature, values):
+        if not self._session:       # touch refused on a re-created monitor
+            return
         self._bus.call(RD_BUS, self._session, RD_SESSION_IFACE, method,
                        GLib.Variant(signature, values), None,
                        Gio.DBusCallFlags.NO_AUTO_START, 1000, None,
@@ -466,6 +481,7 @@ class GnomeBackend:
         self.encoders = EncoderSelector(args, "GNOME")
         self.connector = None
         self._before = set()
+        self._touch = None              # MutterTouchscreen, once created
         # apply_live (control thread) and the placement watcher can run at
         # once; two ApplyMonitorsConfig calls on one serial would fail.
         self._place_lock = threading.Lock()
@@ -548,8 +564,27 @@ class GnomeBackend:
         if not self.remote_desktop:
             raise RuntimeError(self.touch_problem
                                or "touch input is turned off on the computer")
-        return MutterTouchscreen(self.bus, self.remote_desktop, self.stream,
-                                 self.a.width, self.a.height)
+        self._touch = MutterTouchscreen(self.bus, self.remote_desktop,
+                                        self.stream, self.a.width,
+                                        self.a.height)
+        return self._touch
+
+    def resize(self, width, height):
+        """Create the virtual monitor anew at width x height (device_fit.py);
+        the encoder is stopped, and tandemd has set args.width/height.
+
+        A new monitor rather than new caps on the old one: whether a running
+        Mutter virtual monitor follows a renegotiated size differs between
+        GNOME versions, and a new one gets the size it is asked for on every
+        version. Mutter moves the windows that were on it to the other
+        monitors. The touch surface is pointed at the new session.
+        """
+        self.teardown()
+        self.connector = None
+        self.setup()
+        if self._touch:
+            self._touch.retarget(self.remote_desktop, self.stream,
+                                 width, height)
 
     def start_capture(self):
         """Start the encoder on our PipeWire node; returns its H.264 stream.

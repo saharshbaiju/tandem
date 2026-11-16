@@ -49,7 +49,7 @@
       "applicationSubCategory": "Second monitor / screen extender",
       "operatingSystem": "Linux (Hyprland, GNOME on Wayland, KDE Plasma on Wayland), Android 8+",
       "downloadUrl": "https://github.com/saharshbaiju/tandem/releases/latest/download/Tandem.apk",
-      "softwareVersion": "0.7.2",
+      "softwareVersion": "0.8.0",
       "installUrl": "https://raw.githubusercontent.com/saharshbaiju/tandem/main/install.sh",
       "softwareHelp": "https://github.com/saharshbaiju/tandem#readme",
       "license": "https://www.gnu.org/licenses/gpl-3.0.html",
@@ -198,6 +198,39 @@ main, footer { position: relative; z-index: 1; }
   touch-action: none;
 }
 
+/* What's new: a slim bar above the nav for the latest release, inverted
+ * like the security section. Closing it is remembered per release (the
+ * version in data-release), so the next release shows its own bar again.
+ * --news-h is its height, taken off the hero so the first screen still
+ * fits exactly. */
+.news {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  min-height: 44px; padding: 8px 56px; position: relative;
+  background: var(--white); color: var(--black);
+  font: 500 14px/1.35 var(--text); letter-spacing: -.005em; text-align: center;
+  overflow: hidden; transition: height .35s var(--ease), min-height .35s var(--ease), padding .35s var(--ease);
+}
+.news[hidden] { display: none; }
+.news.closing { min-height: 0; padding-top: 0; padding-bottom: 0; }
+.news-tag {
+  flex: none; font: 600 12.5px/1 var(--text); letter-spacing: -.005em;
+  background: var(--red); color: #fff; padding: 5px 8px 6px; border-radius: 3px;
+}
+.news p { margin: 0; }
+.news a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; white-space: nowrap; }
+.news a:hover { text-decoration-thickness: 2px; }
+.news-close {
+  position: absolute; right: max(8px, calc(var(--gutter) - 10px)); top: 50%; translate: 0 -50%;
+  width: 32px; height: 32px; display: grid; place-items: center;
+  background: transparent; border: 0; color: inherit; cursor: pointer; opacity: .6;
+}
+.news-close:hover { opacity: 1; }
+.news-close svg { width: 14px; height: 14px; }
+@media (max-width: 600px) {
+  .news { justify-content: flex-start; text-align: left; padding: 10px 48px 10px 16px; font-size: 13px; }
+  .news .more { display: none; }
+}
+
 /* Nav -------------------------------------------------------------------
  * No rule under it: the nav is the same colour as the section beneath, so
  * it has no visible edge. It stays at the top, slides away while you read
@@ -225,7 +258,7 @@ main, footer { position: relative; z-index: 1; }
 .theme-btn:hover { border-color: var(--nav-ink); }
 
 /* Hero ------------------------------------------------------------------- */
-.hero { min-height: calc(100vh - 61px); min-height: calc(100dvh - 61px); display: flex; flex-direction: column; }
+.hero { min-height: calc(100vh - 61px - var(--news-h, 0px)); min-height: calc(100dvh - 61px - var(--news-h, 0px)); display: flex; flex-direction: column; }
 .hero-main {
   flex: 1;
   display: grid;
@@ -852,6 +885,34 @@ footer { background: var(--black); }
 
 <canvas id="splash" aria-hidden="true"></canvas>
 
+<aside class="news" id="news" data-release="0.8.0" aria-label="What's new" hidden>
+  <span class="news-tag">New in 0.8</span>
+  <p>The screen now fits your phone or tablet exactly<span class="more">, with no black bars</span>. <a href="https://github.com/saharshbaiju/tandem/releases/tag/v0.8.0">What's new</a></p>
+  <button class="news-close" type="button" aria-label="Close"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M1.5 1.5l11 11M12.5 1.5l-11 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/></svg></button>
+</aside>
+<script>
+  // Before first paint, so the page doesn't jump: show the bar unless this
+  // release's bar was closed, and keep the hero's height in step with it.
+  (() => {
+    const bar = document.getElementById("news"), key = "tandem-news-closed";
+    let closed = "";
+    try { closed = localStorage.getItem(key) || ""; } catch {}
+    if (closed === bar.dataset.release) return;
+    bar.hidden = false;
+    const setH = h => document.documentElement.style.setProperty("--news-h", h + "px");
+    setH(bar.offsetHeight);
+    addEventListener("resize", () => { if (!bar.hidden) setH(bar.offsetHeight); });
+    bar.querySelector(".news-close").addEventListener("click", () => {
+      try { localStorage.setItem(key, bar.dataset.release); } catch {}
+      bar.style.height = bar.offsetHeight + "px";
+      void bar.offsetHeight;
+      bar.classList.add("closing");
+      bar.style.height = "0px";
+      setH(0);
+      bar.addEventListener("transitionend", () => { bar.hidden = true; }, { once: true });
+    });
+  })();
+</script>
 <nav class="nav" aria-label="Main">
   <a class="wordmark" href="#top">Tandem</a>
   <ul>

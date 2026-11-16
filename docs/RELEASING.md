@@ -98,7 +98,9 @@ A beta (`V=0.7.0-beta.1`, tag `v0.7.0-beta.1`) is built and tagged the same
 way, but published as a GitHub **pre-release**: add `--prerelease` to
 `gh release create`. GitHub's `releases/latest` skips pre-releases, so the
 website's Download buttons, the README's install line and plain `install.sh`
-keep giving everyone the last stable release. Testers install the beta by
+keep giving everyone the last stable release. The app (0.8.0 and later)
+does offer a beta that is newer than the last stable release, in a card that
+asks whether the user wants to try it (see ANDROID.md, *Update check*). Testers install the beta by
 naming its tag, which makes `install.sh` download that release's
 `tandem-linux.tar.gz` (and stop with an error, rather than fall back, if the
 tag has none):

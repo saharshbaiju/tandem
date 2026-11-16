@@ -407,6 +407,51 @@ tandem-kwin-helper --name Tandem --width W --height H
   mid-session, the helper reports `closed`, capture restarts fail with *the KWin
   virtual output was closed*, and the daemon exits.
 
+### Fit to device (`device_fit.py`)
+
+With *Fit to device* on (the default; `tandemd --fit-device`), the virtual
+monitor takes the size and shape of the phone or tablet watching it, so the
+picture fills the whole screen with no black bars and every point of the screen
+is a point on the desktop. `--width` and `--height` are then only the size the
+monitor starts at.
+
+1. After pairing, the app sends `SIZE` with its window size in pixels: the
+   whole screen as held (always landscape), since the app draws under the system
+   bars. It sends it again when that changes, for example when a foldable
+   unfolds or the app goes into split screen.
+2. `Broadcaster` passes the report to `DeviceFit` with one fact attached: is
+   this phone the only one connected? Only then is the monitor fitted. With two
+   or more phones watching, it stays as it is and the others are letterboxed.
+3. `fit_size()` keeps the aspect ratio, scales down anything over 3840 pixels
+   on the long side or 3840x2160 in area (what every encoder Tandem uses can
+   take), and rounds both sides down to even numbers, as encoders want them.
+4. Reports are applied `SETTLE` (0.6 s) after the last one, so the app's layout
+   settling causes one resize, not several. A size equal to the current one
+   does nothing.
+5. `DeviceFit` asks the capture supervisor for a restart. `supervise_capture`
+   stops the encoder, calls `resize_monitor()`, and starts the encoder again at
+   the new size. Connected phones get a fresh `ASX1` with the new size, and
+   their decoder rebuilds itself on the new SPS (stage 4), so the stream carries
+   on without reconnecting.
+6. The size is saved to `~/.local/state/tandem/device-size.json`. The next
+   daemon starts at it, so the same device reconnecting finds the monitor
+   already right and nothing moves.
+
+Each backend's `resize(width, height)` does the actual work:
+
+| Backend | How it resizes | Windows on the monitor | Touch |
+| --- | --- | --- | --- |
+| Hyprland | A new mode on the same headless output (`place_output`) | Stay | The touchscreen is mapped to the output, so it follows; it is re-mapped anyway |
+| GNOME | A new screen-cast session and virtual monitor at the new size | Mutter moves them to the other monitors | `MutterTouchscreen.retarget()` points it at the new session and size |
+| KDE | A new KWin helper and output at the new size | KWin moves them to the other monitors | `KwinTouchscreen.retarget()` points it at the new helper |
+
+GNOME and KDE create a new monitor instead of renegotiating the old one: KWin
+6.7 keeps the size an output was created with, and Mutter versions differ in
+whether a running virtual monitor follows new caps. A new monitor gets the
+size it is asked for everywhere. If a resize fails, the old size is put back;
+if even that fails, there is no monitor left and the daemon stops with an
+error.
+
 ### Stage 1: capture and encode
 
 On Hyprland, `wf-recorder` (wlr-screencopy, DMA-BUF) feeds FFmpeg `h264_vaapi`
@@ -648,10 +693,11 @@ big-endian length, and a body:
 | `INPT` | PC to phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | Right after the phone is admitted |
 | `TUCH` | Phone to PC | 6 bytes: `action u8, finger u8, x u16, y u16` (big-endian) | Every touch change (stage 5) |
 | `KEYQ` | Phone to PC | Empty | The phone's decoder needs a fresh keyframe (see *Keyframe requests and resync* below) |
+| `SIZE` | Phone to PC | JSON `{"width": W, "height": H}`: the app's screen in pixels, as held | Right after pairing, and whenever it changes (see *Fit to device* in stage 0) |
 
 After the handshake, both ends ignore unknown message types, so new types can be
-added without breaking older peers. An older daemon ignores `KEYQ` and the
-phone's `PING`, and an older app never sends them. The daemon refuses
+added without breaking older peers. An older daemon ignores `KEYQ`, `SIZE` and
+the phone's `PING`, and an older app never sends them. The daemon refuses
 phone-to-PC frames larger than 4 KB, and 1 KB during the handshake.
 
 Each phone gets one I/O thread. Its queues hold whole frames, and the same
@@ -828,7 +874,8 @@ are sent together.
 scaled to 0..65535. Its video view is letterboxed to the stream's exact aspect
 ratio, so a fraction of the view is the same fraction of the virtual monitor.
 Neither side needs to know the other's resolution, and the black bars never
-produce touches. Each backend converts the fractions into its own coordinate
+produce touches. With *Fit to device* the monitor has the screen's own shape,
+so there are no bars at all. Each backend converts the fractions into its own coordinate
 space.
 
 **Fingers.** Android pointer IDs travel as the `finger` byte. `TouchRouter`
@@ -1043,7 +1090,9 @@ has waited 4 s for a keyframe (stage 3).
   `~/.config/tandem/daemon-banner.json` atomically and sends `SIGUSR1`. The
   daemon's control thread moves and rescales the monitor through the backend,
   then pushes a fresh `ASX1` frame to connected phones. Changes to resolution,
-  fps, quality, GOP, port or backend restart the daemon. On Hyprland the monitor
+  fps, quality, GOP, port or backend restart the daemon. Fitting the monitor to
+  a phone (*Fit to device*, stage 0) needs no restart: the daemon resizes it
+  itself and keeps the phone connected. On Hyprland the monitor
   survives (`--keep-output`). On GNOME and KDE it is recreated: both remove it
   with the daemon's connection.
 - The TUI and the installer never decide anything by backend name. They ask

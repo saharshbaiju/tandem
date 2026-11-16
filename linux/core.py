@@ -54,8 +54,10 @@ QUALITY = {"low": "4M", "medium": "8M", "high": "12M", "ultra": "20M"}
 # hands the PC an address on this subnet.
 USB_TETHER_PREFIX = "192.168.42."
 
+# None = fit to device: the monitor takes the size of the phone watching it
+# (tandemd --fit-device, device_fit.py).
 RES_PRESETS = [
-    ("Match connected phone (USB)", None),
+    ("Fit to device", None),
     ("1280x720", (1280, 720)),
     ("1920x1080", (1920, 1080)),
     ("2560x1440", (2560, 1440)),
@@ -70,6 +72,9 @@ class Config:
     side: str = "right"            # right / left / up / down
     width: int = 1920
     height: int = 1080
+    # Size the monitor to the phone or tablet watching it (no black bars).
+    # width x height is then only the size before the first phone connects.
+    fit_device: bool = True
     fps: int = 60
     scale: float = 1.0             # desktop scale of the virtual monitor
     quality: str = "high"          # low / medium / high / ultra
@@ -120,7 +125,8 @@ class Config:
             "--quality", self.quality,
             "--encoder", self.encoder,
             "--pairing-key-file", PAIRING_KEY_PATH,
-        ] + ([] if self.touch else ["--no-touch"])
+        ] + ([] if self.touch else ["--no-touch"]) \
+          + (["--fit-device"] if self.fit_device else [])
 
 
 # --------------------------------------------------------------------------- #

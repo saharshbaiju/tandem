@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.saharshbaiju.tandem"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.7.2"
+        versionCode = 15
+        versionName = "0.8.0"
     }
 
     // Release signing. The keystore lives OUTSIDE the repo; point at it with
@@ -73,4 +73,6 @@ dependencies {
     // Google code scanner: Play-services hosted QR scanner UI, no camera
     // permission needed in this app.
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // JVM unit tests (./gradlew testDebugUnitTest): pure logic only.
+    testImplementation("junit:junit:4.13.2")
 }

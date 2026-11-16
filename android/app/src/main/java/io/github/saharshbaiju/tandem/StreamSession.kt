@@ -162,6 +162,8 @@ class StreamSession(
 
     @Volatile private var sender: Sender? = null
     private var feeder: Feeder? = null
+    /** This screen's size in pixels as held, from [setScreenSize]. */
+    @Volatile private var screenSize: Pair<Int, Int>? = null
 
     /** The host that answered (one of the target's candidate hosts). */
     @Volatile var connectedHost: String? = null
@@ -187,6 +189,20 @@ class StreamSession(
      */
     fun sendTouches(points: List<TouchPoint>) {
         sender?.queueTouches(points)
+    }
+
+    /**
+     * Tell the computer how big this screen is, so it can give the virtual
+     * monitor the same size and shape: the picture then fills the screen with
+     * no black bars (linux/device_fit.py). Sent right after pairing and again
+     * whenever it changes. Daemons that predate it ignore the SIZE frame.
+     */
+    fun setScreenSize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        val size = width to height
+        if (size == screenSize) return
+        screenSize = size
+        sender?.screenSizeChanged()
     }
 
     // ------------------------------------------------------------------ reader
@@ -766,6 +782,8 @@ class StreamSession(
         private val touches = TouchQueue()
         private var keyframeWanted = false
         private var lastKeyframeRequestMs = 0L
+        /** [screenSize] hasn't gone out yet (it is sent once at the start). */
+        private var screenSizeWanted = true
         @Volatile private var active = true
 
         fun queueTouches(points: List<TouchPoint>) = synchronized(lock) {
@@ -790,6 +808,20 @@ class StreamSession(
             if (!keyframeWanted) Long.MAX_VALUE
             else (lastKeyframeRequestMs + KEYFRAME_REQUEST_INTERVAL_MS - now).coerceAtLeast(0)
 
+        fun screenSizeChanged() = synchronized(lock) {
+            screenSizeWanted = true
+            lock.notifyAll()
+        }
+
+        /** The SIZE frame to send now, or null. Call with [lock] held. */
+        private fun takeScreenSize(): Pair<String, ByteArray>? {
+            if (!screenSizeWanted) return null
+            val (width, height) = screenSize ?: return null
+            screenSizeWanted = false
+            return FrameWriter.TYPE_SCREEN_SIZE to
+                """{"width":$width,"height":$height}""".toByteArray(Charsets.US_ASCII)
+        }
+
         fun shutdown() = synchronized(lock) {
             active = false
             lock.notifyAll()
@@ -801,7 +833,8 @@ class StreamSession(
                 while (active) {
                     val frames = ArrayList<Pair<String, ByteArray>>()
                     synchronized(lock) {
-                        while (active && touches.isEmpty()) {
+                        while (active && touches.isEmpty() &&
+                            !(screenSizeWanted && screenSize != null)) {
                             val now = SystemClock.elapsedRealtime()
                             val keyframeIn = keyframeDelayMs(now)
                             if (keyframeIn == 0L) break
@@ -815,6 +848,7 @@ class StreamSession(
                             keyframeWanted = false
                             lastKeyframeRequestMs = now
                         }
+                        takeScreenSize()?.let { frames += it }
                         touches.drainTo(frames)
                     }
                     if (!active) break

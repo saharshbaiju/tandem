@@ -263,6 +263,13 @@ recreated on the next start, and every phone must scan the new QR code.
   asks for a rescan instead of trying an unauthenticated connection.
 - The TLS socket has one reader thread and one writer thread. Conscrypt, Android's
   TLS implementation, supports this model.
+- **The only other connection is the update check** (from 0.8.0): at most once a
+  day, an HTTPS `GET` to `api.github.com` for the recent releases, with a generic
+  User-Agent and nothing about the user, the phone or the paired computer. The
+  answer only decides whether an *Update available* (or *try the beta*) card is shown; nothing is
+  downloaded or installed (see [ANDROID.md](ANDROID.md#update-check-updatecheckkt)).
+  The TUI makes the same request on the computer (`linux/update_check.py`;
+  `TANDEM_NO_UPDATE_CHECK=1` turns it off).
 
 ### 4.8 Computer side
 
@@ -387,6 +394,7 @@ path is unit-tested.
 | `android/…/StreamSession.kt` | TLS and proof before any frame. Final and retryable failures |
 | `android/…/MainActivity.kt` | Link confirmation, debug-only autoconnect, and the pairing-code field |
 | `AndroidManifest.xml`, `res/xml/data_extraction_rules.xml` | No backups and no cleartext |
+| `linux/update_check.py`, `android/…/UpdateCheck.kt` | The daily latest-release check: a GET to api.github.com, nothing identifying sent, nothing installed |
 
 ## 9. Possible next steps
 

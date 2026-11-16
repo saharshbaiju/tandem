@@ -33,4 +33,13 @@
     <string name="link_confirm_title">Pair with %1$s?</string>
     <string name="link_confirm_body">A link wants this phone to connect to %1$s. Only continue if this is your computer: it will see your touches.</string>
     <string name="link_confirm_yes">Pair</string>
+    <string name="update_title">Update available</string>
+    <string name="update_body">Tandem %1$s is out. You have %2$s.</string>
+    <string name="update_later">Later</string>
+    <string name="update_action">Update</string>
+    <string name="beta_title">Want to try the beta?</string>
+    <string name="beta_body">Tandem %1$s is out for testing. It has the newest features, and may still have bugs.</string>
+    <string name="beta_later">No thanks</string>
+    <string name="beta_action">Try it</string>
+    <string name="update_no_browser">Open github.com/saharshbaiju/tandem/releases in a browser to update.</string>
 </resources>

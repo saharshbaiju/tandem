@@ -3,9 +3,11 @@ package io.github.saharshbaiju.tandem
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.content.pm.ApplicationInfo
 import android.content.res.ColorStateList
 import android.graphics.Rect
+import android.net.Uri
 import android.net.ConnectivityManager
 import android.net.LinkAddress
 import android.net.LinkProperties
@@ -22,6 +24,7 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import android.view.animation.PathInterpolator
 import android.util.Log
 import android.view.inputmethod.EditorInfo
@@ -140,6 +143,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             insets
         }
         b.surface.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateGestureExclusion() }
+        // A foldable unfolding or split screen changes it mid-stream.
+        b.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> reportScreenSize() }
         networks.start()
         b.primaryBtn.setOnClickListener { onPrimary() }
         b.scanBtn.setOnClickListener { scan() }
@@ -180,6 +185,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         target = ConnectTarget.load(prefs)
         handleIntent(intent)
         render()
+        checkForUpdate()
         showSystemBars()
         // The website's splash, on a fresh launch (not after a re-theme).
         if (savedInstanceState == null) b.splash.run {}
@@ -359,6 +365,15 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         acquireWifiLock()
         session = StreamSession(t, appVersion(), b.surface.holder.surface, this,
             networks::networkFor, networks::isDirect)
+        reportScreenSize()
+    }
+
+    /**
+     * The area the picture can fill (the whole window: it is drawn under the
+     * system bars), for the computer to size its monitor to.
+     */
+    private fun reportScreenSize() {
+        session?.setScreenSize(b.root.width, b.root.height)
     }
 
     private fun userDisconnect(why: String) {
@@ -666,6 +681,47 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     }
 
     // ------------------------------------------------------------------ misc
+
+    /**
+     * Asks GitHub (at most once a day, see [UpdateCheck]) whether a newer
+     * Tandem is out, and if so shows the card on the connect screen: an
+     * update, or else a beta the user may want to try. The button opens the
+     * release page; Later / No thanks hides it until a newer version.
+     */
+    private fun checkForUpdate() {
+        val current = appVersion()
+        // Its own thread: a slow network must not hold up the link probes.
+        Thread({
+            val release = UpdateCheck.check(prefs, current) ?: return@Thread
+            ui.post {
+                if (isFinishing || isDestroyed) return@post
+                if (release.beta) {
+                    b.updateTitle.setText(R.string.beta_title)
+                    b.updateBody.text = getString(R.string.beta_body, release.version)
+                    b.updateLaterBtn.setText(R.string.beta_later)
+                    b.updateBtn.setText(R.string.beta_action)
+                } else {
+                    b.updateTitle.setText(R.string.update_title)
+                    b.updateBody.text = getString(R.string.update_body, release.version,
+                                                  current.removeSuffix("-debug"))
+                    b.updateLaterBtn.setText(R.string.update_later)
+                    b.updateBtn.setText(R.string.update_action)
+                }
+                b.updateBtn.setOnClickListener {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl)))
+                    } catch (_: ActivityNotFoundException) {
+                        Toast.makeText(this, R.string.update_no_browser, Toast.LENGTH_LONG).show()
+                    }
+                }
+                b.updateLaterBtn.setOnClickListener {
+                    UpdateCheck.dismiss(prefs, release)
+                    b.updateCard.visibility = View.GONE
+                }
+                b.updateCard.visibility = View.VISIBLE
+            }
+        }, "update-check").apply { isDaemon = true }.start()
+    }
 
     private fun dp(v: Float) = v * resources.displayMetrics.density
 

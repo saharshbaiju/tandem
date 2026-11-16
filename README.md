@@ -74,6 +74,15 @@ desktop need, using `apt`, `dnf` or `pacman`. It asks for your password once.
 Run the same line again to update. `./install.sh --uninstall` removes Tandem. From a
 git checkout, `./install.sh` installs that checkout instead.
 
+**Updates.** From 0.8.0, `tandem` and the phone app each tell you when a newer
+release is out: the TUI shows a line in its main menu with the command to run,
+and the app shows an *Update available* card on its connect screen that opens
+the release page. When a beta is out, the app also asks whether you want to try
+it. Neither downloads or installs anything by itself. To check, each asks
+GitHub for the releases at most once a day, with nothing about you or your
+machine in the request. `TANDEM_NO_UPDATE_CHECK=1` turns it off on
+the computer.
+
 > **Ubuntu and Fedora:** log in to the GNOME **Wayland** session, which is the
 > default. On Ubuntu, choose "Ubuntu", not "Ubuntu on Xorg". On Fedora, the H.264
 > encoder comes from the `fedora-cisco-openh264` repository, which is enabled by
@@ -197,8 +206,8 @@ tandem
   `~/.local/state/tandem/tandemd.log` (the previous session's in `tandemd.log.1`);
   attach it when you report a bug. `tandem --version` prints the version.
 - **Configure** sets the desktop backend (auto, hyprland, gnome or kde), the screen
-  **side** (left, right, up or down), the **resolution** (presets, or *Match connected
-  phone* through adb), the **FPS**, the desktop **scale**, the **quality** (bitrate),
+  **side** (left, right, up or down), the **resolution** (*Fit to device*, the
+  default, or a fixed size), the **FPS**, the desktop **scale**, the **quality** (bitrate),
   the **encoder** (auto, or one to try first, with a fallback if it can't start),
   the keyframe interval, the **preferred link** (which address comes first in the
   QR code), the **port**, **touch input** (on or off), and **paired phones**. The
@@ -283,6 +292,8 @@ linux/
   qr.py                 dependency-free QR encoder (half-block terminal output)
   tandemd.py            daemon: backend → NAL parse → GOP cache → TCP broadcast
   secure_link.py        TLS certificate, pairing key, handshake, lock-out
+  device_fit.py         fit to device: sizes the monitor to the phone's screen (SIZE)
+  update_check.py       "a newer Tandem is out": latest GitHub release, once a day
   phone_input.py        what admitted phones send back: touches → slots
   uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland)
   backends/__init__.py  backend registry, session detection, the backend contract

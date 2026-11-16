@@ -556,6 +556,14 @@ class KwinTouchscreen:
         for slot in sorted(self._active_slots):
             self.up(slot)
 
+    def retarget(self, helper):
+        """Send touches through a new helper from now on: the output was
+        created anew at another size (KdeBackend.resize). Fingers still
+        down belonged to the old output, which KWin has already lifted."""
+        self._active_slots.clear()
+        self._helper = helper
+        self.description = f"KWin fake input on {helper.output_name}"
+
     def close(self):
         """Lift every finger still down. Idempotent; a helper that is
         already gone needs nothing (KWin cancels its touches itself)."""
@@ -641,6 +649,7 @@ class KdeBackend:
         self.proc = None            # gst-launch while capturing
         # Picks the first encoder that works and falls back to the next.
         self.encoders = EncoderSelector(args, "KDE")
+        self._touch = None          # KwinTouchscreen, once created
         # apply_live (control thread) and teardown must not interleave two
         # kscreen-doctor runs or place an output being removed.
         self._layout_lock = threading.Lock()
@@ -852,7 +861,25 @@ class KdeBackend:
                 "KWin refused touch input (org_kde_kwin_fake_input); on "
                 "Plasma 6.7 or older log out and back in so KWin reads "
                 f"{kwin_helper.desktop_entry_path()}")
-        return KwinTouchscreen(helper)
+        self._touch = KwinTouchscreen(helper)
+        return self._touch
+
+    # -- resize ------------------------------------------------------------- #
+
+    def resize(self, width, height):
+        """Create the virtual output anew at width x height (device_fit.py);
+        the encoder is stopped, and tandemd has set args.width/height.
+
+        A new output rather than new caps on the old one: KWin 6.8 resizes
+        an output to its consumer's caps, but 6.7 keeps the size it was
+        created with. KWin moves the windows that were on it to the other
+        monitors. The touch surface is pointed at the new helper; touch
+        stays off if KWin refuses fake input to it.
+        """
+        self.teardown()
+        self.setup()
+        if self._touch and self.helper and self.helper.fake_input_version:
+            self._touch.retarget(self.helper)
 
     # -- teardown ----------------------------------------------------------- #
 
