@@ -597,9 +597,11 @@ main, footer { position: relative; z-index: 1; }
 .rv .star-mark { color: inherit; }
 .rv .star-mark::before { transform: scaleX(0); }
 .rv .btn-star svg { color: currentColor; }
-.rv .seen .star-mark { color: #fff; transition: color .2s .55s; }
-.rv .seen .star-mark::before { transform: scaleX(1); transition: transform .6s cubic-bezier(.7, 0, .2, 1) .25s; }
-.rv .seen .btn-star svg { color: var(--red); transition: color .2s 1s; animation: star-pop .7s cubic-bezier(.3, 1.6, .5, 1) 1s both; }
+/* --star-wait is 5s when "Why star?" scrolled here: the gold highlight on
+ * the line plays first, the red star after it. */
+.rv .seen .star-mark { color: #fff; transition: color .2s calc(var(--star-wait, 0s) + .55s); }
+.rv .seen .star-mark::before { transform: scaleX(1); transition: transform .6s cubic-bezier(.7, 0, .2, 1) calc(var(--star-wait, 0s) + .25s); }
+.rv .seen .btn-star svg { color: var(--red); transition: color .2s calc(var(--star-wait, 0s) + 1s); animation: star-pop .7s cubic-bezier(.3, 1.6, .5, 1) calc(var(--star-wait, 0s) + 1s) both; }
 @keyframes star-pop {
   0%   { transform: scale(1) rotate(0); }
   45%  { transform: scale(1.7) rotate(72deg); }
@@ -653,9 +655,9 @@ main, footer { position: relative; z-index: 1; }
 .gh-link.nudge .gh-stars .nudge-from { color: var(--gold); transition: color .2s; }
 @keyframes star-fly {
   0%   { opacity: 0; transform: scale(.3) rotate(-200deg); }
-  24%  { opacity: 1; transform: scale(2.9) rotate(12deg); }
-  32%  { transform: scale(2.5) rotate(0deg); }
-  64%  { opacity: 1; transform: scale(2.5) rotate(0deg); }
+  24%  { opacity: 1; transform: scale(1.6) rotate(12deg); }
+  32%  { transform: scale(1.45) rotate(0deg); }
+  64%  { opacity: 1; transform: scale(1.45) rotate(0deg); }
   100% { opacity: 0; transform: scale(.3) rotate(220deg); }
 }
 /* Two crisp bursts: rays shoot out from the star and vanish. */
@@ -2591,6 +2593,8 @@ const StarNudge = (() => {
     hideTag();
     const line = document.getElementById("why-star");
     if (!line) return;
+    // The section's red star wipe waits until the gold highlight is done.
+    line.closest(".oss")?.style.setProperty("--star-wait", "5s");
     line.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
     // Light it up once the scroll has (about) arrived.
     setTimeout(() => {
