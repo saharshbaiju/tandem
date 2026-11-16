@@ -627,7 +627,7 @@ main, footer { position: relative; z-index: 1; }
 .gh-stars { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .gh-stars svg { width: 12px; height: 12px; }
 
-/* Star nudge: a few seconds after the splash, a small gold star pops out of
+/* Star nudge: right after the splash, a small gold star pops out of
  * the grey star by the star count in the nav, hangs there for a moment and
  * drops back in. (Before the count loads, it uses the GitHub icon.) A quiet
  * reminder that starring helps. Once per visit, never with reduced motion. */
@@ -2510,12 +2510,12 @@ const Footer = (() => {
 })();
 
 /* ===================================================================
- * Star nudge: once per visit, a few seconds after the splash, the gold
+ * Star nudge: once per visit, right after the splash, the gold
  * star pops out of the nav's GitHub link and drops back in (CSS above).
  * ?nudge in the URL replays it on every load, for previewing. */
 const StarNudge = (() => {
   const KEY = "tandem-star-nudge";
-  const DELAY = 2500;
+  const DELAY = 300;              // right after the splash, once the page has appeared
   function seen() { try { return sessionStorage.getItem(KEY) === "1"; } catch { return false; } }
   function remember() { try { sessionStorage.setItem(KEY, "1"); } catch { /* private mode */ } }
   function play() {
