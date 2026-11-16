@@ -337,6 +337,9 @@ within four periods of input arrival. Idle input and codec reconfiguration start
 a fresh schedule; a cached GOP burst cannot build an unbounded display queue.
 Lower, unknown and out-of-range rates keep immediate timestamps. This trades a
 small amount of latency for fewer frames competing for the same display vsync.
+At 120 fps the nominal requested lead is 25 ms; this is not additional measured
+end-to-end latency. Bounded deadlines alone do not guarantee smoother output
+or bound total pipeline latency.
 A new SPS, such as one from a resolution change after a daemon restart, releases
 the decoder and rebuilds it at the next keyframe.
 
@@ -601,7 +604,9 @@ JAVA_HOME=/path/to/jdk-17-or-21 ./gradlew :app:testDebugUnitTest
 ```
 
 They cover arrival jitter, cached bursts, idle and late input, supported-rate
-boundaries, near-nominal cadence, and fresh schedules after codec restart.
+boundaries, near-nominal cadence, and independent clock instances. Codec
+configuration resets are checked at the integration call site, not by these
+pure helper tests.
 
 ## 8. Limitations and next steps
 

@@ -56,7 +56,7 @@ class FramePresentationClockTest {
         }
     }
 
-    @Test fun aNewCodecDoesNotInheritAnOldDeadline() {
+    @Test fun separateClockInstancesDoNotShareDeadlines() {
         val previous = FramePresentationClock(120)
         previous.nextNs(start + 1_000_000_000L)
         assertEquals(start + 3*period, FramePresentationClock(120).nextNs(start))
