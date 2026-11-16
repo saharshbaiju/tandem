@@ -19,7 +19,7 @@ EXPECTED_DESCRIPTION = (
     "leaky=downstream ! videoconvert n-threads=4 ! video/x-raw,format=I420 "
     "! x264enc tune=zerolatency speed-preset=ultrafast bitrate=12000 "
     "key-int-max=30 bframes=0 threads=2 sliced-threads=false "
-    "byte-stream=true vbv-buf-capacity=33 ! h264parse config-interval=-1 "
+    "byte-stream=true vbv-buf-capacity=100 ! h264parse config-interval=-1 "
     "! video/x-h264,stream-format=byte-stream,alignment=au "
     "! fdsink fd={fd} sync=false")
 

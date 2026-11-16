@@ -224,7 +224,7 @@ class PipelineTest(unittest.TestCase):
             "videoconvert n-threads=4 ! video/x-raw,format=I420 ! x264enc "
             "tune=zerolatency speed-preset=ultrafast bitrate=12000 "
             "key-int-max=30 bframes=0 threads=2 sliced-threads=false "
-            "byte-stream=true vbv-buf-capacity=33")
+            "byte-stream=true vbv-buf-capacity=100")
 
     def test_openh264_chain(self):
         self.assertEqual(
@@ -232,6 +232,19 @@ class PipelineTest(unittest.TestCase):
             "videoconvert n-threads=4 ! video/x-raw,format=I420 ! openh264enc "
             "usage-type=screen rate-control=bitrate bitrate=4000000 "
             "gop-size=60 complexity=low")
+
+    def test_x264_vbv_has_a_quality_floor_at_high_frame_rates(self):
+        chain = gstreamer.encoder_chain("x264enc", 20000, 60, 120)
+        self.assertIn("vbv-buf-capacity=100", chain.split())
+
+    def test_x264_vbv_preserves_larger_two_frame_budgets(self):
+        chain = gstreamer.encoder_chain("x264enc", 20000, 10, 10)
+        self.assertIn("vbv-buf-capacity=200", chain.split())
+
+    def test_x264_without_vbv_property_still_builds(self):
+        with FakeInspect({"x264enc": ()}):
+            chain = gstreamer.encoder_chain("x264enc", 20000, 60, 120)
+        self.assertNotIn("vbv-buf-capacity=", chain)
 
     def test_va_chain_without_vapostproc_converts_on_the_cpu(self):
         self.assertEqual(

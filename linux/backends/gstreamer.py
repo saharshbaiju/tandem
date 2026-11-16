@@ -19,8 +19,9 @@ finding its node, placing it) stays in each backend.
 
 Encoder rules every chain follows: one slice per frame and no B-frames (the
 phone's hardware decoder wants exactly one complete access unit per input
-buffer), the fastest preset with no lookahead, and a rate-control buffer of
-VBV_FRAMES frames so a keyframe can't grow big enough to stall the Wi-Fi link.
+buffer), the fastest preset with no lookahead, and a small rate-control buffer
+where supported: VBV_FRAMES frames, with a 100 ms minimum for x264 to avoid
+excessive keyframe quantization at high frame rates.
 """
 
 import os
@@ -119,7 +120,7 @@ def bitrate_kbps(bitrate):
 # Rate-control buffer (VBV / CPB) length, in frames. Encoders default to
 # 0.6-1.5 s, which lets one IDR grow to many times an average frame and
 # serialise the Wi-Fi link for its whole length: a latency spike every GOP.
-# Two frames keeps every frame, IDRs included, near the average size.
+# Two frames limits bursts; x264 needs a larger minimum to preserve IDR quality.
 VBV_FRAMES = 2
 
 
@@ -159,9 +160,10 @@ def encoder_chain(enc, kbps, gop, fps=60):
     Every chain is single-slice and B-frame free: the phone's hardware decoder
     wants exactly one complete access unit per input buffer. Each one is also
     set up for low latency: fastest preset, no lookahead, and a VBV of
-    VBV_FRAMES frames where the element exposes one. The encoder input is
-    always pinned to a 4:2:0 format (NV12 / I420): left to negotiate, x264
-    would pick 4:4:4 from an RGB source, which phones can't decode.
+    VBV_FRAMES frames where the element exposes one (at least 100 ms for x264).
+    The encoder input is always pinned to a 4:2:0 format (NV12 / I420): left
+    to negotiate, x264 would pick 4:4:4 from an RGB source, which phones can't
+    decode.
     """
     if enc in ("vah264enc", "vah264lpenc"):
         conv = ("vapostproc ! video/x-raw(memory:VAMemory),format=NV12"
@@ -183,7 +185,7 @@ def encoder_chain(enc, kbps, gop, fps=60):
             enc, "tune=zerolatency", "speed-preset=ultrafast",
             f"bitrate={kbps}", f"key-int-max={gop}", "bframes=0", "threads=2",
             "sliced-threads=false", "byte-stream=true",
-            vbv_buf_capacity=vbv_ms(fps)))
+            vbv_buf_capacity=max(100, vbv_ms(fps))))
     if enc == "openh264enc":
         # openh264 has no VBV-size property; its bitrate mode is already
         # frame-level and skips frames rather than buffering them.

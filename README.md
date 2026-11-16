@@ -145,7 +145,7 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor /
         │  zero-copy capture
    H.264 encode on the compositor's GPU (NVENC / VA-API, x264 / openh264 fallback;
                 GStreamer VA / x264 / openh264 on GNOME and KDE)
-        │  no B-frames, one slice per frame, CBR with a 2-frame buffer
+        │  no B-frames, one slice per frame, small rate-control buffers
    tandemd.py   splits NAL units, caches the current GOP, one I/O
         │         thread per phone, 1 s heartbeats, keyframe on request (KEYQ),
         │         restarts the encoder if it exits
@@ -158,6 +158,10 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor /
    phone_input.py → virtual touchscreen: uinput (Hyprland) /
                     Mutter RemoteDesktop (GNOME) / KWin fake input (KDE)
 ```
+
+Where supported, rate-control buffers hold two frames' worth, with a minimum
+of 100 ms for GStreamer `x264enc` to preserve keyframe quality at high frame rates.
+This is a rate-control budget, not a measured delay.
 
 Target latency from glass to glass is about **25 to 45 ms** over USB and about
 **30 to 60 ms** over Wi-Fi, with hardware encoding. Wi-Fi is lowest on the

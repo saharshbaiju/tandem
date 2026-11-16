@@ -276,11 +276,13 @@ desktop is idle, because Mutter only sends frames when something changes. It is
 only set where the installed PipeWire plugin has the property.
 
 Each encoder gets a rate-control buffer of two frames where its GStreamer element
-has one, so keyframes do not arrive as one large burst. The encoder runs in its
-own process session, so Ctrl+C in the terminal cannot stop capture behind the
-daemon's back. Touches go to Mutter on their own thread and never hold up the
-video. The
-daemon's GOP replay gives a phone that connects to an idle desktop a picture at
+has one, with a minimum of 100 ms for `x264enc` to preserve keyframe quality at
+high frame rates. This limits bursts while allowing x264 larger keyframes; the
+buffer setting is a rate-control budget, not a measured end-to-end delay.
+The encoder runs in its own process session, so Ctrl+C in the terminal cannot
+stop capture behind the daemon's back. Touches go to Mutter on their own thread
+and never hold up the video. The daemon's GOP replay gives a phone that connects
+to an idle desktop a picture at
 once.
 
 **Display settings.** While Tandem runs, the virtual monitor appears in *Settings
