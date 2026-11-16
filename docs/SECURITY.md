@@ -199,11 +199,18 @@ proof and any other `DENY` stay final.
 | Limit | Value | Where |
 | --- | --- | --- |
 | Whole handshake (TLS and proofs) | 6 s deadline, not per read. A client that sends one byte at a time cannot hold the slot | `HANDSHAKE_TIMEOUT` |
-| Handshake frame size | 1 KB | `MAX_HANDSHAKE_FRAME` |
-| Handshakes in progress | 8 at once. Extra connections are closed immediately | `Gatekeeper.MAX_PENDING_HANDSHAKES` |
-| Failed handshakes per address | 5 within 60 s. That address is then told `DENY "too many failed pairing attempts…"` and refused for 60 s. Only failed proofs and malformed or unexpected messages count. A reset, a timeout or EOF mid-handshake (`OSError`) does not | `FailureThrottle`, `tandemd.LOCKED_OUT` |
+| First byte | 2 s. A real phone sends its TLS hello straight away, so a connection that stays silent is closed | `FIRST_BYTE_TIMEOUT` |
+| Handshake frame size | 1 KB on the computer. The phone allows 4 KB and checks the length before it allocates anything | `MAX_HANDSHAKE_FRAME` (both sides) |
+| Handshakes in progress | 4 per host and 32 in all. `127.0.0.1` and `::1` get 8, because every `adb reverse` phone shares them. Another 8 are kept for addresses that paired in the last hour. IPv6 hosts are counted per /64. Extra connections are closed immediately | `HandshakeSlots`, `ip_key()` |
+| Failed handshakes per address | 5 within 60 s. That address is then told `DENY "too many failed pairing attempts…"` and refused for 60 s. Only failed proofs and malformed or unexpected messages count. A reset, a timeout or EOF mid-handshake (`OSError`) does not. `127.0.0.1` and `::1` are never locked out: every USB phone uses them, and a local program shouldn't be able to lock the USB phone out. The 100-bit key is what stops guessing | `FailureThrottle`, `tandemd.LOCKED_OUT` |
 | Phones streaming at once | 4. The fifth gets `DENY "already 4 phones connected to this computer"` before any `OKAY` | `tandemd.MAX_CLIENTS`, `PHONES_FULL` |
 | Frames from an admitted phone | 4 KB maximum. A larger frame disconnects the phone | `MAX_INCOMING_FRAME` |
+| Frame rate from an admitted phone | 5000 per second (a real phone sends about 100 to 1200). Reading is capped at 256 KB per pass, so a flood can neither grow memory nor starve the video | `MAX_FRAMES_PER_SEC`, `RECV_BUDGET` |
+| Fingers per phone | 5, so one phone can't take every slot of the shared touchscreen | `phone_input.MAX_FINGERS_PER_CLIENT` |
+
+Text a peer sends (its app version, a malformed hello) is reduced to plain
+letters and digits, or left out, before it reaches the log, because the TUI reads
+the log.
 
 A connection that closes **before sending a single byte** is not counted as a
 failure. The app connects to every address in the QR code at once, and closes the
@@ -213,9 +220,11 @@ out. A client that connects and then stays silent does count as a failure.
 
 Handshakes run on their own threads, so a slow client never blocks `accept()` for
 everyone else. The lock-out `DENY` is also sent from a thread that holds a
-handshake slot, so a flood from a locked-out address is still bounded by the 8
-slots. When all slots are busy, extra connections are closed without a `DENY`,
-because answering each one would cost a thread. Each rejection is logged with its address and reason, for example
+handshake slot, so a flood from a locked-out address can't take more than that
+address's slots. When the slots are full, extra connections are closed without a
+`DENY`, because answering each one would cost a thread, and one summary line is
+logged at most every 30 s. Other rejections are logged with the address and the
+reason, for example
 `client 10.0.0.7 rejected: wrong pairing code (locked out for a minute)`.
 
 ### 4.6 Revoking phones: *forget all*

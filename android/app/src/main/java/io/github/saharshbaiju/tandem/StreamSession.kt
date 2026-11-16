@@ -24,6 +24,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicIntegerArray
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.SSLException
@@ -120,6 +121,9 @@ class StreamSession(
     private val listener: Listener,
     /** The network whose subnet holds [InetAddress], so the socket can be bound to it. */
     private val networkFor: (InetAddress) -> Network? = { null },
+    /** True for an address the phone reaches over a link it provides itself
+     *  (USB tethering, adb on 127.0.0.1): see [NetworkWatcher.isDirect]. */
+    private val isDirect: (String) -> Boolean = { false },
 ) : Runnable {
 
     interface Listener {
@@ -291,13 +295,27 @@ class StreamSession(
      * by something else) falls through to the next one instead of ending the
      * attempt. Every socket that loses the race is closed, including ones that
      * connect after we stopped waiting.
+     *
+     * A direct link (USB) beats Wi-Fi even when Wi-Fi answers first: a Wi-Fi
+     * address that wins while a direct one is still connecting is held for up
+     * to [DIRECT_GRACE_MS]. Without this, a reconnect right after the cable
+     * came back (its interface still settling) stayed on Wi-Fi for good, with
+     * Wi-Fi's higher, jumpier latency.
      */
     private fun connectAny(): Connected {
         val hosts = target.candidateHosts
+        val direct = BooleanArray(hosts.size) { i ->
+            try { isDirect(hosts[i]) } catch (_: Exception) { false }
+        }
         val connected = LinkedBlockingQueue<Pair<Int, Socket>>()
         val errors = arrayOfNulls<Exception>(hosts.size)
         val pending = AtomicInteger(hosts.size)
+        val finished = AtomicIntegerArray(hosts.size)   // 1 = attempt over
         val gaveUp = AtomicBoolean(false)
+        // Non-direct sockets that answered while a direct attempt was still
+        // running, oldest first, and when we stop waiting for the direct one.
+        val held = ArrayDeque<Pair<Int, Socket>>()
+        var heldUntil = 0L
 
         hosts.forEachIndexed { i, host ->
             Thread({
@@ -322,35 +340,58 @@ class StreamSession(
                     errors[i] = e
                     closeQuietly(s)
                 } finally {
+                    finished.set(i, 1)     // after put(): see directPending
                     pending.decrementAndGet()
                 }
             }, "connect-$host").apply { isDaemon = true }.start()
         }
 
+        // A direct attempt that may still produce a socket. Its put() comes
+        // before finished is set, so "finished and queue empty" means it failed.
+        fun directPending() = hosts.indices.any { direct[it] && finished.get(it) == 0 } ||
+            connected.any { direct[it.first] }
+
+        fun handshake(entry: Pair<Int, Socket>): Connected? {
+            val (i, raw) = entry
+            return try {
+                socket = raw   // so stop() can abort a handshake in progress
+                raw.soTimeout = HANDSHAKE_TIMEOUT_MS
+                val (tls, fingerprint) = SecureChannel.wrap(raw, hosts[i], port,
+                    target.pinnedFingerprint)
+                Connected(hosts[i], raw, tls, fingerprint)
+            } catch (e: Exception) {
+                errors[i] = e
+                closeQuietly(raw)
+                if (running) Log.w(TAG, "${hosts[i]}: TLS failed, trying other addresses", e)
+                null
+            }
+        }
+
         val deadline = SystemClock.elapsedRealtime() + CONNECT_TIMEOUT_MS + 500L
         try {
             while (running) {
-                val next = connected.poll(50, TimeUnit.MILLISECONDS)
-                if (next == null) {
-                    if (pending.get() == 0 && connected.isEmpty()) break
-                    if (SystemClock.elapsedRealtime() > deadline) break
+                val next = connected.poll(if (held.isEmpty()) 50L else 10L, TimeUnit.MILLISECONDS)
+                val now = SystemClock.elapsedRealtime()
+                if (next != null) {
+                    if (direct[next.first] || !directPending()) {
+                        handshake(next)?.let { return it }
+                    } else {
+                        if (held.isEmpty()) heldUntil = now + DIRECT_GRACE_MS
+                        held.addLast(next)
+                    }
                     continue
                 }
-                val (i, raw) = next
-                try {
-                    socket = raw   // so stop() can abort a handshake in progress
-                    raw.soTimeout = HANDSHAKE_TIMEOUT_MS
-                    val (tls, fingerprint) = SecureChannel.wrap(raw, hosts[i], port,
-                        target.pinnedFingerprint)
-                    return Connected(hosts[i], raw, tls, fingerprint)
-                } catch (e: Exception) {
-                    errors[i] = e
-                    closeQuietly(raw)
-                    if (running) Log.w(TAG, "${hosts[i]}: TLS failed, trying other addresses", e)
+                if (held.isNotEmpty() && (now >= heldUntil || !directPending())) {
+                    // the direct link didn't answer in time: take Wi-Fi after all
+                    handshake(held.removeFirst())?.let { return it }
+                    continue
                 }
+                if (held.isEmpty() && pending.get() == 0 && connected.isEmpty()) break
+                if (held.isEmpty() && now > deadline) break
             }
         } finally {
             gaveUp.set(true)
+            while (held.isNotEmpty()) closeQuietly(held.removeFirst().second)
             while (true) closeQuietly((connected.poll() ?: break).second)
         }
         if (!running) throw IOException("stopped")
@@ -791,6 +832,8 @@ class StreamSession(
     companion object {
         private const val TAG = "StreamSession"
         private const val CONNECT_TIMEOUT_MS = 3000
+        /** How long a Wi-Fi address that answered first waits for a direct (USB) one. */
+        private const val DIRECT_GRACE_MS = 400L
         /** The daemon PINGs after 1 s of silence, so 4 s without data is a dead link. */
         private const val READ_TIMEOUT_MS = 4000
         private const val HANDSHAKE_TIMEOUT_MS = 5000

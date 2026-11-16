@@ -42,8 +42,13 @@ import threading
 import time
 
 import uinput_touch
+# Re-exported: other modules used to reach the uinput rule through here.
+from uinput_touch import (  # noqa: F401
+    UINPUT_MODULE_PATH, UINPUT_RULE, UINPUT_RULE_PATH, uinput_setup_problem)
 
 from . import gnome, xdph
+# Re-exported: valid_scale lived here before layout.py was shared.
+from .layout import valid_scale  # noqa: F401
 
 # The phone gets its own workspace (an id above every one the user has, so it
 # never takes over theirs); EXT opens on it because the rule is bound with
@@ -280,21 +285,6 @@ def set_monitor(name, mode, position, scale):
            f"position = {lua_str(position)}, scale = {scale}, transform = 0 }})")
     return hypr(lua, "keyword", "monitor",
                 f"{name},{mode},{position},{scale},transform,0")
-
-
-def valid_scale(width, height, scale):
-    """Nearest scale Hyprland accepts for a width x height mode.
-
-    Hyprland needs both logical dimensions to be whole pixels (it works in
-    1/120 steps); anything else pops an "invalid scale" error and gets replaced
-    by a guess. 2772x1280 @ 1.5 -> 853.3 px tall, so 4/3.
-    """
-    want = round(scale * 120)
-    for d in range(0, 120):
-        for k in (want - d, want + d):
-            if k > 0 and (width * 120) % k == 0 and (height * 120) % k == 0:
-                return round(k / 120, 6)
-    return scale
 
 
 def _settled_problem(name, width, height, scale, side):
@@ -882,8 +872,62 @@ def _die_with_parent():
         pass
 
 
+# --------------------------------------------------------------------------- #
+# Module hooks (see backends/__init__.py): used without a backend instance
+# --------------------------------------------------------------------------- #
+
+def session_confidence():
+    """3 when this process is a client of a running Hyprland (its instance
+    signature is set); 1 when only XDG_CURRENT_DESKTOP names Hyprland;
+    else 0."""
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return 3
+    if "hyprland" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower():
+        return 1
+    return 0
+
+
+def session_problem():
+    """None: every Hyprland session is Wayland, and hyprctl reports anything
+    else when setup() runs."""
+    return None
+
+
+def describe_primary_monitor():
+    """'<name>  WxH@Hz  scale s' for the main monitor, or None."""
+    try:
+        m = primary_for("EXT-1")
+    except Exception:
+        return None
+    if not m:
+        return None
+    return (f"{m['name']}  {m['width']}x{m['height']}"
+            f"@{m.get('refreshRate', 0):.0f}  scale {m.get('scale', 1)}")
+
+
+def remove_leftover_output(output_name):
+    """Remove a headless output the daemon left behind. The TUI starts the
+    daemon with --keep-output so the monitor survives restarts; this takes
+    it away (windows moved to the main monitor first). Never raises: it
+    runs in the TUI, where a failure has nowhere useful to go (and a log
+    line on stderr would land on top of the curses screen)."""
+    try:
+        remove_output(output_name)
+    except Exception:
+        pass
+
+
+def touch_setup_problem():
+    """Touch needs a uinput device, which needs a one-time udev rule."""
+    return uinput_setup_problem()
+
+
 class HyprlandBackend:
     name = "hyprland"
+    # The headless output can outlive the daemon: the TUI restarts the
+    # daemon with --keep-output so the phone's monitor (and the windows on
+    # it) survive the restart.
+    honors_keep_output = True
 
     def __init__(self, args):
         self.a = args

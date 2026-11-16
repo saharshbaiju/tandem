@@ -48,3 +48,13 @@ License 1.1 (not the GPL); see android/fonts/ for the licence texts:
 
   Geist Mono     Copyright 2024 The Geist Project Authors
   Archivo Black  Copyright 2017 The Archivo Black Project Authors
+
+
+Third-party Wayland protocol files
+----------------------------------
+
+linux/kwin-helper/protocols/ vendors three protocol descriptions, unchanged
+and with their licence headers, which tandem-kwin-helper is built from:
+zkde-screencast-unstable-v1.xml and fake-input.xml from KDE's
+plasma-wayland-protocols (LGPL-2.1-or-later), and xdg-output-unstable-v1.xml
+from wayland-protocols (MIT).

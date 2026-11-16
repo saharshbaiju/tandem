@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-tandemd - Tandem streaming daemon (Hyprland / GNOME).
+tandemd - Tandem streaming daemon (Hyprland / GNOME / KDE Plasma).
 
 Pipeline:
     compositor backend (see backends/)
         hyprland : headless output -> wf-recorder (VA-API)
         gnome    : Mutter virtual monitor -> PipeWire -> GStreamer encoder
+        kde      : KWin virtual output -> PipeWire -> GStreamer encoder
         -> raw Annex-B H.264 on a pipe (no container, no B-frames)
         -> this daemon splits NAL units, caches SPS/PPS + the current GOP,
            and broadcasts framed NALs over TCP
@@ -1284,9 +1285,13 @@ def main():
                                  formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--version", action="version",
                     version=f"{about.CREDIT}\n{about.LICENSE}")
+    beta_backends = [name for name in backends.NAMES
+                     if backends.beta_notice(name)]
     ap.add_argument("--backend", default="auto",
                     choices=("auto",) + backends.NAMES,
-                    help="compositor backend (auto-detected by default)")
+                    help="compositor backend (auto-detected by default)"
+                         + (f"; in beta: {', '.join(beta_backends)}"
+                            if beta_backends else ""))
     ap.add_argument("--output", default="EXT-1",
                     help="headless output name (Hyprland)")
     ap.add_argument("--width", type=int, default=1920)
@@ -1297,9 +1302,9 @@ def main():
     ap.add_argument("--codec", default="h264", choices=("h264", "hevc"),
                     help="video codec (the app decodes h264)")
     ap.add_argument("--encoder", default="auto",
-                    help="GNOME: GStreamer element (vah264enc, x264enc, ...); "
-                         "Hyprland: h264_nvenc or h264_vaapi (auto = the "
-                         "GPU the compositor renders on)")
+                    help="GNOME / KDE: GStreamer element (vah264enc, "
+                         "x264enc, ...); Hyprland: h264_nvenc or h264_vaapi "
+                         "(auto = the GPU the compositor renders on)")
     ap.add_argument("--side", default="right",
                     choices=("right", "left", "up", "down"),
                     help="where the phone sits relative to the main screen")
@@ -1319,7 +1324,9 @@ def main():
                          "IPv4 and IPv6)")
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--keep-output", action="store_true",
-                    help="don't remove the Hyprland headless output on exit")
+                    help="don't remove the virtual output on exit, where it "
+                         "can outlive the daemon (Hyprland; on GNOME and KDE "
+                         "it always goes with the daemon)")
     ap.add_argument("--parent-pid", type=int, default=None,
                     help="stop when this process exits, and then remove the "
                          "output even with --keep-output (the TUI passes "
@@ -1381,6 +1388,9 @@ def main():
         log(f"error: {backend.name} backend is missing: {', '.join(missing)}")
         sys.exit(1)
     log(f"backend: {backends.describe(backend.name)}")
+    beta_notice = backends.beta_notice(backend.name)
+    if beta_notice:
+        log(f"note: {beta_notice}")
     if args.codec != "h264":
         # Kept for experiments, but the NAL parsing here (GOP cache, resync)
         # and the Android app are H.264 only: say so instead of a black screen.
@@ -1467,10 +1477,10 @@ def main():
                 touch_surface.close()
             except Exception as e:
                 log(f"warning: closing the touch device failed ({e})")
-        # A GNOME virtual monitor dies with our session anyway; only Hyprland's
-        # headless output can outlive the daemon (the TUI uses that on restart,
-        # so not once the TUI itself is gone).
-        if (not args.keep_output or backend.name == "gnome"
+        # Only an output that can outlive the daemon (Hyprland's headless
+        # output) is kept; the TUI uses that on restart, so not once the TUI
+        # itself is gone. Others die with our session anyway.
+        if (not args.keep_output or not backend.honors_keep_output
                 or parent_gone.is_set()):
             if parent_gone.is_set():
                 log("the launcher exited; removing the virtual monitor")

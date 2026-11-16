@@ -1,0 +1,105 @@
+{
+    "outputs": [
+        {
+            "clones": [
+            ],
+            "connected": true,
+            "currentModeId": "1",
+            "followPreferredMode": false,
+            "icon": "",
+            "id": 1,
+            "modes": [
+                {
+                    "id": "1",
+                    "name": "2400x1080@60",
+                    "refreshRate": 60,
+                    "size": {
+                        "height": 1080,
+                        "width": 2400
+                    }
+                }
+            ],
+            "name": "Virtual-Tandem",
+            "pos": {
+                "x": 1920,
+                "y": 0
+            },
+            "preferredModes": [
+                "1"
+            ],
+            "priority": 2,
+            "replicationSource": 0,
+            "rotation": 1,
+            "scale": 1.5,
+            "size": {
+                "height": 1080,
+                "width": 2400
+            },
+            "sizeMM": {
+                "height": -1,
+                "width": -1
+            },
+            "type": 0
+        },
+        {
+            "clones": [
+            ],
+            "connected": true,
+            "currentModeId": "2",
+            "enabled": true,
+            "followPreferredMode": false,
+            "icon": "",
+            "id": 2,
+            "modes": [
+                {
+                    "id": "2",
+                    "name": "1920x1080@60",
+                    "refreshRate": 60,
+                    "size": {
+                        "height": 1080,
+                        "width": 1920
+                    }
+                }
+            ],
+            "name": "Virtual-0",
+            "pos": {
+                "x": 0,
+                "y": 0
+            },
+            "preferredModes": [
+                "2"
+            ],
+            "priority": 1,
+            "replicationSource": 0,
+            "rotation": 1,
+            "scale": 1,
+            "size": {
+                "height": 1080,
+                "width": 1920
+            },
+            "sizeMM": {
+                "height": -1,
+                "width": -1
+            },
+            "type": 0
+        }
+    ],
+    "screen": {
+        "currentSize": {
+            "height": 1080,
+            "width": 3520
+        },
+        "id": 0,
+        "maxActiveOutputsCount": 2,
+        "maxSize": {
+            "height": 64000,
+            "width": 64000
+        },
+        "minSize": {
+            "height": 0,
+            "width": 0
+        }
+    },
+    "tabletModeAvailable": false,
+    "tabletModeEngaged": false
+}
