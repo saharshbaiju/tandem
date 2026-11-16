@@ -21,13 +21,25 @@ Encoder rules every chain follows: one slice per frame and no B-frames (the
 phone's hardware decoder wants exactly one complete access unit per input
 buffer), the fastest preset with no lookahead, and a rate-control buffer of
 VBV_FRAMES frames so a keyframe can't grow big enough to stall the Wi-Fi link.
+
+Every encoder setting is checked against what the installed element accepts
+before gst-launch sees it (setting_value): a VA driver lists only the rate
+control modes it can really do, and one value it doesn't list makes
+gst-launch reject the whole pipeline ("could not set property"). A number
+outside the element's range is clamped; a mode it doesn't offer makes the
+encoder EncoderUnusable. EncoderSelector then starts the first encoder that
+works, so a GPU whose hardware encoder can't be used still streams with the
+next one (in the end x264 or OpenH264 on the CPU) instead of stopping.
 """
 
 import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
 
 # Hardware encoders first; the VA plugins only register an element when the
 # driver can really encode H.264, so "element exists" is a usable probe.
@@ -76,12 +88,109 @@ def has_prop(element, prop):
                for line in gst_inspect(element).splitlines())
 
 
+def _property_block(element, prop):
+    """The gst-inspect lines describing `prop` of `element`: its header line
+    and the indented lines under it (flags, type, range or enum values).
+    Empty when the element or the property is unknown.
+
+        rate-control        : The desired rate control mode for the encoder
+                              flags: readable, writable
+                              Enum "GstVaEncoderRateControl" Default: 2, "cbr"
+                                 (2): cbr              - Constant Bitrate
+                                 (16): cqp             - Constant Quantizer
+    """
+    lines = gst_inspect(element).splitlines()
+    for i, line in enumerate(lines):
+        if not line.strip().startswith((prop + " ", prop + ":")):
+            continue
+        header_indent = len(line) - len(line.lstrip())
+        block = [line]
+        for following in lines[i + 1:]:
+            indent = len(following) - len(following.lstrip())
+            if not following.strip() or indent <= header_indent:
+                break
+            block.append(following)
+        return block
+    return []
+
+
+ENUM_VALUE = re.compile(r"^\s*\((-?\d+)\):\s*(\S+)")
+INTEGER_RANGE = re.compile(r"Integer(?:64)?\.\s*Range:\s*(-?\d+)\s*-\s*(-?\d+)")
+
+
+def enum_values(element, prop):
+    """{nick: number} of an enum property, or None when `prop` is not an enum
+    (or gst-inspect didn't describe it)."""
+    values = {}
+    for line in _property_block(element, prop)[1:]:
+        match = ENUM_VALUE.match(line)
+        if match:
+            values[match.group(2)] = match.group(1)
+    return values or None
+
+
+def integer_range(element, prop):
+    """(minimum, maximum) of an integer property, or None if it isn't one."""
+    for line in _property_block(element, prop):
+        match = INTEGER_RANGE.search(line)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def setting_value(element, prop, value):
+    """`value` as `element` will accept it for `prop`, or None if it won't.
+
+    Only what gst-inspect describes is checked; a property it says nothing
+    about passes unchanged. An enum value must be one the element lists (by
+    name or number): VA elements list just the modes the driver supports.
+    An integer is clamped into the property's range.
+    """
+    allowed = enum_values(element, prop)
+    if allowed is not None:
+        text = str(value)
+        return text if text in allowed or text in allowed.values() else None
+    limits = integer_range(element, prop)
+    if limits is not None:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        low, high = limits
+        return str(min(max(number, low), high))
+    return str(value)
+
+
 def pick_encoder(preferred=None):
     """The requested encoder element if it exists, else the first available
     one from ENCODERS; None when there is none."""
     if preferred and preferred != "auto":
         return preferred if gst_inspect(preferred) else None
     return next((e for e in ENCODERS if gst_inspect(e)), None)
+
+
+def installed_encoders():
+    """The ENCODERS this system has, in preference order (hardware first)."""
+    return [encoder for encoder in ENCODERS if gst_inspect(encoder)]
+
+
+def encoder_candidates(preferred=None):
+    """Encoders to try, in order: `preferred` first when it is one Tandem
+    can drive and is installed, then every other installed one. A request
+    that can't be honoured is logged and treated as "auto"; the rest of the
+    list stays as the fallback either way."""
+    installed = installed_encoders()
+    if preferred and preferred != "auto":
+        if preferred in installed:
+            installed.remove(preferred)
+            installed.insert(0, preferred)
+        elif preferred not in ENCODERS:
+            log(f"encoder '{preferred}' isn't one Tandem can use here "
+                f"({', '.join(ENCODERS)}); choosing automatically")
+        else:
+            log(f"encoder '{preferred}' isn't installed; choosing "
+                "automatically")
+    return installed
 
 
 def missing_pipeline_tools():
@@ -133,18 +242,58 @@ def vbv_kbits(kbps, fps):
     return max(1, kbps * VBV_FRAMES // max(1, fps))
 
 
-def _with_props(element, *required, **optional):
-    """`element req... key=value...`, keeping only optional props it has.
+class EncoderUnusable(RuntimeError):
+    """This encoder element can't be configured the way Tandem needs (for
+    example a VA driver without bitrate control); try the next one."""
 
-    Optional props are given with "_" for "-" (cpb_size -> cpb-size) and are
-    probed with has_prop, so an older plugin without one still parses.
+
+def _with_props(element, *required, **optional):
+    """`element req... key=value...`, every value one the element accepts.
+
+    Required settings ("prop=value") are always written; a value the element
+    rejects (a mode it doesn't list) raises EncoderUnusable rather than
+    leaving gst-launch to fail on it, and a number out of range is clamped.
+    Optional settings are given with "_" for "-" (cpb_size -> cpb-size),
+    kept only when the element has the property, and dropped when it
+    rejects the value, so an older plugin without one still parses.
     """
-    parts = [element, *required]
+    parts = [element]
+    for setting in required:
+        prop, _, value = setting.partition("=")
+        accepted = setting_value(element, prop, value)
+        if accepted is None:
+            raise EncoderUnusable(f"{element} doesn't accept {prop}={value}")
+        parts.append(f"{prop}={accepted}")
     for key, value in optional.items():
         prop = key.replace("_", "-")
         if has_prop(element, prop):
-            parts.append(f"{prop}={value}")
+            accepted = setting_value(element, prop, value)
+            if accepted is not None:
+                parts.append(f"{prop}={accepted}")
     return " ".join(parts)
+
+
+# Rate control modes that hold the stream near the bitrate the user chose,
+# best first. CBR is the goal; VBR with the small CPB below stays close to
+# it. A driver offering neither (Intel's low-power encoder without its HuC
+# firmware offers only constant-quantizer) can't keep frames small enough
+# for the link, so that encoder is skipped for the next one.
+BITRATE_MODES = ("cbr", "vbr")
+
+
+def _bitrate_mode(element):
+    """The best BITRATE_MODES entry `element` offers. Raises EncoderUnusable
+    when it lists rate control modes but none of these."""
+    offered = enum_values(element, "rate-control")
+    if offered is None:          # not described: assume the usual CBR
+        return "cbr"
+    for mode in BITRATE_MODES:
+        if mode in offered:
+            return mode
+    raise EncoderUnusable(
+        f"{element} offers no bitrate control (rate-control: "
+        f"{', '.join(offered)}); on Intel this usually means the GPU's HuC "
+        "firmware isn't loaded")
 
 
 def videoconvert():
@@ -168,12 +317,12 @@ def encoder_chain(enc, kbps, gop, fps=60):
                 if gst_inspect("vapostproc")
                 else f"{videoconvert()} ! video/x-raw,format=NV12")
         return f"{conv} ! " + _with_props(
-            enc, "rate-control=cbr", f"bitrate={kbps}",
+            enc, f"rate-control={_bitrate_mode(enc)}", f"bitrate={kbps}",
             f"key-int-max={gop}", "b-frames=0", "target-usage=7",
             cpb_size=vbv_kbits(kbps, fps))
     if enc == "vaapih264enc":
         return (f"{videoconvert()} ! video/x-raw,format=NV12 ! " + _with_props(
-            enc, "rate-control=cbr", f"bitrate={kbps}",
+            enc, f"rate-control={_bitrate_mode(enc)}", f"bitrate={kbps}",
             f"keyframe-period={gop}", "max-bframes=0",
             cpb_length=vbv_ms(fps)))
     if enc == "x264enc":
@@ -281,13 +430,19 @@ def choose_encoder(args, backend_label):
     --codec asks for something else. Raises RuntimeError when there is no
     usable encoder. `backend_label` names the backend in that note
     ("GNOME", "KDE")."""
+    return _encoders_for(args, backend_label)[0]
+
+
+def _encoders_for(args, backend_label):
+    """encoder_candidates() for tandemd's `args`, after the h264-only note.
+    Raises RuntimeError when none is installed."""
     if args.codec != "h264":
         log(f"note: {backend_label} backend encodes h264 only; ignoring "
             f"codec '{args.codec}'")
-    encoder = pick_encoder(getattr(args, "encoder", None))
-    if not encoder:
+    candidates = encoder_candidates(getattr(args, "encoder", None))
+    if not candidates:
         raise RuntimeError("no usable GStreamer H.264 encoder found")
-    return encoder
+    return candidates
 
 
 def start_encoder(node, args, encoder):
@@ -309,6 +464,95 @@ def start_encoder(node, args, encoder):
         return command
 
     return spawn_pipeline(pipeline_writing_to)
+
+
+# An encoder that exits with an error this soon after it was started is
+# treated as one that can't run here: gst-launch rejecting a setting, or a
+# driver refusing the session, ends it within a second. tandemd's
+# supervise_capture restarts capture when the encoder exits, and that restart
+# moves on to the next encoder instead of retrying this one until tandemd
+# gives up. Starting never waits for the encoder: the listener only opens
+# once start_capture returns, and an idle compositor may send no frame at all.
+QUICK_EXIT = 5.0
+
+
+def ended_with_an_error(proc):
+    """True if gst-launch `proc` has exited and it wasn't a clean exit or our
+    own stop_pipeline (SIGTERM, then SIGKILL)."""
+    code = proc.poll()
+    return code is not None and code not in (0, -signal.SIGTERM,
+                                             -signal.SIGKILL)
+
+
+class EncoderSelector:
+    """Starts the first encoder that can run on a PipeWire node and
+    remembers it, so capture restarts within a session go straight back to it.
+
+    One per backend instance; GNOME and KDE call start() from their
+    start_capture(). An encoder fails in one of two ways, and either way it
+    is logged and skipped for the next one, so a broken hardware encoder ends
+    with a CPU encoder rather than no stream:
+
+    * a setting it doesn't accept (EncoderUnusable): found before it starts,
+      and the next one is started at once;
+    * it exits with an error within QUICK_EXIT: tandemd sees the stream end
+      and restarts capture, and that start() moves on to the next one.
+    """
+
+    def __init__(self, args, backend_label):
+        self.args = args
+        self.backend_label = backend_label
+        self.working = None       # the encoder that started last
+        self.failed = set()       # encoders that failed in this session
+        self._last = None         # (proc, start time) of the last start
+
+    def _note_how_the_last_one_ended(self):
+        """Mark the last started encoder failed if it ended with an error
+        soon after starting. Stopped by us (stop_capture) is not a failure."""
+        if self._last is None:
+            return
+        proc, started = self._last
+        self._last = None
+        if (ended_with_an_error(proc)
+                and time.monotonic() - started < QUICK_EXIT
+                and self.working is not None):
+            log(f"encoder {self.working} failed right after starting (exit "
+                f"code {proc.returncode}); trying the next one")
+            self.failed.add(self.working)
+            self.working = None
+
+    def candidates(self):
+        """The order to try encoders in this time: the one that worked
+        first, the ones that failed in this session last (they are retried
+        only when nothing else is left)."""
+        ordered = _encoders_for(self.args, self.backend_label)
+        if self.working in ordered:
+            ordered.remove(self.working)
+            ordered.insert(0, self.working)
+        return ([e for e in ordered if e not in self.failed]
+                + [e for e in ordered if e in self.failed])
+
+    def start(self, node):
+        """(proc, stream) of the first encoder that works on `node`.
+        Raises RuntimeError naming every encoder tried when none does."""
+        self._note_how_the_last_one_ended()
+        tried = []
+        for encoder in self.candidates():
+            tried.append(encoder)
+            try:
+                proc, stream = start_encoder(node, self.args, encoder)
+            except EncoderUnusable as e:
+                log(f"encoder {encoder} can't be used: {e}; trying the next one")
+                self.failed.add(encoder)
+                continue
+            if encoder != tried[0]:
+                log(f"using encoder {encoder}")
+            self.working = encoder
+            self._last = (proc, time.monotonic())
+            return proc, stream
+        raise RuntimeError("no H.264 encoder can be used on this system "
+                           f"(tried: {', '.join(tried)}); see the encoder "
+                           "messages above")
 
 
 def forward_stderr(proc, label="gst"):

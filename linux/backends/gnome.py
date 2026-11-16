@@ -70,7 +70,8 @@ from .gstreamer import (  # noqa: F401  (re-exported)
     vbv_ms,
     videoconvert,
 )
-from .gstreamer import choose_encoder, missing_pipeline_tools, start_encoder
+from .gstreamer import (EncoderSelector, installed_encoders,
+                        missing_pipeline_tools)
 from .layout import _overlaps, place_beside  # noqa: F401  (re-exported)
 
 SC_BUS = "org.gnome.Mutter.ScreenCast"
@@ -152,6 +153,15 @@ def touch_setup_problem():
     """None: touches go through Mutter's RemoteDesktop API, which needs no
     permissions or one-time setup."""
     return None
+
+
+def encoder_choices():
+    """The GStreamer encoders installed here, hardware first: what the user
+    can ask for (tandemd --encoder) on GNOME. Never raises."""
+    try:
+        return tuple(installed_encoders())
+    except Exception:
+        return ()
 
 
 # --------------------------------------------------------------------------- #
@@ -452,6 +462,8 @@ class GnomeBackend:
         self.stream = None              # ScreenCast stream path (touch target)
         self.node = None
         self.proc = None
+        # Picks the first encoder that works and falls back to the next.
+        self.encoders = EncoderSelector(args, "GNOME")
         self.connector = None
         self._before = set()
         # apply_live (control thread) and the placement watcher can run at
@@ -546,9 +558,8 @@ class GnomeBackend:
         on its own, e.g. a renegotiation) within one session: the virtual
         monitor and touch session belong to setup()/teardown(), not to this.
         """
-        encoder = choose_encoder(self.a, "GNOME")
         self.stop_capture()                 # never two encoders on one node
-        proc, stream = start_encoder(self.node, self.a, encoder)
+        proc, stream = self.encoders.start(self.node)
         self.proc = proc
         # The placement thread gets *this* process: after a restart,
         # self.proc is the next one and the old thread must finish with the

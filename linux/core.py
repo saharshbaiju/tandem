@@ -36,6 +36,12 @@ from backends import hyprland as hypr_backend
 
 CONFIG_DIR = secure_link.CONFIG_DIR
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+# Everything the daemon logs while the TUI runs it, so it can be read (and
+# attached to a bug report) after the live view has moved on. Each TUI
+# session starts a new file; the previous session's stays as tandemd.log.1.
+STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME")
+                         or os.path.expanduser("~/.local/state"), "tandem")
+DAEMON_LOG_PATH = os.path.join(STATE_DIR, "tandemd.log")
 # Shared secret a phone must prove it knows to connect at all (see
 # secure_link.py); it travels only inside the QR code.
 PAIRING_KEY_PATH = secure_link.PAIRING_KEY_PATH
@@ -67,6 +73,10 @@ class Config:
     fps: int = 60
     scale: float = 1.0             # desktop scale of the virtual monitor
     quality: str = "high"          # low / medium / high / ultra
+    # "auto" (the best one that works) or one of encoder_choices() to try
+    # first. Either way the backend falls back to another encoder if that
+    # one can't start.
+    encoder: str = "auto"
     codec: str = "h264"            # the app decodes h264
     gop: int = 30                  # keyframe interval (frames)
     transport: str = "usb"         # usb / wifi (preferred address in the QR)
@@ -79,6 +89,18 @@ class Config:
 
     def resolved_backend(self):
         return backends.detect() if self.backend == "auto" else self.backend
+
+    def encoder_choices(self) -> list:
+        """What the Encoder setting can be for this config's backend: "auto",
+        then the encoders that backend can be asked for. A saved choice
+        another backend doesn't know is kept too, so switching the backend
+        back and forth doesn't lose it (that backend logs it and uses auto).
+        """
+        module = backends.module(self.resolved_backend())
+        choices = ["auto"] + list(module.encoder_choices() if module else ())
+        if self.encoder not in choices:
+            choices.append(self.encoder)
+        return choices
 
     def tandemd_args(self) -> list:
         """Build the explicit CLI for tandemd.py from this config."""
@@ -96,6 +118,7 @@ class Config:
             "--device", self.va_device,
             "--port", str(self.port),
             "--quality", self.quality,
+            "--encoder", self.encoder,
             "--pairing-key-file", PAIRING_KEY_PATH,
         ] + ([] if self.touch else ["--no-touch"])
 
@@ -103,6 +126,25 @@ class Config:
 # --------------------------------------------------------------------------- #
 # Persistence
 # --------------------------------------------------------------------------- #
+
+def home_relative(path: str) -> str:
+    """`path` with the home directory written as ~ (for showing it)."""
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path.startswith(home + os.sep) else path
+
+
+def open_daemon_log(new_session: bool):
+    """DAEMON_LOG_PATH opened for appending (line buffered), or None if it
+    can't be written. `new_session` first moves the previous session's log
+    to DAEMON_LOG_PATH + ".1", so the file holds this session only."""
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        if new_session and os.path.exists(DAEMON_LOG_PATH):
+            os.replace(DAEMON_LOG_PATH, DAEMON_LOG_PATH + ".1")
+        return open(DAEMON_LOG_PATH, "a", buffering=1, encoding="utf-8")
+    except OSError:
+        return None
+
 
 def load_config() -> Config:
     if os.path.exists(CONFIG_PATH):

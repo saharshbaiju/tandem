@@ -101,8 +101,10 @@ def run_shell(win, cmd, prompt="press Enter to return"):
 # needs the daemon restarted. side/scale are applied live by the daemon itself
 # (SIGUSR1 -> backend.apply_live); transport only changes the QR's host order.
 RESTART_KEYS = ("backend", "output", "width", "height", "fps", "quality",
-                "codec", "gop", "port", "touch")
+                "encoder", "codec", "gop", "port", "touch")
 LIVE_KEYS = ("side", "scale")
+# Daemon log lines kept for the live view (all of them go to the log file).
+LOG_LINES_KEPT = 200
 
 
 class Stream:
@@ -118,7 +120,8 @@ class Stream:
     def __init__(self, cfg):
         self.cfg = cfg
         self.proc = None
-        self.logs = deque(maxlen=8)
+        self.logs = deque(maxlen=LOG_LINES_KEPT)
+        self.log_file = None            # core.DAEMON_LOG_PATH while open
         self.state = {"live": 0, "ever": False}
         self.error = None
         self.touch_status = ""          # daemon's "touch input: ..." verdict
@@ -154,6 +157,7 @@ class Stream:
         # window closes) must not reach the daemon's encoder directly — it
         # would die while the daemon lives on. The TUI stops the daemon itself
         # (see main()), which then stops its encoder cleanly.
+        self._start_log_file(cmd)
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL,
                                      stderr=subprocess.PIPE, text=True, bufsize=1,
@@ -195,10 +199,35 @@ class Stream:
                     core._adb_reverse_cache.pop(self.cfg.port, None)
                     core.adb_reverse(self.cfg.port)
 
+    def _start_log_file(self, cmd):
+        """Open the log file for this daemon run and write a header naming
+        the version and the exact command. The first run of this TUI starts
+        a new file (the last session's is kept as .1); later runs (restarts
+        after a config change, a start after the daemon stopped) append to
+        it, so the run that failed is still there."""
+        if self.log_file is None:
+            self.log_file = core.open_daemon_log(
+                new_session=not _active["log_started"])
+            _active["log_started"] = True
+        self._save_log_line(
+            f"=== Tandem {about.VERSION}, "
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {' '.join(cmd)}")
+
+    def _save_log_line(self, line):
+        """Append one line to the log file; a failing disk never stops the
+        stream (the file is closed and the live view keeps working)."""
+        if self.log_file is None:
+            return
+        try:
+            self.log_file.write(line + "\n")
+        except (OSError, ValueError):
+            self.log_file = None
+
     def _reader(self):
         for line in self.proc.stderr:
             line = line.rstrip()
             self.logs.append(line)
+            self._save_log_line(line)
             if "client connected" in line:
                 self.state["live"] += 1
                 self.state["ever"] = True
@@ -519,6 +548,7 @@ def configure_screen(win, cfg, live=False):
         ("Refresh (FPS)", "choice", "fps", [30, 60, 120]),
         ("Desktop scale", "choice", "scale", [1.0, 1.25, 1.5, 2.0]),
         ("Quality", "choice", "quality", ["low", "medium", "high", "ultra"]),
+        ("Encoder", "encoder", "encoder", None),
         ("Keyframe interval", "choice", "gop", [15, 30, 60]),
         ("Preferred link", "choice", "transport", ["usb", "wifi"]),
         ("Port", "port", None, None),
@@ -539,6 +569,11 @@ def configure_screen(win, cfg, live=False):
                 value = str(cfg.port)
             elif key == "quality":
                 value = f"{cfg.quality}  ({core.QUALITY[cfg.quality]})"
+            elif kind == "encoder":
+                value = ("auto  (best that works; falls back if one fails)"
+                         if cfg.encoder == "auto" else
+                         f"{cfg.encoder}  (tried first; falls back if it "
+                         "can't start)")
             elif key == "backend":
                 value = (f"auto → {cfg.resolved_backend() or 'unsupported'}"
                          if cfg.backend == "auto" else cfg.backend)
@@ -582,6 +617,9 @@ def configure_screen(win, cfg, live=False):
             step = -1 if c == curses.KEY_LEFT else 1
             if kind == "choice":
                 setattr(cfg, key, cycle(choices, getattr(cfg, key), step))
+            elif kind == "encoder":
+                # The choices depend on the backend row above, so ask anew.
+                cfg.encoder = cycle(cfg.encoder_choices(), cfg.encoder, step)
             elif kind == "resolution":
                 res_idx = (res_idx + step) % len(core.RES_PRESETS)
                 _apply_resolution(win, cfg, res_idx)
@@ -736,6 +774,31 @@ def touch_row(cfg, stream, touch_setup, width):
     return f"Touch   : {short}"[:width], color, details
 
 
+def log_rows(lines, width):
+    """Log lines wrapped to `width` columns (continuations indented), so a
+    long line is shown whole instead of cut off."""
+    rows = []
+    for line in lines:
+        rows += textwrap.wrap(line, max(20, width), subsequent_indent="  ",
+                              drop_whitespace=False) or [""]
+    return rows
+
+
+def draw_log(win, top, bottom, width, stream):
+    """The daemon log between rows `top` and `bottom` (exclusive): a title
+    naming the log file, then the newest lines that fit, wrapped to `width`.
+    Returns the row after the last one drawn."""
+    log_path = core.home_relative(core.DAEMON_LOG_PATH)
+    title = (f"daemon log (all of it: {log_path})" if stream.log_file
+             else "daemon log:")
+    addstr(win, top, 2, title[:width + 2], curses.color_pair(5))
+    room = max(0, bottom - top - 1)
+    rows = log_rows(list(stream.logs), width) if room else []
+    for i, row in enumerate(rows[-room:] if room else []):
+        addstr(win, top + 1 + i, 4, row, curses.color_pair(5))
+    return top + 1 + min(room, len(rows))
+
+
 def live_screen(win, stream):
     """Live status + pairing QR for the already-running stream.
 
@@ -795,37 +858,46 @@ def live_screen(win, stream):
             if uri != qr_uri:
                 qr_lines = qr.render_halfblocks(qr.encode(uri, "M"), quiet=2)
                 qr_uri = uri
-            qr_x = 64 if w > 64 + len(qr_lines[0]) else 2
+            # Once the daemon has stopped there is nothing to scan: no QR and
+            # no addresses, so the log (which says why) gets the whole width.
+            show_qr = not exited
+            qr_x = 64 if show_qr and w > 64 + len(qr_lines[0]) else 2
             left_w = (qr_x - 4) if qr_x > 2 else w - 6   # keep text off the QR
             touch_text, touch_color, touch_details = touch_row(
                 cfg, stream, touch_setup, left_w)
             addstr(win, 8, 2, touch_text, curses.color_pair(touch_color))
             qr_y = 3 if qr_x > 2 else 10
-            if qr_x > 2:
-                addstr(win, 9, 2, "Scan the QR code with the phone app  →",
-                       curses.A_BOLD)
-            else:
-                addstr(win, qr_y - 1, 2, "Scan with the phone app:",
-                       curses.A_BOLD)
-            fits = (qr_y + len(qr_lines) < h - 1
-                    and qr_x + len(qr_lines[0]) < w)
-            size = (len(qr_lines), len(qr_lines[0])) if fits else None
-            text_y = 10 if qr_x > 2 else qr_y + (size[0] if size else 0) + 1
-            if not size:
+            size = None
+            if show_qr:
+                if qr_x > 2:
+                    addstr(win, 9, 2, "Scan the QR code with the phone app  →",
+                           curses.A_BOLD)
+                else:
+                    addstr(win, qr_y - 1, 2, "Scan with the phone app:",
+                           curses.A_BOLD)
+                fits = (qr_y + len(qr_lines) < h - 1
+                        and qr_x + len(qr_lines[0]) < w)
+                size = (len(qr_lines), len(qr_lines[0])) if fits else None
+            text_y = (10 if qr_x > 2 or not show_qr
+                      else qr_y + (size[0] if size else 0) + 1)
+            if show_qr and not size:
                 addstr(win, text_y, 4, "(enlarge the terminal to show the QR "
                                        "code)", curses.color_pair(5))
                 text_y += 1
-            addstr(win, text_y, 2, "…or type an address and the code in the app:",
-                   curses.color_pair(5))
-            for i, ip in enumerate(ips or ["<no network — enable USB tethering "
-                                           "or join Wi-Fi>"]):
-                tag = "USB tethering" if ip == core.usb_tether_ip() else "network"
-                addstr(win, text_y + 1 + i, 4, f"{ip}:{cfg.port}   ({tag})",
+            y = text_y
+            if show_qr:
+                addstr(win, y, 2, "…or type an address and the code in the app:",
+                       curses.color_pair(5))
+                for i, ip in enumerate(ips or ["<no network — enable USB "
+                                               "tethering or join Wi-Fi>"]):
+                    tag = ("USB tethering" if ip == core.usb_tether_ip()
+                           else "network")
+                    addstr(win, y + 1 + i, 4, f"{ip}:{cfg.port}   ({tag})",
+                           curses.color_pair(1) | curses.A_BOLD)
+                code_y = y + 1 + max(1, len(ips))
+                addstr(win, code_y, 4, f"pairing code  {pairing_code}"[:left_w],
                        curses.color_pair(1) | curses.A_BOLD)
-            code_y = text_y + 1 + max(1, len(ips))
-            addstr(win, code_y, 4, f"pairing code  {pairing_code}"[:left_w],
-                   curses.color_pair(1) | curses.A_BOLD)
-            y = code_y + 2
+                y = code_y + 2
             if not live and not exited:
                 y = draw_checks(win, y, left_w, fw, usb) + 1
             for line in touch_details:
@@ -836,11 +908,11 @@ def live_screen(win, stream):
                 addstr(win, y, 2, line, curses.color_pair(5))
                 y += 1
             if exited and stream.error:
-                addstr(win, y, 2, f"error: {stream.error}", curses.color_pair(4))
-                y += 1
-            addstr(win, y + 1, 2, "daemon log:", curses.color_pair(5))
-            for i, line in enumerate(list(stream.logs)[-max(0, h - y - 4):]):
-                addstr(win, y + 2 + i, 4, line[:left_w], curses.color_pair(5))
+                for line in textwrap.wrap(f"error: {stream.error}",
+                                          max(20, left_w)):
+                    addstr(win, y, 2, line, curses.color_pair(4))
+                    y += 1
+            y = draw_log(win, y + 1, h - 2, left_w, stream)
             if size:
                 draw_qr(win, qr_y, qr_x, qr_lines)   # last, so nothing overlaps it
 
@@ -897,7 +969,9 @@ def _raise_terminal_gone(*_):
 
 
 # The running stream, so main() can stop it however app() exits.
-_active = {"stream": None, "gone": False}
+# log_started: this TUI already began a new log file (core.open_daemon_log);
+# every later daemon run, in any Stream, appends to it.
+_active = {"stream": None, "gone": False, "log_started": False}
 
 
 def app(stdscr):
@@ -987,7 +1061,7 @@ def setup_terminal():
 
 def main():
     if sys.argv[1:] in (["--version"], ["-V"]):
-        print(f"{about.CREDIT}\n{about.LICENSE}")   # the credit NOTICE asks forks to keep
+        print(about.version_text())   # includes the credit NOTICE asks forks to keep
         return
     setup_terminal()
     # The daemon runs in its own session (no terminal signals reach it), so
@@ -1010,6 +1084,12 @@ def main():
         stream = _active["stream"]
         if stream is not None and stream.needs_teardown:
             stream.disconnect()          # no window: the terminal may be gone
+        if _active["log_started"]:
+            try:                         # the terminal may be gone
+                print("Tandem's log of this session: "
+                      + core.home_relative(core.DAEMON_LOG_PATH))
+            except (OSError, ValueError):
+                pass
 
 
 if __name__ == "__main__":

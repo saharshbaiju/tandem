@@ -193,10 +193,13 @@ tandem
 - **Start Tandem** launches the daemon and opens the live view. It shows the status,
   the pairing **QR code**, the plain addresses, the touch status and the daemon log.
   `q` returns to the menu and keeps the stream running. `d` disconnects and removes
-  the monitor.
+  the monitor. The whole daemon log is also saved to
+  `~/.local/state/tandem/tandemd.log` (the previous session's in `tandemd.log.1`);
+  attach it when you report a bug. `tandem --version` prints the version.
 - **Configure** sets the desktop backend (auto, hyprland, gnome or kde), the screen
   **side** (left, right, up or down), the **resolution** (presets, or *Match connected
   phone* through adb), the **FPS**, the desktop **scale**, the **quality** (bitrate),
+  the **encoder** (auto, or one to try first, with a fallback if it can't start),
   the keyframe interval, the **preferred link** (which address comes first in the
   QR code), the **port**, **touch input** (on or off), and **paired phones**. The
   paired phones option has a *forget all* action, which creates a new pairing key.
@@ -221,7 +224,7 @@ python3 tandemd.py --help
 --width 2400 --height 1080 --fps 60      # virtual monitor mode
 --side right|left|up|down --scale 1.5    # placement (applied live on SIGUSR1)
 --bitrate 12M --gop 30                   # encoder (Hyprland: GOP is at least 1 s of frames)
---encoder auto|vah264enc|x264enc|…       # GNOME, KDE: GStreamer element to use
+--encoder auto|vah264enc|x264enc|…       # GNOME, KDE: GStreamer element to try first
 --encoder auto|h264_nvenc|h264_vaapi|libx264|libopenh264  # Hyprland: compositor GPU, CPU fallback
 --device /dev/dri/renderD128             # Hyprland: VA-API node (h264_vaapi)
 --host 0.0.0.0 --port 5000               # default: every interface, IPv4 and IPv6
@@ -298,7 +301,7 @@ linux/
                         and fake input), vendored protocol XML, Makefile
   start-tandem.sh       no-TUI launcher (prints the QR)
   testsrc.py            test-pattern server for app development
-  about.py              the credit line and license notice (printed by --version)
+  about.py              the version, credit line and license notice (printed by --version)
 android/app/src/main/java/io/github/saharshbaiju/tandem/
   MainActivity.kt       Material 3 UI, scanner, transitions, side sheet
   StreamSession.kt      parallel connect, framed reader, MediaCodec → Surface

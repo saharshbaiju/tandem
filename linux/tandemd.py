@@ -1284,7 +1284,7 @@ def main():
     ap = argparse.ArgumentParser(description="Tandem daemon",
                                  formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--version", action="version",
-                    version=f"{about.CREDIT}\n{about.LICENSE}")
+                    version=about.version_text())
     beta_backends = [name for name in backends.NAMES
                      if backends.beta_notice(name)]
     ap.add_argument("--backend", default="auto",

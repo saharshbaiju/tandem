@@ -45,6 +45,8 @@ pairing key, certificate or config.
 |---|---|
 | `test_backends_registry.py` | `backends/__init__.py`: the registry, `detect()`, `create()`, `describe()`, the module hooks and class attributes every backend must have, tandemd's `--backend` choices |
 | `test_gstreamer.py` | `backends/gstreamer.py`: encoder chains, pipeline descriptions, encoder choice, the shared `missing_pipeline_tools` / `choose_encoder` / `start_encoder` every PipeWire backend uses, `spawn_pipeline` / `stop_pipeline`, and that `gnome.py` still re-exports the moved names |
+| `test_encoder_fallback.py` | issue #6: reading enum values and integer ranges from gst-inspect, settings checked before gst-launch sees them, the VA rate control choice (`cbr`, `vbr`, or unusable), the order encoders are tried in, `EncoderSelector` falling back and remembering, `ended_with_an_error` against real processes, and `about.VERSION` matching the Android `versionName` |
+| `test_tui_log_and_encoder.py` | the Encoder setting reaching the daemon, the daemon log file (`~/.local/state/tandem/tandemd.log`, one per TUI session), and the live view wrapping log lines instead of cutting them off |
 | `test_layout.py` | `backends/layout.py`: `place_beside`, `valid_scale`, the side phrases in log messages |
 | `test_gnome_capture.py` | the GNOME backend's `start_capture` / `stop_capture` command line and process handling |
 | `test_core_dispatch.py` | `core.DEPS` rows and the functions that ask the backend's hooks: `touch_setup_check`, `remove_virtual_output`, `primary_monitor_desc` |

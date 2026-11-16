@@ -922,6 +922,19 @@ def touch_setup_problem():
     return uinput_setup_problem()
 
 
+# What Configure offers besides "auto", in the form --encoder takes here: the
+# GPU encoder families wf-recorder drives, then the CPU ones. "auto" also
+# covers the zero-copy NVIDIA path (xdph + nvh264enc), which has no name of
+# its own. A GPU choice falls back to the CPU encoders; a CPU choice to the
+# other CPU encoder (see encoder_candidates).
+ENCODER_CHOICES = ("h264_vaapi", "h264_nvenc", "libx264", "libopenh264")
+
+
+def encoder_choices():
+    """Encoders the user can ask for (tandemd --encoder) on Hyprland."""
+    return ENCODER_CHOICES
+
+
 class HyprlandBackend:
     name = "hyprland"
     # The headless output can outlive the daemon: the TUI restarts the
@@ -1009,6 +1022,10 @@ class HyprlandBackend:
         req = (a.encoder if a.encoder.startswith(("h264_", "hevc_", "libx26",
                                                   "libopenh264"))
                else "auto")
+        if req != a.encoder and a.encoder != "auto" and not self._working:
+            # e.g. a GStreamer element name saved while on GNOME or KDE
+            log(f"encoder '{a.encoder}' isn't one Hyprland can use "
+                f"({', '.join(ENCODER_CHOICES)}); choosing automatically")
         cands = encoder_candidates(req, a.device)
         if a.codec == "hevc":            # H.264-only pipelines
             cands = [c for c in cands if c[0] not in (XDPH_NVENC, "libopenh264")]

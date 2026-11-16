@@ -497,21 +497,58 @@ The encoder chain converts to I420 or NV12 before the encoder. Without that,
 `x264enc` picks the High 4:4:4 profile for KWin's RGB frames, which phone
 decoders refuse.
 
-The encoder is chosen by checking which GStreamer elements exist, hardware
-first: `vah264enc`, then `vah264lpenc`, `vaapih264enc`, `x264enc` and
-`openh264enc`. The VA plugins only register an element when the driver can
-really encode H.264, so "the element exists" is a reliable test. `--encoder`
-overrides the choice.
+The encoders to try are the GStreamer elements that exist, hardware first:
+`vah264enc`, then `vah264lpenc`, `vaapih264enc`, `x264enc` and `openh264enc`
+(`encoder_candidates`). The VA plugins only register an element when the
+driver can encode H.264. That an element exists does not mean every setting
+works, though, so two more checks follow.
 
-Both backends start the encoder through the same two calls in
-`backends/gstreamer.py`, so the pipeline, its log line and the
-"no usable GStreamer H.264 encoder" error are written once:
-`choose_encoder(args, label)` picks the element (and notes that only H.264 is
-encoded when `--codec` asks for more), then `start_encoder(node, args, encoder)`
-builds the pipeline for the node at the requested size and starts it. Each
-backend keeps only its own steps around them: GNOME starts its placement
-watcher afterwards, and KDE first checks that KWin's output still exists.
-Their `missing()` lists share
+**Every setting is checked before gst-launch sees it** (`setting_value`).
+gst-inspect lists each property's type: for an enum, only the values this
+driver offers; for an integer, its range. A value the element doesn't list
+would make gst-launch reject the whole pipeline (`erroneous pipeline: could
+not set property …`). An integer is clamped into its range instead, and a
+rate control mode is picked from what the driver lists: `cbr`, else `vbr`.
+A VA encoder that offers neither raises `EncoderUnusable`. This is the case
+of issue #6: Intel's low-power encoder (`vah264lpenc`, often the only one on
+newer Intel GPUs) offers only constant-quantizer mode when the GPU's HuC
+firmware isn't loaded, so `rate-control=cbr` failed and the daemon stopped.
+Constant-quantizer mode has no bitrate limit at all, which the link can't
+carry, so such an encoder is skipped rather than used.
+
+**The first encoder that can run is used** (`EncoderSelector`, one per
+backend), so a machine whose hardware encoder can't be used still streams
+with x264 or OpenH264. An encoder fails in one of two ways:
+
+- A setting it doesn't accept (`EncoderUnusable`, above) is found before it
+  starts. It is logged (`encoder X can't be used: …; trying the next one`)
+  and the next encoder starts at once.
+- It starts but exits with an error (any exit except a clean one or our own
+  SIGTERM/SIGKILL) within `QUICK_EXIT` (5 s). The stream ends, and
+  `supervise_capture` restarts capture as for any encoder exit (section 6).
+  That `start` sees how the last encoder ended, logs `encoder X failed right
+  after starting (exit code 1); trying the next one`, and starts the next.
+  Each failed encoder costs one restart backoff (0.2 s for the first).
+
+Starting never waits for the encoder's first frame. The daemon opens its
+listener only once `start_capture` returns, and a compositor may send no
+frame at all while the screen is idle (KWin can ignore `keepalive-time`), so a
+wait would delay every start on an idle desktop. A restart within the session
+tries the encoder that worked first. Encoders that failed are tried again
+only when nothing else is left. When none can be used, `start_capture`
+raises `no H.264 encoder can be used on this system (tried: …)`.
+
+`--encoder` (Configure → Encoder in the TUI) puts one element first. The
+others stay as fallbacks, and a name that isn't installed or isn't one of the
+five is logged and treated as `auto`.
+
+Both backends start the encoder through `backends/gstreamer.py`, so the
+pipeline, its log lines and the errors are written once:
+`EncoderSelector.start(node)` runs the steps above, starting each candidate
+with `start_encoder(node, args, encoder)`, which builds the pipeline for the
+node at the requested size. Each backend keeps only its own steps around it:
+GNOME starts its placement watcher afterwards, and KDE first checks that
+KWin's output still exists. Their `missing()` lists share
 `missing_pipeline_tools()` the same way.
 
 Every encoder is configured the same way, for the same reasons:

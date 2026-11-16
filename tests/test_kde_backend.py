@@ -442,7 +442,8 @@ class KdeBackendSetupTest(FakeHelperCase):
         backend = self.backend()
         backend.setup()
         process = mock.Mock()
-        with mock.patch.object(gstreamer, "pick_encoder", return_value="x264enc"), \
+        with mock.patch.object(gstreamer, "installed_encoders",
+                               return_value=["x264enc"]), \
                 mock.patch.object(gstreamer, "build_pipeline",
                                   return_value=["gst-launch-1.0"]) as build, \
                 mock.patch.object(gstreamer, "spawn_pipeline",
@@ -463,9 +464,12 @@ class KdeBackendSetupTest(FakeHelperCase):
         self.use_script(Tandem=CREATED)
         backend = self.backend()
         backend.setup()
-        with mock.patch.object(gstreamer, "pick_encoder", return_value=None):
+        with mock.patch.object(gstreamer, "installed_encoders",
+                               return_value=[]), \
+                mock.patch.object(gstreamer, "spawn_pipeline") as spawn:
             with self.assertRaises(RuntimeError) as raised:
                 backend.start_capture()
+        spawn.assert_not_called()
         self.assertIn("H.264 encoder", str(raised.exception))
 
 

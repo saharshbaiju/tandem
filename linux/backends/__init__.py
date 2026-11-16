@@ -64,6 +64,11 @@ raise:
                                    Callers must not assume the fix uses
                                    sudo; None as fix means nothing can be
                                    run, only explained
+    encoder_choices()           -> tuple of encoder names the user can pick
+                                   in Configure, as tandemd --encoder takes
+                                   them here ("auto" is always offered on
+                                   top). The backend still falls back to the
+                                   others when the picked one can't start
 
 Adding a backend:
     1. Write backends/<module>.py with the class and the hooks above. Keep

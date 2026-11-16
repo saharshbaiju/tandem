@@ -14,7 +14,7 @@ import backends
 from backends import gnome, hyprland
 
 HOOKS = ("session_confidence", "session_problem", "describe_primary_monitor",
-         "remove_leftover_output", "touch_setup_problem")
+         "remove_leftover_output", "touch_setup_problem", "encoder_choices")
 
 
 def detect_with(env):

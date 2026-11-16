@@ -50,8 +50,8 @@ import time
 from typing import NamedTuple
 
 from . import kwin_helper
-from .gstreamer import (choose_encoder, missing_pipeline_tools,
-                        start_encoder, stop_pipeline)
+from .gstreamer import (EncoderSelector, installed_encoders,
+                        missing_pipeline_tools, stop_pipeline)
 from .layout import place_beside, side_phrase, valid_scale
 
 # The helper's --name. KWin calls the output "Virtual-<name>".
@@ -616,6 +616,15 @@ def touch_setup_problem():
     return None
 
 
+def encoder_choices():
+    """The GStreamer encoders installed here, hardware first: what the user
+    can ask for (tandemd --encoder) on KDE. Never raises."""
+    try:
+        return tuple(installed_encoders())
+    except Exception:
+        return ()
+
+
 # --------------------------------------------------------------------------- #
 # backend
 # --------------------------------------------------------------------------- #
@@ -630,6 +639,8 @@ class KdeBackend:
         self.a = args
         self.helper = None          # KwinHelper while the output exists
         self.proc = None            # gst-launch while capturing
+        # Picks the first encoder that works and falls back to the next.
+        self.encoders = EncoderSelector(args, "KDE")
         # apply_live (control thread) and teardown must not interleave two
         # kscreen-doctor runs or place an output being removed.
         self._layout_lock = threading.Lock()
@@ -819,11 +830,10 @@ class KdeBackend:
                       else "the KWin helper stopped")
             raise RuntimeError(
                 f"the KWin virtual output was closed ({reason})")
-        encoder = choose_encoder(self.a, "KDE")
         self.stop_capture()                 # never two encoders on one node
         # The caps are pinned to the size we asked KWin for: KWin 6.8
         # resizes the output to match them, 6.7 only accepts its own size.
-        self.proc, stream = start_encoder(helper.node, self.a, encoder)
+        self.proc, stream = self.encoders.start(helper.node)
         return stream
 
     def stop_capture(self):

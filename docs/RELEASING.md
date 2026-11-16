@@ -63,7 +63,9 @@ The 0.5.0 release notes describe the rename.
 ## Cutting a release
 
 1. Increase `versionCode` by one, and update `versionName`, in
-   `android/app/build.gradle.kts`.
+   `android/app/build.gradle.kts`. Set `VERSION` in `linux/about.py` to the
+   same `versionName`: it is what `tandem --version` prints, and a unit test
+   fails while the two differ.
 2. Build and package:
 
    ```bash
