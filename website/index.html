@@ -627,6 +627,39 @@ main, footer { position: relative; z-index: 1; }
 .gh-stars { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .gh-stars svg { width: 12px; height: 12px; }
 
+/* Star nudge: a few seconds after the splash, a small gold star pops out of
+ * the grey star by the star count in the nav, hangs there for a moment and
+ * drops back in. (Before the count loads, it uses the GitHub icon.) A quiet
+ * reminder that starring helps. Once per visit, never with reduced motion. */
+.gh-link { position: relative; }
+.star-nudge {
+  position: absolute; left: 10px; top: 50%; width: 18px; height: 18px;
+  margin: -9px 0 0 -9px; color: #F5B800; pointer-events: none;
+  opacity: 0; transform: translate(0, 0) scale(0);
+  filter: drop-shadow(0 0 6px rgba(245, 184, 0, .55));
+}
+.star-nudge svg { width: 100%; height: 100%; display: block; }
+.gh-link.nudge .star-nudge { animation: star-nudge 2.4s cubic-bezier(.3, 1.4, .5, 1) both; }
+.gh-link.nudge .nudge-from { animation: gh-bump 2.4s ease both; }
+.gh-link.nudge .gh-stars .nudge-from { color: #F5B800; transition: color .2s; }
+@keyframes star-nudge {
+  0%   { opacity: 0; transform: translate(0, 0) scale(0) rotate(-90deg); }
+  18%  { opacity: 1; transform: translate(0, 30px) scale(1.25) rotate(10deg); }
+  26%  { transform: translate(0, 28px) scale(1) rotate(0deg); }
+  36%  { transform: translate(0, 28px) scale(1.12) rotate(0deg); }
+  44%  { transform: translate(0, 28px) scale(1) rotate(0deg); }
+  70%  { opacity: 1; transform: translate(0, 28px) scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: translate(0, 0) scale(0) rotate(90deg); }
+}
+@keyframes gh-bump {
+  0%, 100% { transform: scale(1); }
+  8%  { transform: scale(.85); }
+  16% { transform: scale(1.08); }
+  24% { transform: scale(1); }
+  92% { transform: scale(1); }
+  96% { transform: scale(1.1); }
+}
+
 /* Buy me a chai: the UPI QR dialog (computers only) ----------------------------- */
 .chai { margin: auto; width: min(360px, calc(100vw - 32px)); padding: 32px; border: 1px solid var(--white); background: var(--black); color: var(--white); }
 .chai::backdrop { background: rgb(0 0 0 / .7); }
@@ -780,7 +813,7 @@ footer { background: var(--black); }
     <li><a class="nav-chai" href="#chai" data-chai aria-label="Buy me a chai"><svg class="chai-glass" viewBox="0 0 16 16" aria-hidden="true"><path class="steam" d="M6.4 3.6c-.9-.8.9-1.5 0-2.4M9.6 3.6c-.9-.8.9-1.5 0-2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M2.9 5.2h10.2l-1.2 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3.8 8.6h8.4l-.8 5.6H4.6z" fill="currentColor"/></svg><span>Buy me a chai</span></a></li>
     <li class="opt"><a href="#demo">See it work</a></li>
     <li class="opt"><a href="#install">Install</a></li>
-    <li><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a></li>
+    <li><a class="gh-link" href="https://github.com/saharshbaiju/tandem" aria-label="Tandem on GitHub"><span class="star-nudge" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg></span><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span class="gh-stars" data-stars-wrap hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .9l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.3l-4.5 2.4.9-5L.8 6.2l5-.7z" fill="currentColor"/></svg><span data-stars></span></span></a></li>
     <li><button class="theme-btn" type="button" id="themeBtn" aria-label="Switch to light theme">Light</button></li>
   </ul>
 </nav>
@@ -2477,6 +2510,44 @@ const Footer = (() => {
 })();
 
 /* ===================================================================
+ * Star nudge: once per visit, a few seconds after the splash, the gold
+ * star pops out of the nav's GitHub link and drops back in (CSS above).
+ * ?nudge in the URL replays it on every load, for previewing. */
+const StarNudge = (() => {
+  const KEY = "tandem-star-nudge";
+  const DELAY = 2500;
+  function seen() { try { return sessionStorage.getItem(KEY) === "1"; } catch { return false; } }
+  function remember() { try { sessionStorage.setItem(KEY, "1"); } catch { /* private mode */ } }
+  function play() {
+    const link = document.querySelector(".nav .gh-link");
+    if (!link) return;
+    // Start from the grey star by the count; the GitHub icon until it loads.
+    const wrap = link.querySelector("[data-stars-wrap]");
+    const from = wrap && !wrap.hidden ? wrap.querySelector("svg") : link.querySelector(":scope > svg");
+    const star = link.querySelector(".star-nudge");
+    link.querySelectorAll(".nudge-from").forEach(el => el.classList.remove("nudge-from"));
+    if (from && star) {
+      const a = from.getBoundingClientRect(), b = link.getBoundingClientRect();
+      star.style.left = (a.left - b.left + a.width / 2) + "px";
+      star.style.top = (a.top - b.top + a.height / 2) + "px";
+      from.classList.add("nudge-from");
+    }
+    link.classList.remove("nudge");
+    void link.offsetWidth;          // restart the animation if it already ran
+    link.classList.add("nudge");
+    // Clean up when the gold star is back in, so the grey star is grey again.
+    star?.addEventListener("animationend", () => link.classList.remove("nudge"), { once: true });
+  }
+  function later() {
+    const preview = new URLSearchParams(location.search).has("nudge");
+    if (reduceMotion || (seen() && !preview)) return;
+    remember();
+    setTimeout(play, DELAY);
+  }
+  return { later, play };
+})();
+
+/* ===================================================================
  * Magnet: on small screens the pinned sections get scroll-snap stops at
  * each beat, so a flick settles on the next one instead of skipping it,
  * and a scroll that ends near a beat is pulled onto it. A stop at
@@ -2528,6 +2599,7 @@ Promise.race([
 ]).then(() => Splash.run(() => {
   document.getElementById("top").classList.add("in");
   HeroArt.start();
+  StarNudge.later();
 }));
 </script>
 </body>
