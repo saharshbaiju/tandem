@@ -258,7 +258,7 @@ app/src/main/java/io/github/saharshbaiju/tandem/
                            TextToKeys (composing / autocorrect edits → key presses)
   OrientationWatcher.kt    how far the phone is turned from the screen, for the portrait prompt
   ConnectTarget.kt         tandem:// QR and deep-link parsing, manual entry, persistence
-  UpdateCheck.kt           "a newer Tandem is out": latest GitHub release, once a day
+  UpdateCheck.kt           "a newer Tandem is out": latest GitHub release, each open
   RippleRevealLayout.kt    water ripple and reveal (AGSL on Android 13+, canvas fallback)
   AsciiSplashView.kt       launch splash: ASCII wordmark, ripples, reveal (a port of the website's)
   AsciiWordmarkView.kt     the connect screen's "Tandem" in ASCII (static)
@@ -804,9 +804,16 @@ video still goes straight to the PC.
 The app is installed from GitHub Releases, not a store, so nothing would tell a
 user that a new version exists. From 0.8.0 the app checks by itself:
 
-- **When:** at launch, at most once a day. The answer (the newest stable
-  release and the newest pre-release, with their pages) is kept in the app's
-  preferences, so later launches that day show the card without going online.
+- **When:** every time the app comes to the front (`onStart`), if the phone
+  has a network with working internet (validated; a USB link to the computer
+  alone doesn't count). Without one, the last answer is shown and the check
+  runs as soon as such a network comes up while the app is open. The answer
+  (the newest stable release and the newest pre-release, with their pages) and
+  its ETag are kept in the app's preferences. Each ask sends that ETag
+  (`If-None-Match`); while nothing changed GitHub answers `304 Not Modified`,
+  which doesn't count against its limit of 60 anonymous requests an hour, and
+  the kept answer stands. A check that is still running isn't started twice.
+  The card also hides again when the app is up to date.
 - **What is sent:** one HTTPS `GET` to
   `api.github.com/repos/saharshbaiju/tandem/releases?per_page=20`, with the
   generic User-Agent `Tandem-update-check`. No identifiers, no settings, nothing

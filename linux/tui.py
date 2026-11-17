@@ -1014,7 +1014,7 @@ def app(stdscr):
     init_colors()
     cfg = core.load_config()
     stream = None
-    updates = update_check.UpdateCheck()   # once a day, in the background
+    updates = update_check.UpdateCheck()   # on every start, in the background
 
     # first run: go straight to dependencies if anything required is missing
     if core.missing_packages(cfg.resolved_backend(), required_only=True):

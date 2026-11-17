@@ -98,8 +98,10 @@ release is out: the TUI shows a line in its main menu with the command to run,
 and the app shows an *Update available* card on its connect screen that opens
 the release page. When a beta is out, the app also asks whether you want to try
 it. Neither downloads or installs anything by itself. To check, each asks
-GitHub for the releases at most once a day, with nothing about you or your
-machine in the request. `TANDEM_NO_UPDATE_CHECK=1` turns it off on
+GitHub for the releases every time it starts (the app: every time it is
+opened, or as soon as there is internet), with nothing about you or your
+machine in the request. Repeat asks send the last answer's ETag, so while
+nothing changed GitHub replies "not modified" at no cost. `TANDEM_NO_UPDATE_CHECK=1` turns it off on
 the computer.
 
 > **Ubuntu and Fedora:** log in to the GNOME **Wayland** session, which is the
@@ -325,7 +327,7 @@ linux/
   tandemd.py            daemon: backend → NAL parse → GOP cache → TCP broadcast
   secure_link.py        TLS certificate, pairing key, handshake, lock-out
   device_fit.py         fit to device: sizes the monitor to the phone's screen (SIZE)
-  update_check.py       "a newer Tandem is out": latest GitHub release, once a day
+  update_check.py       "a newer Tandem is out": latest GitHub release, each start
   phone_input.py        what admitted phones send back: touches → slots, keys, pointer
   uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland)
   uinput_pointer.py     virtual absolute mouse via /dev/uinput, for pointer mode (Hyprland)

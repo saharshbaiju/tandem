@@ -7,8 +7,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * "A newer Tandem is out": asks GitHub for the releases at most once a day
- * and tells the connect screen what to offer:
+ * "A newer Tandem is out": asks GitHub for the releases every time the app
+ * is opened with internet, and tells the connect screen what to offer:
  *
  *  - an **update**, when the latest stable release is newer than this app;
  *  - otherwise a **beta**, when a pre-release is newer than this app and than
@@ -22,8 +22,10 @@ import java.net.URL
  *
  * What is sent: one HTTPS GET to api.github.com for the repository's recent
  * releases, with a generic User-Agent. No identifiers, no settings. The
- * answer is kept in SharedPreferences, so the other launches that day stay
- * offline.
+ * answer and its ETag are kept in SharedPreferences: the next ask sends the
+ * ETag (If-None-Match), and while nothing changed GitHub answers "304 Not
+ * Modified", which doesn't count against its limit of 60 anonymous requests
+ * an hour. Offline, rate limited or unreachable: the kept answer is used.
  *
  * The PC side checks stable releases only (linux/update_check.py).
  */
@@ -68,11 +70,10 @@ object UpdateCheck {
     private const val RELEASES_URL =
         "https://api.github.com/repos/saharshbaiju/tandem/releases?per_page=20"
     const val RELEASES_PAGE = "https://github.com/saharshbaiju/tandem/releases"
-    private const val CHECK_EVERY_MS = 24L * 60 * 60 * 1000
     private const val TIMEOUT_MS = 5000
     private const val USER_AGENT = "Tandem-update-check"
 
-    private const val KEY_CHECKED = "update.checked_at"
+    private const val KEY_ETAG = "update.etag"
     private const val KEY_STABLE = "update.latest_version"
     private const val KEY_STABLE_URL = "update.latest_url"
     private const val KEY_BETA = "update.beta_version"
@@ -88,19 +89,25 @@ object UpdateCheck {
     }
 
     /**
-     * What to offer to an app at version [current], or null. Blocks on the
-     * network when the cached answer is older than a day, so call it off the
-     * main thread.
+     * What to offer to an app at version [current], or null. With [online],
+     * asks GitHub first (blocking: call it off the main thread); without, or
+     * when GitHub can't answer, goes by the last answer kept.
      */
-    fun check(prefs: SharedPreferences, current: String, now: Long = System.currentTimeMillis()): Release? {
-        if (now - prefs.getLong(KEY_CHECKED, 0L) !in 0L until CHECK_EVERY_MS) {
-            fetchReleases()?.let { (stable, beta) ->
+    fun check(prefs: SharedPreferences, current: String, online: Boolean): Release? {
+        if (online) {
+            val fetched = fetchReleases(prefs.getString(KEY_ETAG, null))
+            Log.i(TAG, "update check: " + when (fetched) {
+                is Fetched.Fresh -> "latest ${fetched.stable?.version}, beta ${fetched.beta?.version}"
+                Fetched.Unchanged -> "unchanged since last time"
+                Fetched.Failed -> "GitHub didn't answer, using the last answer"
+            })
+            if (fetched is Fetched.Fresh) {
                 prefs.edit()
-                    .putString(KEY_STABLE, stable?.version)
-                    .putString(KEY_STABLE_URL, stable?.pageUrl)
-                    .putString(KEY_BETA, beta?.version)
-                    .putString(KEY_BETA_URL, beta?.pageUrl)
-                    .putLong(KEY_CHECKED, now)
+                    .putString(KEY_STABLE, fetched.stable?.version)
+                    .putString(KEY_STABLE_URL, fetched.stable?.pageUrl)
+                    .putString(KEY_BETA, fetched.beta?.version)
+                    .putString(KEY_BETA_URL, fetched.beta?.pageUrl)
+                    .putString(KEY_ETAG, fetched.etag)
                     .apply()
             }
         }
@@ -137,17 +144,31 @@ object UpdateCheck {
                                release.version).apply()
     }
 
-    /** (newest stable release, newest pre-release), or null if GitHub can't say. */
-    private fun fetchReleases(): Pair<Release?, Release?>? {
+    /** GitHub's answer: the newest releases, "same as last time", or nothing. */
+    private sealed interface Fetched {
+        /** The newest stable release and the newest pre-release, and the answer's ETag. */
+        data class Fresh(val stable: Release?, val beta: Release?, val etag: String?) : Fetched
+        data object Unchanged : Fetched
+        data object Failed : Fetched
+    }
+
+    private fun fetchReleases(etag: String?): Fetched {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(RELEASES_URL).openConnection() as HttpURLConnection).apply {
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
+                useCaches = false              // the ETag below does the caching
                 setRequestProperty("User-Agent", USER_AGENT)
                 setRequestProperty("Accept", "application/vnd.github+json")
+                if (etag != null) setRequestProperty("If-None-Match", etag)
             }
-            if (connection.responseCode != 200) return null
+            when (connection.responseCode) {
+                200 -> {}
+                HttpURLConnection.HTTP_NOT_MODIFIED -> return Fetched.Unchanged
+                else -> return Fetched.Failed
+            }
+            val newEtag = connection.getHeaderField("ETag")
             val list = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
             var stable: Pair<Version, Release>? = null
             var beta: Pair<Version, Release>? = null
@@ -167,10 +188,10 @@ object UpdateCheck {
                     if (stable == null || version > stable.first) stable = version to release
                 }
             }
-            stable?.second to beta?.second
+            Fetched.Fresh(stable?.second, beta?.second, newEtag)
         } catch (e: Exception) {       // offline, rate limited, bad JSON: say nothing
             Log.i(TAG, "update check skipped: ${e.javaClass.simpleName}")
-            null
+            Fetched.Failed
         } finally {
             connection?.disconnect()
         }

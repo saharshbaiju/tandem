@@ -423,7 +423,7 @@ path is unit-tested.
 | `android/…/PointerGestures.kt` | Pointer mode: sends `PNTR` only when `INPT` offered it |
 | `android/…/OrientationWatcher.kt` | Reads only the orientation sensor (no permission needed), while live and in front, for the portrait prompt |
 | `AndroidManifest.xml`, `res/xml/data_extraction_rules.xml` | No backups and no cleartext |
-| `linux/update_check.py`, `android/…/UpdateCheck.kt` | The daily latest-release check: a GET to api.github.com, nothing identifying sent, nothing installed |
+| `linux/update_check.py`, `android/…/UpdateCheck.kt` | The latest-release check (each start / each time the app is opened): a GET to api.github.com, nothing identifying sent, nothing installed |
 
 ## 9. Possible next steps
 

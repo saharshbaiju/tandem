@@ -8,6 +8,7 @@ import os
 import tempfile
 import time
 import unittest
+import urllib.error
 from unittest import mock
 
 import about
@@ -43,64 +44,89 @@ class LatestVersionTest(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
-    def test_asks_github_then_caches_for_a_day(self):
-        calls = []
-        fetch = lambda: calls.append(1) or "0.8.0"
+    def test_asks_github_every_time_with_the_etag(self):
+        seen = []
+
+        def fetch(etag):
+            seen.append(etag)
+            return ("0.8.0", '"abc"') if etag is None else (update_check.UNCHANGED, etag)
+
         self.assertEqual(update_check.latest_version(1000.0, self.path, fetch), "0.8.0")
         with open(self.path) as f:
-            self.assertEqual(json.load(f), {"version": "0.8.0", "checked": 1000.0})
-        # Within the day: answered from the cache, GitHub not asked again.
-        self.assertEqual(update_check.latest_version(1000.0 + 3600, self.path, fetch), "0.8.0")
-        self.assertEqual(len(calls), 1)
-        # A day later: asked again.
-        later = 1000.0 + update_check.CHECK_EVERY + 1
-        update_check.latest_version(later, self.path, lambda: calls.append(1) or "0.8.1")
-        self.assertEqual(len(calls), 2)
+            self.assertEqual(json.load(f), {"version": "0.8.0", "etag": '"abc"',
+                                            "checked": 1000.0})
+        # The next start asks again at once, with the ETag; 304 keeps 0.8.0.
+        self.assertEqual(update_check.latest_version(1001.0, self.path, fetch), "0.8.0")
+        self.assertEqual(seen, [None, '"abc"'])
+
+    def test_a_new_release_replaces_the_cached_one(self):
+        update_check.latest_version(1000.0, self.path, lambda etag: ("0.8.0", '"a"'))
+        self.assertEqual(update_check.latest_version(
+            1001.0, self.path, lambda etag: ("0.9.0", '"b"')), "0.9.0")
 
     def test_offline_keeps_the_old_answer(self):
-        update_check.latest_version(1000.0, self.path, lambda: "0.8.0")
-        later = 1000.0 + update_check.CHECK_EVERY + 1
-        self.assertEqual(update_check.latest_version(later, self.path, lambda: None), "0.8.0")
+        update_check.latest_version(1000.0, self.path, lambda etag: ("0.8.0", None))
+        self.assertEqual(update_check.latest_version(
+            2000.0, self.path, lambda etag: (None, None)), "0.8.0")
 
     def test_offline_with_no_cache_is_unknown(self):
-        self.assertIsNone(update_check.latest_version(1000.0, self.path, lambda: None))
+        self.assertIsNone(update_check.latest_version(
+            1000.0, self.path, lambda etag: (None, None)))
 
-    def test_a_clock_moved_back_asks_again(self):
-        update_check.latest_version(5000.0, self.path, lambda: "0.8.0")
-        calls = []
-        update_check.latest_version(100.0, self.path, lambda: calls.append(1) or "0.8.0")
-        self.assertEqual(calls, [1])
+    def test_an_old_cache_without_an_etag_still_works(self):
+        os.makedirs(os.path.dirname(self.path))
+        with open(self.path, "w") as f:
+            json.dump({"version": "0.8.0", "checked": 1.0}, f)
+        seen = []
+        update_check.latest_version(1000.0, self.path,
+                                    lambda etag: seen.append(etag) or (None, None))
+        self.assertEqual(seen, [None])
 
     def test_a_broken_cache_file_is_ignored(self):
         os.makedirs(os.path.dirname(self.path))
         with open(self.path, "w") as f:
             f.write("{not json")
-        self.assertEqual(update_check.latest_version(1000.0, self.path, lambda: "0.8.0"), "0.8.0")
+        self.assertEqual(update_check.latest_version(
+            1000.0, self.path, lambda etag: ("0.8.0", None)), "0.8.0")
 
 
 class FetchTest(unittest.TestCase):
-    def _response(self, body):
+    def _response(self, body, etag='"e1"'):
         response = mock.MagicMock()
         response.__enter__.return_value = response
         response.read.return_value = body
+        response.headers = {"ETag": etag}
         return response
 
-    def test_reads_the_tag(self):
+    def test_reads_the_tag_and_etag(self):
         body = json.dumps({"tag_name": "v0.8.0", "html_url": "x"}).encode()
         with mock.patch("urllib.request.urlopen", return_value=self._response(body)) as urlopen:
-            self.assertEqual(update_check.fetch_latest(), "0.8.0")
+            self.assertEqual(update_check.fetch_latest(), ("0.8.0", '"e1"'))
         request = urlopen.call_args[0][0]
         self.assertEqual(request.full_url, update_check.LATEST_URL)
         # A generic agent: nothing about the user or the machine.
         self.assertEqual(request.get_header("User-agent"), update_check.USER_AGENT)
+        self.assertIsNone(request.get_header("If-none-match"))
+
+    def test_sends_the_etag_and_understands_304(self):
+        not_modified = urllib.error.HTTPError(update_check.LATEST_URL, 304,
+                                              "Not Modified", {}, None)
+        with mock.patch("urllib.request.urlopen", side_effect=not_modified) as urlopen:
+            self.assertEqual(update_check.fetch_latest('"e1"'),
+                             (update_check.UNCHANGED, '"e1"'))
+        self.assertEqual(urlopen.call_args[0][0].get_header("If-none-match"), '"e1"')
 
     def test_errors_and_odd_answers_are_none(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("offline")):
-            self.assertIsNone(update_check.fetch_latest())
+            self.assertIsNone(update_check.fetch_latest()[0])
+        forbidden = urllib.error.HTTPError(update_check.LATEST_URL, 403,
+                                           "rate limited", {}, None)
+        with mock.patch("urllib.request.urlopen", side_effect=forbidden):
+            self.assertIsNone(update_check.fetch_latest('"e1"')[0])
         for body in (b"not json", b'{"message": "API rate limit exceeded"}',
                      b'{"tag_name": "nightly"}'):
             with mock.patch("urllib.request.urlopen", return_value=self._response(body)):
-                self.assertIsNone(update_check.fetch_latest(), body)
+                self.assertIsNone(update_check.fetch_latest()[0], body)
 
 
 class UpdateCheckTest(unittest.TestCase):

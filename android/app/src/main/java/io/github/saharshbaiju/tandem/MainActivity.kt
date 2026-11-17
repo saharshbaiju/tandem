@@ -52,6 +52,7 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 
 /**
@@ -222,7 +223,6 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         target = ConnectTarget.load(prefs)
         handleIntent(intent)
         render()
-        checkForUpdate()
         showSystemBars()
         // The website's splash, on a fresh launch (not after a re-theme).
         if (savedInstanceState == null) b.splash.run {}
@@ -1003,44 +1003,115 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     // ------------------------------------------------------------------ misc
 
     /**
-     * Asks GitHub (at most once a day, see [UpdateCheck]) whether a newer
-     * Tandem is out, and if so shows the card on the connect screen: an
-     * update, or else a beta the user may want to try. The button opens the
-     * release page; Later / No thanks hides it until a newer version.
+     * Each time the app comes to the front, asks GitHub whether a newer
+     * Tandem is out (see [UpdateCheck]), and shows the card on the connect
+     * screen: an update, or else a beta the user may want to try. The button
+     * opens the release page; Later / No thanks hides it until a newer
+     * version. No internet yet: the last answer is shown, and the check runs
+     * as soon as a connection with internet comes up while the app is open.
      */
+    override fun onStart() {
+        super.onStart()
+        checkForUpdate()
+    }
+
+    override fun onStop() {
+        stopWaitingForInternet()
+        super.onStop()
+    }
+
+    private val updateCheckRunning = AtomicBoolean(false)
+    private var internetWaiter: ConnectivityManager.NetworkCallback? = null
+
     private fun checkForUpdate() {
+        val online = hasInternet()
+        if (!online) waitForInternet()
+        if (!updateCheckRunning.compareAndSet(false, true)) return
         val current = appVersion()
         // Its own thread: a slow network must not hold up the link probes.
         Thread({
-            val release = UpdateCheck.check(prefs, current) ?: return@Thread
-            ui.post {
-                if (isFinishing || isDestroyed) return@post
-                if (release.beta) {
-                    b.updateTitle.setText(R.string.beta_title)
-                    b.updateBody.text = getString(R.string.beta_body, release.version)
-                    b.updateLaterBtn.setText(R.string.beta_later)
-                    b.updateBtn.setText(R.string.beta_action)
-                } else {
-                    b.updateTitle.setText(R.string.update_title)
-                    b.updateBody.text = getString(R.string.update_body, release.version,
-                                                  current.removeSuffix("-debug"))
-                    b.updateLaterBtn.setText(R.string.update_later)
-                    b.updateBtn.setText(R.string.update_action)
-                }
-                b.updateBtn.setOnClickListener {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl)))
-                    } catch (_: ActivityNotFoundException) {
-                        Toast.makeText(this, R.string.update_no_browser, Toast.LENGTH_LONG).show()
+            val release = try {
+                UpdateCheck.check(prefs, current, online)
+            } finally {
+                updateCheckRunning.set(false)
+            }
+            ui.post { if (!isFinishing && !isDestroyed) showUpdate(release, current) }
+        }, "update-check").apply { isDaemon = true }.start()
+    }
+
+    /** A network with working internet (not just a USB link to the computer). */
+    private fun hasInternet(): Boolean {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    /** Check once internet comes up (until the app goes to the background). */
+    private fun waitForInternet() {
+        if (internetWaiter != null) return
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        val waiter = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                    ui.post {
+                        if (internetWaiter !== this) return@post
+                        stopWaitingForInternet()
+                        checkForUpdate()
                     }
                 }
-                b.updateLaterBtn.setOnClickListener {
-                    UpdateCheck.dismiss(prefs, release)
-                    b.updateCard.visibility = View.GONE
-                }
-                b.updateCard.visibility = View.VISIBLE
             }
-        }, "update-check").apply { isDaemon = true }.start()
+        }
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            .build()
+        try {
+            cm.registerNetworkCallback(request, waiter)
+            internetWaiter = waiter
+        } catch (e: RuntimeException) {     // too many callbacks: the next start checks
+            Log.w(TAG, "can't wait for internet", e)
+        }
+    }
+
+    private fun stopWaitingForInternet() {
+        val waiter = internetWaiter ?: return
+        internetWaiter = null
+        try {
+            getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(waiter)
+        } catch (_: IllegalArgumentException) {}
+    }
+
+    /** Show the update / beta card for [release], or hide it (up to date). */
+    private fun showUpdate(release: UpdateCheck.Release?, current: String) {
+        if (release == null) {
+            b.updateCard.visibility = View.GONE
+            return
+        }
+        if (release.beta) {
+            b.updateTitle.setText(R.string.beta_title)
+            b.updateBody.text = getString(R.string.beta_body, release.version)
+            b.updateLaterBtn.setText(R.string.beta_later)
+            b.updateBtn.setText(R.string.beta_action)
+        } else {
+            b.updateTitle.setText(R.string.update_title)
+            b.updateBody.text = getString(R.string.update_body, release.version,
+                                          current.removeSuffix("-debug"))
+            b.updateLaterBtn.setText(R.string.update_later)
+            b.updateBtn.setText(R.string.update_action)
+        }
+        b.updateBtn.setOnClickListener {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl)))
+            } catch (_: ActivityNotFoundException) {
+                Toast.makeText(this, R.string.update_no_browser, Toast.LENGTH_LONG).show()
+            }
+        }
+        b.updateLaterBtn.setOnClickListener {
+            UpdateCheck.dismiss(prefs, release)
+            b.updateCard.visibility = View.GONE
+        }
+        b.updateCard.visibility = View.VISIBLE
     }
 
     private fun dp(v: Float) = v * resources.displayMetrics.density

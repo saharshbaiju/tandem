@@ -11,7 +11,7 @@ both halves of a release report the same number; docs/RELEASING.md bumps
 them together.
 """
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 CREDIT = "Tandem by Saharsh Baiju · github.com/saharshbaiju/tandem"
 LICENSE = "GPL-3.0 with additional terms; see LICENSE and NOTICE"
 
