@@ -11,6 +11,9 @@
  *       gst-launch-1.0 (pipewiresrc) in a separate process.
  *   org_kde_kwin_fake_input touch_down / touch_motion / touch_up
  *       touches from the phone, in KWin's global logical coordinates.
+ *   org_kde_kwin_fake_input keyboard_keysym (v6) / keyboard_key (v4)
+ *       typing from the phone: a keysym KWin finds in the user's layout,
+ *       or, on older KWin, an evdev keycode the daemon looked up itself.
  *   zxdg_output_manager_v1
  *       where our output is in that coordinate space, tracked live, so the
  *       phone's output fractions can be turned into global positions.
@@ -41,6 +44,13 @@
  *   move <slot> <fx> <fy>
  *   up <slot>
  *   cancel
+ * Pointer commands (pointer mode: the phone as a mouse; needs fake_input v3):
+ *   pmove <fx> <fy>                move the mouse pointer onto our output
+ *   button <evdev button> <state>  BTN_LEFT 272, BTN_RIGHT 273, BTN_MIDDLE 274
+ *   axis <0 vertical|1 horizontal> <value>   scroll, in KWin's axis units
+ * Keyboard commands; <state> is 1 for press, 0 for release:
+ *   keysym <keysym> <state>        needs fake_input v6 (Plasma 6.2 or later)
+ *   key <evdev keycode> <state>    needs fake_input v4
  * Malformed or unknown lines are reported on stderr and ignored. Touch
  * commands are ignored when KWin did not grant fake input (the daemon knows
  * that from the "ready" line). EOF on stdin closes the stream and exits 0.
@@ -92,7 +102,7 @@
 /* Highest protocol versions this helper is written against (see header). */
 enum {
     SCREENCAST_MAX_VERSION = 5,
-    FAKE_INPUT_MAX_VERSION = 5,
+    FAKE_INPUT_MAX_VERSION = 6,
     XDG_OUTPUT_MANAGER_MAX_VERSION = 3,
     WL_OUTPUT_MAX_VERSION = 4,
 };
@@ -635,6 +645,87 @@ static void handle_touch_up(struct helper_state *helper, char **words, int word_
     }
 }
 
+/* "pmove <fx> <fy>": the mouse pointer to a point of our output (v3). */
+static void handle_pointer_move(struct helper_state *helper, char **words, int word_count)
+{
+    double fraction_x, fraction_y;
+    wl_fixed_t global_x, global_y;
+    if (word_count != 3 || !parse_fraction(words[1], &fraction_x)
+        || !parse_fraction(words[2], &fraction_y)) {
+        note("ignoring malformed command (usage: pmove <fx> <fy>)");
+        return;
+    }
+    if (!touch_available(helper)
+        || !to_global_position(helper, fraction_x, fraction_y, &global_x, &global_y)) {
+        return;
+    }
+    if (helper->fake_input_version < 3) {
+        note("ignoring pmove: KWin's org_kde_kwin_fake_input is v%u, it needs v3",
+             helper->fake_input_version);
+        return;
+    }
+    org_kde_kwin_fake_input_pointer_motion_absolute(helper->fake_input, global_x, global_y);
+}
+
+/* "button <evdev code> <0|1>" and "axis <0|1> <value>". */
+static void handle_pointer_button(struct helper_state *helper, char **words, int word_count)
+{
+    uint32_t button, state;
+    if (word_count != 3 || !parse_slot(words[1], &button) || !parse_slot(words[2], &state)
+        || state > 1) {
+        note("ignoring malformed command (usage: button <code> <0|1>)");
+        return;
+    }
+    if (touch_available(helper)) {
+        org_kde_kwin_fake_input_button(helper->fake_input, button, state);
+    }
+}
+
+static void handle_pointer_axis(struct helper_state *helper, char **words, int word_count)
+{
+    uint32_t axis;
+    char *end = NULL;
+    double value = 0.0;
+    if (word_count == 3) {
+        errno = 0;
+        value = strtod(words[2], &end);
+    }
+    if (word_count != 3 || !parse_slot(words[1], &axis) || axis > 1 || errno != 0
+        || end == words[2] || *end != '\0' || !isfinite(value)) {
+        note("ignoring malformed command (usage: axis <0|1> <value>)");
+        return;
+    }
+    if (touch_available(helper)) {
+        org_kde_kwin_fake_input_axis(helper->fake_input, axis, wl_fixed_from_double(value));
+    }
+}
+
+/* "keysym <keysym> <state>" (fake_input v6) or "key <code> <state>" (v4). */
+static void handle_keyboard(struct helper_state *helper, char **words, int word_count, bool keysym)
+{
+    uint32_t value, state;
+    if (word_count != 3 || !parse_slot(words[1], &value) || !parse_slot(words[2], &state)
+        || state > 1) {
+        note("ignoring malformed command (usage: %s <%s> <0|1>)", words[0],
+             keysym ? "keysym" : "keycode");
+        return;
+    }
+    if (!touch_available(helper)) {
+        return;
+    }
+    const uint32_t needed = keysym ? 6 : 4;
+    if (helper->fake_input_version < needed) {
+        note("ignoring %s: KWin's org_kde_kwin_fake_input is v%u, it needs v%u", words[0],
+             helper->fake_input_version, needed);
+        return;
+    }
+    if (keysym) {
+        org_kde_kwin_fake_input_keyboard_keysym(helper->fake_input, value, state);
+    } else {
+        org_kde_kwin_fake_input_keyboard_key(helper->fake_input, value, state);
+    }
+}
+
 /* wl_touch.cancel ends every touch point at once and needs no frame. */
 static void handle_touch_cancel(struct helper_state *helper, int word_count)
 {
@@ -671,6 +762,16 @@ static void handle_command(struct helper_state *helper, char *line)
         handle_touch_up(helper, words, word_count);
     } else if (strcmp(words[0], "cancel") == 0) {
         handle_touch_cancel(helper, word_count);
+    } else if (strcmp(words[0], "pmove") == 0) {
+        handle_pointer_move(helper, words, word_count);
+    } else if (strcmp(words[0], "button") == 0) {
+        handle_pointer_button(helper, words, word_count);
+    } else if (strcmp(words[0], "axis") == 0) {
+        handle_pointer_axis(helper, words, word_count);
+    } else if (strcmp(words[0], "keysym") == 0) {
+        handle_keyboard(helper, words, word_count, true);
+    } else if (strcmp(words[0], "key") == 0) {
+        handle_keyboard(helper, words, word_count, false);
     } else {
         note("ignoring unknown command: %s", words[0]);
     }

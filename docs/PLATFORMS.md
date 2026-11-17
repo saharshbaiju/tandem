@@ -99,6 +99,16 @@ sudo pacman -S --needed libva-utils android-tools   # optional: VA-API probe, ph
   group (ydotool's package sets this up), nothing is needed. The device is called
   `tandem-touch`. `hyprctl devices` lists it under touch while streaming. It is
   mapped onto `EXT-1` with `hl.device({ name = "tandem-touch", output = "EXT-1" })`.
+- **Typing and pointer mode** use the same `/dev/uinput` access, so the setup
+  above covers them. While streaming, `hyprctl devices` also lists a keyboard
+  called `tandem-keyboard` and a mouse called `tandem-pointer`. The keyboard
+  types in your Hyprland layout: the daemon reads `input:kb_layout`,
+  `kb_variant`, `kb_options` and `kb_model` with `hyprctl getoption` when it
+  starts and looks each character up in the first layout (libxkbcommon). A
+  character that layout has no key for is skipped, and the log says so once.
+  The pointer is not mapped to `EXT-1`: it spans your whole layout, and the
+  daemon turns a point on the phone into the matching point in it, so the
+  pointer lands on the phone's monitor.
 
 ## Ubuntu (22.04 and newer, GNOME)
 
@@ -259,6 +269,14 @@ touch only from then on. The first tap itself is still delivered. If the
 RemoteDesktop session cannot be created, video still works, and the phone shows
 why touch is off.
 
+**Typing and pointer mode** use the same RemoteDesktop session, so they need no
+setup either. Keys go to `NotifyKeyboardKeysym`: Mutter finds the key in your
+keyboard layout itself, so any character the phone sends can be typed. Pointer
+mode uses `NotifyPointerMotionAbsolute` on the virtual monitor's stream,
+`NotifyPointerButton` and `NotifyPointerAxisDiscrete` (whole wheel steps).
+Without a RemoteDesktop session there is no typing or pointer mode. Both are
+implemented but not yet tested on real hardware.
+
 **Tested.** On Ubuntu 24.04 (Mutter 46, headless, in Docker), the virtual monitor
 appears as `Meta-1`. It is placed on the configured side, and H.264 from x264enc
 reaches the client and decodes. Fedora 42 (Mutter 48) passes the same run with
@@ -326,6 +344,14 @@ standard input and output.
 6. **Touch.** Touches go to the helper as lines (`down 0 0.25 0.5`), and it sends
    them to KWin with fake input at that point of the phone's monitor. No
    setup is needed.
+7. **Typing and pointer mode** go through the same fake input, with no setup.
+   On Plasma 6.2 and later (fake input v6) keys are sent as keysyms
+   (`keysym 97 1`), and KWin finds the key in your layout. On older Plasma
+   (v4, v5) only key codes can be sent (`key 30 1`), so the daemon looks each
+   character up in the first layout of `~/.config/kxkbrc` (*System Settings →
+   Keyboard → Layouts*); a character that layout can't type is skipped. Pointer
+   mode sends `pmove`, `button` and `axis` lines, which need fake input v3.
+   Both are implemented but not yet tested on real hardware.
 
 **Left and up.** KWin refuses negative positions. To put the phone left of or
 above the main monitor, Tandem moves your monitors right or down by the phone's
@@ -360,6 +386,26 @@ back, taps landing at the exact point, encoder restarts, SIGTERM and SIGKILL cle
 bug 527747 recovery all passed.
 
 ---
+
+## Typing and pointer mode on each desktop
+
+The phone can type on the computer (its on-screen keyboard, a key bar with Esc,
+Tab, Ctrl, Alt, Super, Del and the arrows, or a keyboard plugged into the
+phone), and in *Pointer* mode it works as a mouse for apps that only drag with
+one. Both need touch input on (*Configure → Touch input*); with touch off, the
+computer offers neither. The phone sends characters, not key positions, so the
+computer types them in its own layout. Details are in
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) (stages 5b and 5c).
+
+| Desktop | Typing | Pointer mode | Setup | Tested on real hardware |
+| --- | --- | --- | --- | --- |
+| Hyprland | uinput keyboard `tandem-keyboard`, in your Hyprland layout (first layout) | uinput absolute mouse `tandem-pointer` over the whole layout | The `/dev/uinput` access touch needs (press **t**) | Yes |
+| GNOME | Mutter RemoteDesktop, keysyms (any character) | Mutter RemoteDesktop, absolute motion on the phone's monitor | None | Not yet |
+| KDE Plasma 6.2 and later | KWin fake input v6, keysyms (any character) | KWin fake input | None | Not yet |
+| KDE Plasma before 6.2 | KWin fake input v4 or v5, key codes in the first layout from `kxkbrc` (no typing below v4) | KWin fake input (needs v3) | None | Not yet |
+
+Pointer mode moves the computer's own mouse pointer; touch mode does not.
+When a phone disconnects, any key or mouse button it still held is released.
 
 ## USB cable with USB debugging (all distributions)
 
@@ -423,5 +469,10 @@ phone's vendor. The pairing QR code then includes that address.
 | TUI: *"Couldn't set up the encrypted connection"* | `openssl` is missing (the Dependencies screen installs it), or `~/.config/tandem/` is not writable |
 | Hyprland: *Touch: needs one-time setup (… /dev/uinput …)* | `/dev/uinput` is not writable. Press **t** in the live view (see *Arch Linux with Hyprland*). After a kernel update, if the modules-load file is missing, run `sudo modprobe uinput` |
 | Hyprland: touches land on the laptop screen | The device mapping was dropped. The daemon re-applies it after a config reload or monitor change on its own. If it persists, change side or scale, or restart the stream. Check that `hyprctl devices` lists `tandem-touch` |
-| Touch does nothing in one app | That app does not handle Wayland touch events. Some terminals and older toolkits do not. GTK, Qt, Chromium, Electron and Firefox do |
+| Touch does nothing in one app | That app does not handle Wayland touch events. Some terminals and older toolkits do not. GTK, Qt, Chromium, Electron and Firefox do. For dragging tabs, title bars or text, switch the phone's side sheet to *Pointer* |
+| Phone: *"Typing isn't available on this computer yet…"*, or the Keyboard button is dimmed | The computer offered no keyboard. Check that touch input is on (Configure). The daemon log says why: `keyboard input: unavailable (…)`. On Hyprland, set up `/dev/uinput` (press **t**); on GNOME, the RemoteDesktop session failed (touch is off too); on KDE, Plasma's fake input is older than v4. A daemon before 0.9.0 has no typing: update it |
+| Phone: *"Pointer mode needs Tandem 0.9 or newer on your computer"* | The computer did not offer pointer mode. Update Tandem on it, or, with 0.9.0, check `pointer input: unavailable (…)` in the daemon log (the same causes as for typing; KDE needs fake input v3) |
+| Hyprland or older KDE: some characters don't appear, or the wrong ones do | The keyboard types in the first layout of your Hyprland `input:kb_layout` (or of `kxkbrc` on Plasma before 6.2), read when the daemon starts. A character that layout has no key for is skipped (`keyboard: … layout has no key for keysym …` in the log). After changing layouts, stop and start Tandem |
+| Phone: *"To turn the monitor, switch on Fit to device…"* | Turning the monitor to portrait needs *Fit to device* (Configure → Resolution), because the monitor takes the phone's shape from it |
+| Colours look washed out or slightly off | Update both the computer and the phone to 0.9.0, which use BT.709 limited range throughout. If the daemon log says an encoder failed with the BT.709 colour setting and is being retried without it, your ffmpeg or GStreamer refused the colour options and that encoder runs with its old colours; another encoder (Configure → Encoder) may do better |
 | Fedora: the `openh264` download fails | A Cisco mirror problem. Retry, or use RPM Fusion's x264 (`gstreamer1-plugins-ugly`) |

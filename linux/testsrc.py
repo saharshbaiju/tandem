@@ -9,7 +9,7 @@ reaches this PC at 10.0.2.2) without touching your desktop layout.
 
     python3 testsrc.py [--width 2400 --height 1080 --fps 60 --port 5000]
     python3 testsrc.py --static      # one frame then silence: tests GOP replay
-    python3 testsrc.py --log-touch   # print the phone's touches
+    python3 testsrc.py --log-touch   # print the phone's touches, keys and pointer
 
 Phones connect exactly as to the real daemon: TLS + this computer's pairing
 key (scan the QR / type the code printed at start-up).
@@ -53,6 +53,38 @@ class LoggingTouchscreen:
         pass
 
 
+class LoggingPointer:
+    """Stands in for a real mouse: prints what pointer mode sends."""
+
+    description = "pointer events are printed, not injected"
+
+    def move(self, x, y):
+        tandemd.log(f"pointer move  x={x:.3f} y={y:.3f}")
+
+    def button(self, code, pressed):
+        name = {0x110: "left", 0x111: "right", 0x112: "middle"}.get(code, code)
+        tandemd.log(f"pointer {name} {'down' if pressed else 'up'}")
+
+    def scroll(self, dx, dy):
+        tandemd.log(f"pointer scroll dx={dx} dy={dy}")
+
+    def close(self):
+        pass
+
+
+class LoggingKeyboard:
+    """Stands in for a real keyboard: prints each key it receives."""
+
+    description = "keys are printed, not typed"
+
+    def key(self, keysym, pressed):
+        char = chr(keysym & 0xFFFFFF) if (keysym < 0x100 or keysym >> 24 == 1) else ""
+        tandemd.log(f"key {'down' if pressed else 'up  '}  {keysym:#x} {char!r}")
+
+    def close(self):
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--width", type=int, default=1920)
@@ -64,7 +96,8 @@ def main():
     ap.add_argument("--static", action="store_true",
                     help="send 2 seconds of video, then keep the stream idle")
     ap.add_argument("--log-touch", action="store_true",
-                    help="accept touches from paired phones and print them")
+                    help="accept touches, keys and pointer events from paired phones and "
+                         "print them")
     args = ap.parse_args()
 
     enc = gnome.pick_encoder()
@@ -97,6 +130,8 @@ def main():
         "backend": "testsrc"}).encode()
     phone_input = PhoneInput(
         touch_surface=LoggingTouchscreen() if args.log_touch else None,
+        keyboard=LoggingKeyboard() if args.log_touch else None,
+        pointer=LoggingPointer() if args.log_touch else None,
         unavailable_reason="this is the test pattern (start it with "
                            "--log-touch to print touches)")
     cfg = core.load_config()

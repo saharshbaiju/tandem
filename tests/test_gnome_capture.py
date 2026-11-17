@@ -16,7 +16,7 @@ EXPECTED_DESCRIPTION = (
     "gst-launch-1.0 -q pipewiresrc path=77 do-timestamp=true "
     "keepalive-time=1000 ! video/x-raw,width=2400,height=1080 "
     "! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 "
-    "leaky=downstream ! videoconvert n-threads=4 ! video/x-raw,format=I420 "
+    "leaky=downstream ! videoconvert n-threads=4 ! video/x-raw,format=I420,colorimetry=bt709 "
     "! x264enc tune=zerolatency speed-preset=ultrafast bitrate=12000 "
     "key-int-max=30 bframes=0 threads=2 sliced-threads=false "
     "byte-stream=true vbv-buf-capacity=33 ! h264parse config-interval=-1 "

@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.saharshbaiju.tandem"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.8.0"
+        versionCode = 16
+        versionName = "0.9.0"
     }
 
     // Release signing. The keystore lives OUTSIDE the repo; point at it with

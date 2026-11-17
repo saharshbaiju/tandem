@@ -11,6 +11,10 @@ import java.io.OutputStream
  * Phone -> computer types:
  *   "HELO" / "AUTH"  the pairing handshake, see [SecureChannel]
  *   "TUCH"  one touch event, see [StreamSession.sendTouches] (linux/phone_input.py)
+ *   "KEYS"  one key down or up: keysym u32 + pressed u8, see [Keysyms]. Only
+ *           sent when the computer's INPT said "keys": true.
+ *   "PNTR"  pointer mode (the phone as a mouse), see [PointerEvent]. Only
+ *           sent when the computer's INPT said "pointer": true.
  *   "KEYQ"  empty: the decoder needs a keyframe now (it dropped data, recovered
  *           from an error or skipped a backlog). The daemon replays its cached
  *           keyframe or asks the encoder for one; older daemons ignore it.
@@ -18,7 +22,8 @@ import java.io.OutputStream
  *           tell a live phone from a vanished one. Older daemons ignore it.
  *   "SIZE"  JSON {"width":W,"height":H}: this screen in pixels, as held, so the
  *           computer can size its monitor to it (linux/device_fit.py). Sent
- *           after pairing and when it changes. Older daemons ignore it.
+ *           after pairing and when it changes; "now": true when the user
+ *           turned the monitor (apply it at once). Older daemons ignore it.
  *
  * Each call goes out in a single write so the bytes of two frames can never
  * interleave; [send] / [sendAll] are synchronized for the same reason.
@@ -50,6 +55,8 @@ class FrameWriter(private val out: OutputStream) {
 
     companion object {
         const val TYPE_TOUCH = "TUCH"
+        const val TYPE_KEY = "KEYS"
+        const val TYPE_POINTER = "PNTR"
         const val TYPE_KEYFRAME_REQUEST = "KEYQ"
         const val TYPE_PING = "PING"
         const val TYPE_SCREEN_SIZE = "SIZE"

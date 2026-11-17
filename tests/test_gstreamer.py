@@ -199,7 +199,7 @@ class EncoderStartTest(unittest.TestCase):
                                              "x264enc")
         self.assertEqual(result, (process, stream))
         build.assert_called_once_with(42, 2400, 1080, 12000, 30, "x264enc",
-                                      fd=7, fps=60)
+                                      fd=7, fps=60, pin_colour=True)
         log.assert_called_once_with(
             "encoder x264enc; capture cmd: gst-launch-1.0 x")
 
@@ -221,7 +221,7 @@ class PipelineTest(unittest.TestCase):
     def test_x264_chain(self):
         self.assertEqual(
             gstreamer.encoder_chain("x264enc", 12000, 30, 60),
-            "videoconvert n-threads=4 ! video/x-raw,format=I420 ! x264enc "
+            "videoconvert n-threads=4 ! video/x-raw,format=I420,colorimetry=bt709 ! x264enc "
             "tune=zerolatency speed-preset=ultrafast bitrate=12000 "
             "key-int-max=30 bframes=0 threads=2 sliced-threads=false "
             "byte-stream=true vbv-buf-capacity=33")
@@ -229,21 +229,21 @@ class PipelineTest(unittest.TestCase):
     def test_openh264_chain(self):
         self.assertEqual(
             gstreamer.encoder_chain("openh264enc", 4000, 60, 30),
-            "videoconvert n-threads=4 ! video/x-raw,format=I420 ! openh264enc "
+            "videoconvert n-threads=4 ! video/x-raw,format=I420,colorimetry=bt709 ! openh264enc "
             "usage-type=screen rate-control=bitrate bitrate=4000000 "
             "gop-size=60 complexity=low")
 
     def test_va_chain_without_vapostproc_converts_on_the_cpu(self):
         self.assertEqual(
             gstreamer.encoder_chain("vah264enc", 12000, 30, 60),
-            "videoconvert n-threads=4 ! video/x-raw,format=NV12 ! vah264enc "
+            "videoconvert n-threads=4 ! video/x-raw,format=NV12,colorimetry=bt709 ! vah264enc "
             "rate-control=cbr bitrate=12000 key-int-max=30 b-frames=0 "
             "target-usage=7 cpb-size=400")
 
     def test_vaapi_chain(self):
         self.assertEqual(
             gstreamer.encoder_chain("vaapih264enc", 8000, 15, 120),
-            "videoconvert n-threads=4 ! video/x-raw,format=NV12 ! vaapih264enc "
+            "videoconvert n-threads=4 ! video/x-raw,format=NV12,colorimetry=bt709 ! vaapih264enc "
             "rate-control=cbr bitrate=8000 keyframe-period=15 max-bframes=0 "
             "cpb-length=17")
 
@@ -251,7 +251,7 @@ class PipelineTest(unittest.TestCase):
         for encoder in gstreamer.ENCODERS:
             with self.subTest(encoder=encoder):
                 chain = gstreamer.encoder_chain(encoder, 8000, 30)
-                self.assertRegex(chain, r"format=(NV12|I420) ! ")
+                self.assertRegex(chain, r"format=(NV12|I420),colorimetry=bt709 ! ")
 
     def test_unknown_encoder_is_rejected(self):
         with self.assertRaises(ValueError):

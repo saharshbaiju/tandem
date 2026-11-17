@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.view.SurfaceView
 import android.view.View
+import android.view.ViewGroup.MarginLayoutParams
 
 /**
  * A [SurfaceView] that letterboxes its content to a target aspect ratio instead
@@ -88,19 +89,31 @@ class AspectRatioSurfaceView @JvmOverloads constructor(
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         val parentView = parent as? View ?: return
-        translationX = offsetInto(parentView.width, width, safeLeft, safeRight)
-        translationY = offsetInto(parentView.height, height, safeTop, safeBottom)
+        val lp = layoutParams as? MarginLayoutParams
+        translationX = offsetInto(left, width, lp?.leftMargin ?: 0,
+                                  parentView.width - (lp?.rightMargin ?: 0), parentView.width,
+                                  safeLeft, safeRight)
+        translationY = offsetInto(top, height, lp?.topMargin ?: 0,
+                                  parentView.height - (lp?.bottomMargin ?: 0), parentView.height,
+                                  safeTop, safeBottom)
     }
 
     /**
-     * Shift (from centred) that keeps [size] inside [available] minus the
-     * insets, moving as little as possible; 0 if it can't fit either way.
+     * Shift from where the layout put the view ([current]) so that it is
+     * centred in the area between [areaStart] and [areaEnd] (the parent minus
+     * this view's margins: the space above the phone's keyboard while it is
+     * open), moved as little as possible to stay clear of the cutout insets.
+     *
+     * FrameLayout's centring doesn't do the first part by itself: it centres
+     * in the whole parent and then shifts by the margins, which pushes a
+     * picture with a big bottom margin off the top of the screen.
      */
-    private fun offsetInto(available: Int, size: Int, startInset: Int, endInset: Int): Float {
-        val centred = (available - size) / 2f
-        val lowest = startInset.toFloat()
-        val highest = (available - endInset - size).toFloat()
-        if (lowest > highest) return 0f
-        return centred.coerceIn(lowest, highest) - centred
+    private fun offsetInto(current: Int, size: Int, areaStart: Int, areaEnd: Int, parentSize: Int,
+                           startInset: Int, endInset: Int): Float {
+        val centred = areaStart + (areaEnd - areaStart - size) / 2f
+        val lowest = maxOf(areaStart, startInset).toFloat()
+        val highest = (minOf(areaEnd, parentSize - endInset) - size).toFloat()
+        val target = if (lowest > highest) centred else centred.coerceIn(lowest, highest)
+        return target - current
     }
 }

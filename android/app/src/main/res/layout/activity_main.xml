@@ -5,7 +5,11 @@
     connectScreen  Material 3 connect UI; dissolves like water into the video
     statusPill / edgeHandle   "Connecting…" / "Reconnecting…" pill, and the
                               edge handle to the side sheet
-    scrim + controlSheet      side sheet with stream details + Disconnect
+    scrim + controlSheet      side sheet with stream details, controls
+                              (keyboard) and Disconnect
+    keyboardTarget + keyBar   what the phone's keyboard types into, and the
+                              Esc / Tab / Ctrl / Alt / Super / arrow keys
+                              shown above it while typing
     splash         ASCII "Tandem" on black; ripples open onto the connect
                    screen at launch, then it is gone
 -->
@@ -541,6 +545,55 @@
                 </LinearLayout>
             </androidx.core.widget.NestedScrollView>
 
+            <!-- controls: touch or pointer mode, portrait, keyboard -->
+            <LinearLayout
+                android:id="@+id/sheetControls"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/inputModeGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:checkedButton="@id/touchModeBtn"
+                    app:selectionRequired="true"
+                    app:singleSelection="true">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/touchModeBtn"
+                        style="@style/InputModeButton"
+                        android:contentDescription="@string/mode_touch"
+                        app:icon="@drawable/ic_touch" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/pointerModeBtn"
+                        style="@style/InputModeButton"
+                        android:contentDescription="@string/mode_pointer"
+                        app:icon="@drawable/ic_pointer" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/rotateBtn"
+                    style="@style/SheetIconToggle"
+                    android:layout_marginEnd="8dp"
+                    android:contentDescription="@string/rotate_to_portrait"
+                    app:icon="@drawable/ic_rotate" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyboardBtn"
+                    style="@style/SheetIconToggle"
+                    android:contentDescription="@string/keyboard_open"
+                    app:icon="@drawable/ic_keyboard" />
+            </LinearLayout>
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/disconnectBtn"
                 style="@style/Widget.Material3.Button.TonalButton.Icon"
@@ -552,6 +605,168 @@
                 app:icon="@drawable/ic_power" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
+
+    <!-- ========================================================== rotation -->
+    <!-- "Turn the monitor too?" after the phone is turned; goes away by
+         itself. rotatePromptFrame is sized and turned to match the way the
+         phone is held (MainActivity.showRotatePrompt), so the card inside
+         lays out upright in that frame, never as a turned-around view
+         drawn outside its own bounds. Touches outside the card pass
+         through to the picture. -->
+    <FrameLayout
+        android:id="@+id/rotatePromptFrame"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/rotatePrompt"
+        style="?attr/materialCardViewElevatedStyle"
+        android:layout_width="300dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+        app:cardCornerRadius="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="20dp"
+            android:paddingTop="18dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_rotate"
+                    app:tint="@color/ink" />
+
+                <TextView
+                    android:id="@+id/rotatePromptText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:text="@string/rotate_prompt_portrait"
+                    android:textAppearance="?attr/textAppearanceBodyLarge"
+                    android:textColor="@color/ink" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/rotatePromptTimer"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="12dp"
+                    android:layout_weight="1"
+                    android:max="1000"
+                    app:trackCornerRadius="2dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/rotatePromptBtn"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/rotate_yes" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+    </FrameLayout>
+
+    <!-- ========================================================== keyboard -->
+    <!-- What the phone's keyboard types into (invisible; it holds no text). -->
+    <io.github.saharshbaiju.tandem.KeyboardTargetView
+        android:id="@+id/keyboardTarget"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:alpha="0" />
+
+    <!-- Keys a phone keyboard lacks, at the bottom while typing: just above a
+         docked keyboard, at the screen's edge under a floating one. -->
+    <LinearLayout
+        android:id="@+id/keyBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/key_bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyEsc" style="@style/KeyBarKey" android:text="@string/key_esc" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyTab" style="@style/KeyBarKey" android:text="@string/key_tab" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyCtrl" style="@style/KeyBarKey" android:text="@string/key_ctrl" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyAlt" style="@style/KeyBarKey" android:text="@string/key_alt" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keySuper" style="@style/KeyBarKey" android:text="@string/key_super" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyDel" style="@style/KeyBarKey" android:text="@string/key_del" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyLeft" style="@style/KeyBarKey" android:text="←"
+                    android:contentDescription="@string/key_left" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyUp" style="@style/KeyBarKey" android:text="↑"
+                    android:contentDescription="@string/key_up" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyDown" style="@style/KeyBarKey" android:text="↓"
+                    android:contentDescription="@string/key_down" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keyRight" style="@style/KeyBarKey" android:text="→"
+                    android:contentDescription="@string/key_right" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- minimise: hide the phone's keyboard, keep these keys (and back) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/keyboardToggleBtn"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/keyboard_hide"
+            app:icon="@drawable/ic_keyboard_hide" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/keyboardCloseBtn"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/keyboard_close"
+            app:icon="@drawable/ic_close" />
+    </LinearLayout>
 
     <!-- ============================================================ splash -->
     <io.github.saharshbaiju.tandem.AsciiSplashView

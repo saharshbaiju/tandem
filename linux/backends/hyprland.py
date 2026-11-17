@@ -41,6 +41,7 @@ import sys
 import threading
 import time
 
+import colour
 import uinput_touch
 # Re-exported: other modules used to reach the uinput rule through here.
 from uinput_touch import (  # noqa: F401
@@ -204,6 +205,23 @@ def rect(m):
     """(x, y, w, h) of a monitor in the layout."""
     w, h = logical_size(m)
     return int(m.get("x", 0)), int(m.get("y", 0)), w, h
+
+
+def layout_geometry(own, mons=None):
+    """(box, own rect) in layout pixels: the box around every active
+    monitor, which an unbound absolute pointer spans, and `own`'s place in
+    it. None if `own` isn't in the layout."""
+    mons = monitors() if mons is None else mons
+    active = [m for m in mons if m.get("name") == own or in_layout(m, own)]
+    mine = [m for m in active if m.get("name") == own]
+    if not mine:
+        return None
+    rects = [rect(m) for m in active]
+    x0 = min(r[0] for r in rects)
+    y0 = min(r[1] for r in rects)
+    x1 = max(r[0] + r[2] for r in rects)
+    y1 = max(r[1] + r[3] for r in rects)
+    return (x0, y0, x1 - x0, y1 - y0), rect(mine[0])
 
 
 def in_layout(m, own):
@@ -418,6 +436,19 @@ def unbind_workspace(name):
          f"local old = __tandem_ws_rules[{lua_str(name)}]\n"
          "if old then pcall(function() old:set_enabled(false) end) end\n"
          f"__tandem_ws_rules[{lua_str(name)}] = nil")
+
+
+def hyprland_layout():
+    """input:kb_layout / variant / options / model as Keymap keyword
+    arguments (first layout only; empty = xkb's default)."""
+    names = {}
+    for key in ("layout", "variant", "options", "model"):
+        option = query("getoption", f"input:kb_{key}")
+        value = option.get("str", "") if isinstance(option, dict) else ""
+        if value in ("[[EMPTY]]", "[EMPTY]"):
+            value = ""
+        names[key] = value if key == "options" else value.split(",")[0].strip()
+    return names
 
 
 def map_touch_device(device, output):
@@ -953,6 +984,7 @@ class HyprlandBackend:
         self.session = None         # xdph.ScreenCastSession while capturing
         self.workspace = None       # the workspace id the phone hosts
         self._working = None        # encoder candidate that started last time
+        self._working_plain = False  # ...and whether it ran without the colour settings
         self._touch_mapped = False
         # live changes (SIGHUP) and config-reload re-applies come from
         # different threads; one layout change at a time
@@ -1062,38 +1094,50 @@ class HyprlandBackend:
                 encoder = encoder.replace("h264_", "hevc_").replace("264", "265")
             log(f"encoder: {desc}")
             tried.append(desc)
-            try:
-                if encoder == XDPH_NVENC:
-                    self._spawn_xdph()
-                else:
-                    self._spawn(encoder, device, env)
-            except Exception as e:
-                log(f"encoder {encoder} could not start ({e}); trying the next one")
-                self.stop_capture()
-                continue
-            problem = self._fails_to_start()
-            # Silent but alive is kept for the last resort, and for the
-            # encoder that already worked in this session: on a restart a
-            # still screen may simply have nothing new to send, and dropping
-            # to a CPU encoder for that would be a lasting downgrade.
+            # BT.709 colour (colour.py) first; if the encoder won't start
+            # with it, the same encoder again as it ran before 0.9, so an
+            # ffmpeg / GStreamer that rejects the colour options keeps its
+            # encoder. The one that worked is remembered with its colour.
             proven = self._key(cand) == self._working
-            if not problem or (problem == "silent"
-                               and (proven or i == len(cands) - 1)):
-                self._working = self._key(cand)
-                return self.stream
-            self.stop_capture()
+            attempts = ([self._working_plain] if proven else [False, True])
+            for plain in attempts:
+                try:
+                    if encoder == XDPH_NVENC:
+                        self._spawn_xdph(plain_colour=plain)
+                    else:
+                        self._spawn(encoder, device, env, plain_colour=plain)
+                except Exception as e:
+                    log(f"encoder {encoder} could not start ({e})")
+                    self.stop_capture()
+                    continue
+                problem = self._fails_to_start()
+                # Silent but alive is kept for the last resort, and for the
+                # encoder that already worked in this session: on a restart
+                # a still screen may simply have nothing new to send, and
+                # dropping to a CPU encoder for that would be a lasting
+                # downgrade.
+                if not problem or (problem == "silent"
+                                   and (proven or i == len(cands) - 1)):
+                    self._working = self._key(cand)
+                    self._working_plain = plain
+                    return self.stream
+                self.stop_capture()
+                if not plain:
+                    log(f"encoder {encoder} failed to start with the BT.709 "
+                        "colour settings; retrying it without")
             log(f"encoder {encoder} failed to start; trying the next one")
         raise RuntimeError(f"no working {a.codec.upper()} encoder (tried: "
                            f"{'; '.join(tried) or 'none'})")
 
-    def _spawn_xdph(self):
+    def _spawn_xdph(self, plain_colour=False):
         """Zero-copy NVIDIA capture: an xdph screencast into GStreamer NVENC."""
         a = self.a
         self.session = xdph.ScreenCastSession(a.output)
         rfd, wfd = os.pipe()
         cmd = xdph.build_pipeline(self.session.node,
                                   gnome.bitrate_kbps(a.bitrate),
-                                  keyframe_interval(a), wfd, fps=a.fps)
+                                  keyframe_interval(a), wfd, fps=a.fps,
+                                  pin_colour=not plain_colour)
         log("capture cmd: " + " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL,
@@ -1104,13 +1148,16 @@ class HyprlandBackend:
         threading.Thread(target=self._wf_log, args=(self.proc,),
                          daemon=True).start()
 
-    def _spawn(self, encoder, device, env):
+    def _spawn(self, encoder, device, env, plain_colour=False):
         a = self.a
         cmd = ["wf-recorder", "-o", a.output, "-c", encoder]
         if device:
             cmd += ["-d", device]
         if not encoder.endswith(("_vaapi", "_nvenc")):
             cmd += ["-x", "yuv420p"]      # phones decode 4:2:0 only
+        if not plain_colour:
+            # RGB -> BT.709 limited, and labelled so (colour.py)
+            cmd += colour.wf_recorder_args(encoder)
         # no B-frames (no reorder delay), CBR, minimal encoder pipelining
         for p in encoder_params(encoder, a):
             cmd += ["-p", p]
@@ -1176,6 +1223,43 @@ class HyprlandBackend:
                 f"{self.a.output}; touches may land on the wrong monitor")
         screen.description += f" mapped to {self.a.output}"
         return screen
+
+    def create_pointer(self):
+        """A uinput absolute mouse over the whole layout; fractions of the
+        phone's monitor become layout positions (layout_geometry)."""
+        import uinput_pointer
+        problem = uinput_touch.uinput_access_problem()
+        if problem:
+            raise RuntimeError(f"{problem}; run tandem on the computer and "
+                               "press t to set up touch")
+        output = self.a.output
+        cache = {"at": 0.0, "geometry": None}
+
+        def geometry():
+            # Re-read at most twice a second: a pointer drag sends ~120
+            # moves a second, and the layout only changes on (re)placement.
+            now = time.monotonic()
+            if cache["geometry"] is None or now - cache["at"] > 0.5:
+                found = layout_geometry(output)
+                if found:
+                    cache["geometry"], cache["at"] = found, now
+            if cache["geometry"] is None:
+                raise RuntimeError(f"{output} is not in the monitor layout")
+            return cache["geometry"]
+
+        return uinput_pointer.VirtualPointer(geometry)
+
+    def create_keyboard(self):
+        """A uinput keyboard typing in the user's Hyprland layout.
+
+        Hyprland gives every keyboard the input:kb_* layout, so keysyms
+        are looked up in that same layout."""
+        import keyboard
+        problem = uinput_touch.uinput_access_problem()
+        if problem:
+            raise RuntimeError(f"{problem}; run tandem on the computer and "
+                               "press t to set up touch")
+        return keyboard.VirtualKeyboard(keyboard.Keymap(**hyprland_layout()))
 
     def apply_live(self, side, scale):
         a = self.a

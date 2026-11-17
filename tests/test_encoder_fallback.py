@@ -251,6 +251,7 @@ class EncoderSelectorTest(unittest.TestCase):
         self.addCleanup(self.inspect.__exit__)
         self.unusable = set()
         self.started = []
+        self.pinned = []
         args = types.SimpleNamespace(codec="h264", encoder="auto")
         self.selector = gstreamer.EncoderSelector(args, "KDE")
         for patcher in (mock.patch.object(gstreamer, "start_encoder",
@@ -259,8 +260,9 @@ class EncoderSelectorTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def start_encoder(self, node, args, encoder):
+    def start_encoder(self, node, args, encoder, pin_colour=True):
         self.started.append(encoder)
+        self.pinned.append(pin_colour)
         if encoder in self.unusable:
             raise gstreamer.EncoderUnusable(f"{encoder} offers no bitrate "
                                             "control")
@@ -272,6 +274,7 @@ class EncoderSelectorTest(unittest.TestCase):
     def restart(self):
         """What supervise_capture does after the stream ended: start again."""
         self.started.clear()
+        self.pinned.clear()
         return self.selector.start(42)
 
     def test_the_first_encoder_is_started_without_waiting(self):
@@ -298,16 +301,36 @@ class EncoderSelectorTest(unittest.TestCase):
     def test_an_encoder_that_fails_right_after_starting_is_skipped(self):
         proc, _stream = self.selector.start(42)
         end(proc, 1)                      # gst-launch: erroneous pipeline
+        # first the same encoder without the colour pin (issue #7 change)...
+        proc, _stream = self.restart()
+        self.assertEqual((self.started, self.pinned), (["vah264lpenc"], [False]))
+        self.assertIn("encoder vah264lpenc failed right after starting with "
+                      "the BT.709 colour setting; retrying it without",
+                      self.logged())
+        end(proc, 1)
+        # ...then the next encoder, with it
         self.restart()
-        self.assertEqual(self.started, ["x264enc"])
+        self.assertEqual((self.started, self.pinned), (["x264enc"], [True]))
         self.assertIn("encoder vah264lpenc failed right after starting (exit "
                       "code 1); trying the next one", self.logged())
 
     def test_a_crash_counts_as_an_error(self):
         proc, _stream = self.selector.start(42)
         end(proc, -11)                    # SIGSEGV
+        proc, _stream = self.restart()
+        end(proc, -11)
         self.restart()
         self.assertEqual(self.started, ["x264enc"])
+
+    def test_an_encoder_that_only_rejects_the_colour_pin_is_kept(self):
+        proc, _stream = self.selector.start(42)
+        self.assertEqual(self.pinned, [True])
+        end(proc, 1)
+        proc, _stream = self.restart()    # without the pin: runs
+        self.assertEqual(self.selector.working, "vah264lpenc")
+        end(proc, -15)                    # we stopped it (capture restart)
+        self.restart()
+        self.assertEqual((self.started, self.pinned), (["vah264lpenc"], [False]))
 
     def test_an_encoder_we_stopped_is_not_skipped(self):
         for returncode in (-15, -9, 0):   # SIGTERM, SIGKILL, clean exit
@@ -320,17 +343,19 @@ class EncoderSelectorTest(unittest.TestCase):
     def test_an_encoder_that_ran_a_while_is_not_skipped(self):
         proc, _stream = self.selector.start(42)
         end(proc, 1)
-        self.selector._last = (proc, time.monotonic() - 60)
+        self.selector._last = (proc, time.monotonic() - 60, True)
         self.restart()
         self.assertEqual(self.started, ["vah264lpenc"])
 
     def test_every_encoder_gets_its_turn_then_failed_ones_again(self):
         order = []
-        for _ in range(4):
+        for _ in range(7):
             proc, _stream = self.selector.start(42)
             order.append(self.selector.working)
             end(proc, 1)
-        self.assertEqual(order, ["vah264lpenc", "x264enc", "openh264enc",
+        # each one twice: with the colour pin, then without (issue #7)
+        self.assertEqual(order, ["vah264lpenc", "vah264lpenc", "x264enc",
+                                 "x264enc", "openh264enc", "openh264enc",
                                  "vah264lpenc"])
 
     def test_nothing_usable_is_a_clear_error(self):

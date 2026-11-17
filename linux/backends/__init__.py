@@ -35,6 +35,16 @@ start_capture() / stop_capture() may be called again within one session
 the virtual output); stop_capture() is idempotent.
 
 Optional:
+    create_pointer()     -> virtual mouse for pointer mode (description,
+                            move(x, y) in fractions of the monitor,
+                            button(evdev code, pressed), scroll(dx, dy) in
+                            1/120 notches, release_all(), close()), or
+                            raises RuntimeError. Missing means no pointer
+                            mode on that desktop.
+    create_keyboard()    -> virtual keyboard (description, key(keysym,
+                            pressed), release_all(), close()) for typing
+                            from the phone, or raises RuntimeError. Missing
+                            means no typing on that desktop.
     request_keyframe()   -> True if an IDR will follow soon. Look it up with
                             getattr(backend, "request_keyframe", None): the
                             gst-launch based paths (gnome, xdph) can't take

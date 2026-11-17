@@ -8,8 +8,17 @@ gives the virtual monitor that exact size and aspect ratio, so the picture
 fills the screen with no black bars, and a touch anywhere on the screen is a
 touch on the desktop.
 
-    phone -> PC   SIZE   JSON {"width": W, "height": H}: the app's screen,
-                         in pixels, as it is held (landscape)
+    phone -> PC   SIZE   JSON {"width": W, "height": H[, "now": true]}: the app's screen,
+                         in pixels, as it is held: landscape, or portrait
+                         (taller than wide) after the user turns the
+                         monitor from the app, which then gets a tall
+                         monitor
+
+"now" marks a turn the user asked for: it is applied at once, without the
+SETTLE wait (a turn is one deliberate change, not a layout settling).
+
+The banner's "fit" field tells the app this is on, so it only offers to
+turn the monitor to portrait when the monitor would follow.
 
 Older daemons ignore the frame (unknown frame types are skipped), and with an
 older app nothing is sent, so the monitor keeps the size set in Configure.
@@ -117,8 +126,8 @@ class DeviceFit:
         threading.Thread(target=self._run, name="device-fit",
                          daemon=True).start()
 
-    def on_size(self, who, width, height, only_phone):
-        """A phone reported its screen size."""
+    def on_size(self, who, width, height, only_phone, now=False):
+        """A phone reported its screen size; `now`: the user turned it."""
         size = fit_size(width, height)
         if size is None:
             self._log(f"{who} reported a {width}x{height} screen; too small "
@@ -131,7 +140,8 @@ class DeviceFit:
                           "{}x{}".format(*self._current()))
             return
         with self._lock:
-            self._pending = (size, who, time.monotonic() + self._settle)
+            due = time.monotonic() + (0 if now else self._settle)
+            self._pending = (size, who, due)
         self._wake.set()
 
     def take_wanted(self):
@@ -169,3 +179,11 @@ class DeviceFit:
             self._log("fitting the monitor to {}'s screen: {}x{} -> {}x{}"
                       .format(who, *self._current(), *size))
             self._request_restart()
+
+
+def wants_now(body):
+    """True if a SIZE frame body asks for the size at once (a user's turn)."""
+    try:
+        return json.loads(body).get("now") is True
+    except (ValueError, AttributeError):
+        return False

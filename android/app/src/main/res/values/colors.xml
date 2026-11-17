@@ -21,5 +21,6 @@
     <color name="surface_2">#121314</color>    <!-- connect card, dialogs -->
     <color name="surface_3">#1C1D1F</color>    <!-- saved-computer row -->
     <color name="surface_4">#2A2C2E</color>    <!-- its icon disc -->
+    <color name="key_bar">#F20B0C0C</color>    <!-- the key bar above the phone keyboard -->
     <color name="red">#FF5449</color>          <!-- errors: the site's red, lifted to read on black -->
 </resources>

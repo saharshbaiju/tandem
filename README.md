@@ -7,7 +7,7 @@
 
 ### Your Android phone, as a real second monitor for Linux
 
-Native, low-latency, GPU-accelerated, with touch. Drag a window onto the phone and it appears there.
+Native, low-latency, GPU-accelerated, with touch and typing. Drag a window onto the phone and it appears there.
 
 **[Website](https://saharshbaiju.github.io/tandem/)** · **[Download the app](https://github.com/saharshbaiju/tandem/releases/latest)** · **[Documentation](#documentation)** · **[Architecture](docs/ARCHITECTURE.md)**
 
@@ -31,6 +31,25 @@ is. Only a phone that has scanned the computer's QR code can control the desktop
 Pair by scanning the QR code shown in the terminal. Connect over a **USB cable**
 (through adb, automatically when USB debugging is on), **USB tethering** (no USB
 debugging needed), or **Wi-Fi**.
+
+**Typing from the phone.** The side sheet's **Keyboard** button opens the phone's
+own keyboard (Gboard or any other), and what you type goes to the window that has
+focus on the computer. A key bar above it adds Esc, Tab, Ctrl, Alt, Super, Del
+and the arrow keys. A keyboard plugged into the phone types on the computer too.
+The phone sends the character you meant, and the computer finds the key in its
+own keyboard layout, so the two layouts don't have to match.
+
+**Pointer mode.** Some apps only drag with a mouse: Chrome's tabs, window title
+bars, text selection. For those, switch the side sheet from **Touch** to
+**Pointer**, and the phone works as a mouse: tap to click, touch and move to
+drag, hold or tap with two fingers to right-click, and drag with two fingers to
+scroll. Unlike touch, pointer mode moves the computer's own mouse pointer.
+
+**Portrait.** With *Fit to device* on (the default), turn the phone while
+streaming and the app asks whether to turn the monitor too. Tap **Turn**, and the
+computer resizes the phone's monitor to a tall one. The rotate button in the side
+sheet does the same at any time. Nothing is asked when the phone's auto-rotate
+is locked.
 
 **Your monitors stay as they are.** Tandem adds the phone beside your existing
 monitors and only ever changes its own virtual monitor and, on Hyprland, the one
@@ -130,8 +149,8 @@ phone, open it, and allow installs from your browser when asked.
    your extended desktop.
 4. Touch the phone's screen to use it. On **Hyprland**, touch needs a one-time
    permission for `/dev/uinput`. The installer offers to set it up, or you can press
-   **t** in the live view. On **GNOME** and **KDE Plasma**, nothing needs to be set
-   up.
+   **t** in the live view; typing and pointer mode use the same permission. On
+   **GNOME** and **KDE Plasma**, nothing needs to be set up.
 
 The phone's stock camera works too. Point it at the QR code, and it opens a
 `tandem://` link in the app, which asks you to confirm the computer.
@@ -161,10 +180,10 @@ virtual monitor (Hyprland headless output / Mutter virtual monitor /
    TLS over TCP: USB tethering, Wi-Fi, or adb reverse (every QR address tried
         │         in parallel); pairing-key proof before anything is sent
         │                                        ▲
-   Android app → MediaCodec → Surface            │ touches, keyframe requests
-                hardware decode, rendered on arrival    (paired phones only)
-                                                 │
-   phone_input.py → virtual touchscreen: uinput (Hyprland) /
+   Android app → MediaCodec → Surface            │ touches, keys, pointer,
+                hardware decode, rendered on arrival    keyframe requests
+                                                 │      (paired phones only)
+   phone_input.py → virtual touchscreen, keyboard and pointer: uinput (Hyprland) /
                     Mutter RemoteDesktop (GNOME) / KWin fake input (KDE)
 ```
 
@@ -179,6 +198,18 @@ no media player and no jitter buffer, and the stream is raw H.264 with no contai
 The encoder runs on the GPU that the compositor renders on, so frames are never
 copied between GPUs. Details are in
 [`ARCHITECTURE.md` §2](docs/ARCHITECTURE.md#2-why-the-pipeline-avoids-buffering).
+
+### Why the colours are right
+
+Every stream is converted from the desktop's RGB to video colour the same way:
+BT.709, limited range, the convention HD video uses. The encoder writes that into
+the stream, and the app tells the phone's decoder the same thing. Before 0.9.0
+each part used its own default, so colours could look washed out or slightly
+shifted depending on the GPU, the encoder and the phone
+([issue #7](https://github.com/saharshbaiju/tandem/issues/7)). An encoder that
+refuses the colour settings is started again without them before Tandem moves on
+to the next encoder. Details are in
+[`ARCHITECTURE.md`](docs/ARCHITECTURE.md#colour-bt709-limited-range).
 
 ### Why it stays connected
 
@@ -210,7 +241,8 @@ tandem
   default, or a fixed size), the **FPS**, the desktop **scale**, the **quality** (bitrate),
   the **encoder** (auto, or one to try first, with a fallback if it can't start),
   the keyframe interval, the **preferred link** (which address comes first in the
-  QR code), the **port**, **touch input** (on or off), and **paired phones**. The
+  QR code), the **port**, **touch input** (on or off; off also turns off typing
+  and pointer mode), and **paired phones**. The
   paired phones option has a *forget all* action, which creates a new pairing key.
   Connected phones are dropped, and each one must scan the QR code again. Saving
   while streaming applies side and scale at once. Other changes restart the stream.
@@ -242,7 +274,7 @@ python3 tandemd.py --help
 --parent-pid PID                         # stop, and remove the monitor, when PID exits
 --pairing-key-file ~/.config/tandem/pairing-key   # phones must prove this key (default)
 --tls-dir ~/.config/tandem/tls                    # TLS certificate (default; created if missing)
---no-touch                               # view only
+--no-touch                               # view only: no touch, typing or pointer mode
 ```
 
 Signals: SIGTERM, SIGINT and SIGHUP stop the daemon cleanly. SIGUSR1 re-reads
@@ -270,7 +302,7 @@ older phones, it uses a canvas version.
 
 ```bash
 python3 linux/testsrc.py --width 2400 --height 1080   # fake desktop, real daemon code
-python3 linux/testsrc.py --log-touch                  # …and print the touches it receives
+python3 linux/testsrc.py --log-touch                  # …and print the touches, keys and pointer events it receives
 adb shell am start -a android.intent.action.VIEW -d "'tandem://c?h=10.0.2.2&p=5000'"   # emulator
 adb logcat -s StreamSession
 /usr/bin/python3 -m unittest discover -s tests -v     # unit tests for linux/ (no compositor needed)
@@ -294,8 +326,11 @@ linux/
   secure_link.py        TLS certificate, pairing key, handshake, lock-out
   device_fit.py         fit to device: sizes the monitor to the phone's screen (SIZE)
   update_check.py       "a newer Tandem is out": latest GitHub release, once a day
-  phone_input.py        what admitted phones send back: touches → slots
+  phone_input.py        what admitted phones send back: touches → slots, keys, pointer
   uinput_touch.py       virtual multi-touch touchscreen via /dev/uinput (Hyprland)
+  uinput_pointer.py     virtual absolute mouse via /dev/uinput, for pointer mode (Hyprland)
+  keyboard.py           typing: keysym → key in the user's layout (xkbcommon), uinput keyboard
+  colour.py             the BT.709 limited-range colour settings for every encoder
   backends/__init__.py  backend registry, session detection, the backend contract
   backends/hyprland.py  headless output, hyprctl Lua API, wf-recorder, touch mapping
   backends/xdph.py      NVIDIA: zero-copy capture via the Hyprland portal + GStreamer NVENC
@@ -320,8 +355,12 @@ android/app/src/main/java/io/github/saharshbaiju/tandem/
   ConnectTarget.kt      tandem:// QR and deep-link parsing (pairing key, cert fingerprint)
   SecureChannel.kt      TLS, certificate pinning and the pairing proof
   FrameReader.kt        NALU / ASX1 / PING / INPT framing
-  FrameWriter.kt        HELO / AUTH / TUCH (phone to computer)
+  FrameWriter.kt        HELO / AUTH / TUCH / KEYS / PNTR / SIZE (phone to computer)
   TouchForwarder.kt     MotionEvent → touch frames
+  PointerGestures.kt    pointer mode: taps, drags, holds and two-finger scrolls → PNTR
+  RemoteKeyboard.kt     typing: the phone's keyboard, the key bar, plugged-in keyboards
+  Keysyms.kt            characters and Android key codes → X keysyms
+  OrientationWatcher.kt notices the phone being turned, for the portrait prompt
   AspectRatioSurfaceView.kt  letterboxing
 LICENSE, NOTICE          GPL-3.0 and its additional terms (see License below)
 docs/                    PLATFORMS, ARCHITECTURE, ANDROID, SECURITY, RELEASING
@@ -336,7 +375,7 @@ tests/                   unit tests (python3 -m unittest discover -s tests; not 
 - niri, once a niri release can create virtual outputs (the work is ready and
   waiting on [niri pull request #3800](https://github.com/niri-wm/niri/pull/3800))
 - Sway and other wlroots compositors
-- Pen input with pressure and hover, and typing from the phone
+- Pen input with pressure and hover
 - A latency overlay
 
 ## License

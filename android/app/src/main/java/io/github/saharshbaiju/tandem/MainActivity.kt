@@ -1,52 +1,58 @@
 package io.github.saharshbaiju.tandem
 
+import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.content.ActivityNotFoundException
+import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.res.ColorStateList
 import android.graphics.Rect
-import android.net.Uri
 import android.net.ConnectivityManager
 import android.net.LinkAddress
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
+import android.util.Log
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.Toast
+import android.view.animation.LinearInterpolator
 import android.view.animation.PathInterpolator
-import android.util.Log
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import io.github.saharshbaiju.tandem.databinding.ActivityMainBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import io.github.saharshbaiju.tandem.databinding.ActivityMainBinding
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
-import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 /**
  * Connect screen (Material 3) -> water-ripple transition -> full-bleed desktop.
@@ -59,6 +65,16 @@ import java.util.concurrent.ConcurrentHashMap
  *              edge handle that opens a side sheet (details + Disconnect).
  *  RECONNECTING  the link dropped after working; retries with backoff. A
  *              "Reconnecting…" pill says so (the picture is frozen meanwhile).
+ *
+ * Typing: the sheet's Keyboard button opens the phone's keyboard; what it
+ * types goes to the computer (see [RemoteKeyboard]), with a key bar of Esc /
+ * Tab / Ctrl / Alt / Super / arrows above it. While it is open the picture
+ * shrinks into the space above the key bar, so the whole desktop stays in
+ * view. A keyboard plugged into the phone types on the computer too.
+ *
+ * Touch or pointer: the sheet's switch picks how touches act. Touch (the
+ * default) sends them as a touchscreen; Pointer makes the phone a mouse (see
+ * [PointerGestures]), for apps that only drag with a mouse.
  *
  * Touch: while LIVE, and when the computer has touch input on, every touch
  * on the video goes to the computer (see [TouchForwarder]). Without touch, a
@@ -104,9 +120,27 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
 
     private var streamSize = ""
     private var serverConfig: ServerConfig? = null
+    private var portrait = false           // the monitor is turned to portrait
+    private var rotateAsked = false        // asked about this turn of the phone
+    private val orientationWatcher by lazy {
+        OrientationWatcher(this, ::displayDegrees) { turn -> onPhoneTurned(turn) }
+    }
+    private val dismissRotate = Runnable { hideRotatePrompt() }
     private var touchAllowed = false       // the computer accepted our pairing key
     private var touchRefusedReason = ""    // why not, shown in the side sheet
     private val touchForwarder = TouchForwarder { points -> session?.sendTouches(points) }
+    private var keysAllowed = false        // the computer can type what we send
+    private var pointerAllowed = false     // ...and offers pointer mode
+    private val pointerMode get() = prefs.getBoolean(PREF_POINTER_MODE, false)
+    private val pointerGestures by lazy {
+        PointerGestures(slopPx = dp(8f), scrollStepPx = dp(40f)) { e -> session?.sendPointer(e) }
+    }
+    private var keyboardOpen = false       // the user asked for the phone keyboard
+    private var imeShown = false           // ...and it is on screen
+    private val remoteKeyboard = RemoteKeyboard(
+        send = { keysym, pressed -> session?.sendKey(keysym, pressed) },
+        onLatchChanged = { showLatches() },
+    )
     private var linkHost = ""
     private var stopNote = ""              // why the last session dropped, for the sheet
     private var retryNotBefore = 0L        // uptimeMillis: the computer asked us to wait until then
@@ -154,6 +188,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
             if (id == EditorInfo.IME_ACTION_GO) { onPrimary(); true } else false
         }
         b.disconnectBtn.setOnClickListener { closeSheet(); userDisconnect("disconnect button") }
+        setUpKeyboard()
+        setUpRotation()
         b.edgeHandle.setOnClickListener { openSheet() }
         b.scrim.setOnClickListener { closeSheet() }
         b.surface.setOnClickListener {
@@ -168,6 +204,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
                 // Disconnect is one deliberate tap away.
                 when {
                     sheetOpen -> closeSheet()
+                    keyboardOpen -> closeKeyboard()       // the key bar, keyboard minimised
                     state == State.LIVE || state == State.RECONNECTING -> openSheet()
                     state == State.CONNECTING -> userDisconnect("back while connecting")
                     else -> { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
@@ -242,9 +279,29 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
      */
     @SuppressLint("ClickableViewAccessibility")   // taps act on the remote desktop
     private fun forwardTouch(view: View, event: MotionEvent): Boolean {
-        if (state != State.LIVE || !touchAllowed || sheetOpen) return false
-        touchForwarder.forward(view, event)
+        if (state != State.LIVE || sheetOpen) return false
+        when {
+            pointerMode && pointerAllowed -> pointerGestures.onTouch(view, event)
+            touchAllowed -> touchForwarder.forward(view, event)
+            else -> return false
+        }
         return true
+    }
+
+    /** Touches reach the computer, one way or the other. */
+    private fun inputLive() = touchAllowed || (pointerMode && pointerAllowed)
+
+    private fun setPointerMode(on: Boolean) {
+        if (on == pointerMode) return
+        if (on && !pointerAllowed && state == State.LIVE) {
+            Toast.makeText(this, R.string.pointer_off, Toast.LENGTH_LONG).show()
+            b.inputModeGroup.check(R.id.touchModeBtn)
+            return
+        }
+        pointerGestures.cancel()
+        prefs.edit().putBoolean(PREF_POINTER_MODE, on).apply()
+        fillSheet()
+        updateGestureExclusion()
     }
 
     // ------------------------------------------------------------ connect card
@@ -361,7 +418,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     private fun launchSession() {
         val t = target ?: return
         if (!surfaceReady || !wantConnected || session != null) return
-        setTouchState(false, "")       // until the new session's INPT arrives
+        setInputState(InputState())       // until the new session's INPT arrives
         acquireWifiLock()
         session = StreamSession(t, appVersion(), b.surface.holder.surface, this,
             networks::networkFor, networks::isDirect)
@@ -469,15 +526,21 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         applyFrameRate()
     }
 
-    override fun onInputState(session: StreamSession, touchAllowed: Boolean, reason: String) =
+    override fun onInputState(session: StreamSession, state: InputState) =
         runOnUiThread {
             if (session !== this.session) return@runOnUiThread
-            setTouchState(touchAllowed, reason)
+            setInputState(state)
         }
 
-    private fun setTouchState(allowed: Boolean, refusedReason: String) {
-        touchAllowed = allowed
-        touchRefusedReason = refusedReason
+    private fun setInputState(input: InputState) {
+        touchAllowed = input.touch
+        touchRefusedReason = input.reason
+        keysAllowed = input.keys
+        pointerAllowed = input.pointer
+        // keys and buttons held when the link dropped are let go by the
+        // computer itself
+        if (!input.keys) { remoteKeyboard.releaseAll(); closeKeyboard() }
+        if (!input.pointer) pointerGestures.cancel()
         fillSheet()
         updateGestureExclusion()
     }
@@ -486,7 +549,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
                            retryAfterMs: Long) = runOnUiThread {
         if (session !== this.session) return@runOnUiThread
         this.session = null
-        setTouchState(false, "")
+        setInputState(InputState())
         if (!wantConnected) return@runOnUiThread
         // Once this computer streamed to us it does speak TLS: a garbled
         // answer now is a broken link, not an outdated computer.
@@ -535,6 +598,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
 
     private fun setState(s: State) {
         state = s
+        if (s != State.LIVE) closeKeyboard()
+        watchOrientation()
+        if (s == State.IDLE && portrait) setPortrait(false)   // the connect screen is landscape
         render()
         fillSheet()
         updateGestureExclusion()
@@ -658,13 +724,19 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
                 if (it.bitrate.isNotEmpty()) " · ${it.bitrate}bps" else ""
         } ?: "—"
         b.sheetTouch.text = when {
+            pointerMode && pointerAllowed -> getString(R.string.touch_pointer)
             touchAllowed -> getString(R.string.touch_on)
             state == State.LIVE && session != null -> getString(R.string.touch_off)
             else -> "—"
         }
-        val touchNote = if (touchAllowed) getString(R.string.touch_on_hint) else touchRefusedReason
+        val touchNote = when {
+            pointerMode && pointerAllowed -> getString(R.string.pointer_hint)
+            touchAllowed -> getString(R.string.touch_on_hint)
+            else -> touchRefusedReason
+        }
         b.sheetTouchNote.text = touchNote
         b.sheetTouchNote.visibility = if (touchNote.isEmpty() || state == State.IDLE) View.GONE else View.VISIBLE
+        b.keyboardBtn.alpha = if (keysAllowed) 1f else 0.5f
         b.sheetBackend.text = when (sc?.backend) {
             "hyprland" -> "Hyprland"
             "gnome" -> "GNOME"
@@ -678,6 +750,254 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     private fun fmtScale(scale: Double): String {
         val s = if (scale == scale.toLong().toDouble()) scale.toLong().toString() else scale.toString()
         return "$s×"
+    }
+
+    // ------------------------------------------------------------- rotation
+
+    /**
+     * Portrait: while streaming, the phone can turn the computer's monitor
+     * to portrait (and back). The screen stays locked to the orientation
+     * picked, so a phone turned in the hand only asks, for a few seconds,
+     * whether the monitor should turn too (OrientationWatcher); the rotate
+     * button in the sheet turns it any time. Turning sends the new screen
+     * size (SIZE), and the computer resizes its monitor to it when "fit to
+     * device" is on (linux/device_fit.py). Back on the connect screen the
+     * app is landscape again.
+     */
+    private fun setUpRotation() {
+        b.rotateBtn.setOnClickListener { closeSheet(); setPortrait(!portrait) }
+        b.rotatePromptBtn.setOnClickListener { hideRotatePrompt(); setPortrait(!portrait) }
+    }
+
+    private fun setPortrait(on: Boolean) {
+        if (on && serverConfig?.fitsDevice == false) {
+            Toast.makeText(this, R.string.rotate_needs_fit, Toast.LENGTH_LONG).show()
+            return
+        }
+        portrait = on
+        rotateAsked = false
+        // Tell the computer the turned size straight away, before the screen
+        // has even turned, so the monitor resizes without waiting. The layout
+        // that follows reports the same size (no second resize), or the real
+        // one if it differs.
+        val (w, h) = b.root.width to b.root.height
+        if (w > 0 && h > 0 && (w > h) == on) session?.setScreenSize(h, w, now = true)
+        requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+                               else ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
+        orientationWatcher.reset()
+        b.rotateBtn.contentDescription =
+            getString(if (on) R.string.rotate_to_landscape else R.string.rotate_to_portrait)
+    }
+
+    /** Watch the phone being turned while streaming (and the app is in front). */
+    private fun watchOrientation() {
+        if (state == State.LIVE && hasWindowFocus() && orientationWatcher.canDetectOrientation()) {
+            orientationWatcher.enable()
+        } else {
+            orientationWatcher.disable()
+            hideRotatePrompt()
+        }
+    }
+
+    private fun onPhoneTurned(turn: Int) {
+        if (turn == 90 || turn == 270) {
+            if (!rotateAsked) showRotatePrompt()
+        } else {
+            rotateAsked = false         // back as drawn: the next turn asks again
+            hideRotatePrompt()
+        }
+    }
+
+    private fun showRotatePrompt() {
+        val turn = orientationWatcher.turn
+        if (state != State.LIVE || sheetOpen || (turn != 90 && turn != 270)) return
+        // Rotation lock on: the user wants the phone to stay as it is.
+        if (Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 0) return
+        if (serverConfig?.fitsDevice == false) return
+        rotateAsked = true
+        b.rotatePromptText.setText(if (portrait) R.string.rotate_prompt_landscape
+                                   else R.string.rotate_prompt_portrait)
+        layOutTurned(b.rotatePromptFrame, turn)
+        val lp = b.rotatePrompt.layoutParams
+        val width = minOf(dp(300f).toInt(), b.rotatePromptFrame.layoutParams.width - dp(32f).toInt())
+        if (lp.width != width) { lp.width = width; b.rotatePrompt.layoutParams = lp }
+        b.rotatePromptFrame.visibility = View.VISIBLE
+        ObjectAnimator.ofInt(b.rotatePromptTimer, "progress", 1000, 0).apply {
+            duration = ROTATE_PROMPT_MS
+            interpolator = LinearInterpolator()
+            start()
+        }
+        ui.removeCallbacks(dismissRotate)
+        ui.postDelayed(dismissRotate, ROTATE_PROMPT_MS)
+    }
+
+    private fun hideRotatePrompt() {
+        ui.removeCallbacks(dismissRotate)
+        b.rotatePromptFrame.visibility = View.GONE
+    }
+
+    /**
+     * Make [frame] (a full-screen child of the root) the screen as the user
+     * sees it with the phone turned [turn] degrees: laid out with the
+     * screen's width and height swapped, centred, and turned back by [turn]
+     * about its centre, so it covers the screen exactly and what is inside
+     * stands upright.
+     */
+    private fun layOutTurned(frame: View, turn: Int) {
+        val screenW = b.root.width; val screenH = b.root.height
+        val sideways = turn == 90 || turn == 270
+        val w = if (sideways) screenH else screenW
+        val h = if (sideways) screenW else screenH
+        val lp = frame.layoutParams
+        if (lp.width != w || lp.height != h) { lp.width = w; lp.height = h; frame.layoutParams = lp }
+        frame.pivotX = w / 2f
+        frame.pivotY = h / 2f
+        frame.translationX = (screenW - w) / 2f
+        frame.translationY = (screenH - h) / 2f
+        frame.rotation = -turn.toFloat()
+    }
+
+    /** The display's rotation in degrees (0, 90, 180, 270). */
+    private fun displayDegrees(): Int {
+        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display?.rotation ?: 0
+                       else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
+        return rotation * 90
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        watchOrientation()
+    }
+
+    // ------------------------------------------------------------- keyboard
+
+    private fun setUpKeyboard() {
+        b.keyboardTarget.keyboard = remoteKeyboard
+        b.inputModeGroup.check(if (pointerMode) R.id.pointerModeBtn else R.id.touchModeBtn)
+        b.inputModeGroup.addOnButtonCheckedListener { _, id, checked ->
+            if (checked) setPointerMode(id == R.id.pointerModeBtn)
+        }
+        b.keyboardBtn.setOnClickListener { openKeyboard() }
+        b.keyboardToggleBtn.setOnClickListener { if (imeShown) hidePhoneKeyboard() else showPhoneKeyboard() }
+        b.keyboardCloseBtn.setOnClickListener { closeKeyboard() }
+        val taps = mapOf(
+            b.keyEsc to Keysyms.ESCAPE, b.keyTab to Keysyms.TAB, b.keyDel to Keysyms.DELETE,
+            b.keyLeft to Keysyms.LEFT, b.keyRight to Keysyms.RIGHT,
+            b.keyUp to Keysyms.UP, b.keyDown to Keysyms.DOWN,
+        )
+        for ((button, keysym) in taps) button.setOnClickListener { remoteKeyboard.tap(keysym) }
+        for ((button, keysym) in latchKeys()) {
+            button.setOnClickListener { remoteKeyboard.toggleLatch(keysym) }
+        }
+        showLatches()
+        for (button in taps.keys) {
+            button.backgroundTintList = ColorStateList.valueOf(getColor(R.color.surface_4))
+            button.setTextColor(getColor(R.color.ink))
+        }
+        // Follow the phone's keyboard: a docked one has a height, so the key
+        // bar sits on it and the picture fits above; a floating one (Gboard's
+        // floating mode) has none, so the bar stays at the bottom and the
+        // picture keeps nearly the whole screen. Its visibility, not its
+        // height, says whether it is up. It going away by itself (Back, its
+        // own hide key) leaves the key bar, like the minimise button.
+        ViewCompat.setOnApplyWindowInsetsListener(b.root) { _, insets ->
+            if (keyboardOpen) {
+                imeShown = insets.isVisible(WindowInsetsCompat.Type.ime())
+                layOutForKeyboard(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+                showImeToggle()
+            }
+            insets
+        }
+    }
+
+    private fun latchKeys() = listOf(
+        b.keyCtrl to Keysyms.CONTROL_L, b.keyAlt to Keysyms.ALT_L, b.keySuper to Keysyms.SUPER_L,
+    )
+
+    private fun openKeyboard() {
+        if (!keysAllowed) {
+            Toast.makeText(this, R.string.keyboard_off, Toast.LENGTH_LONG).show()
+            return
+        }
+        closeSheet()
+        keyboardOpen = true
+        imeShown = false
+        layOutForKeyboard(0)
+        showPhoneKeyboard()
+    }
+
+    private fun showPhoneKeyboard() {
+        b.keyboardTarget.requestFocus()
+        WindowInsetsControllerCompat(window, b.keyboardTarget).show(WindowInsetsCompat.Type.ime())
+    }
+
+    /** Minimise: the phone's keyboard goes, the key bar stays. */
+    private fun hidePhoneKeyboard() {
+        WindowInsetsControllerCompat(window, b.keyboardTarget).hide(WindowInsetsCompat.Type.ime())
+        if (state == State.LIVE) enterImmersive()
+    }
+
+    /** The bar's minimise / restore button shows what a tap will do. */
+    private fun showImeToggle() {
+        b.keyboardToggleBtn.setIconResource(if (imeShown) R.drawable.ic_keyboard_hide else R.drawable.ic_keyboard)
+        b.keyboardToggleBtn.contentDescription =
+            getString(if (imeShown) R.string.keyboard_hide else R.string.keyboard_show)
+    }
+
+    /** Close the keyboard and put the picture back. Safe to call any time. */
+    private fun closeKeyboard() {
+        val wasOpen = keyboardOpen
+        keyboardOpen = false
+        imeShown = false
+        remoteKeyboard.releaseAll()
+        b.keyBar.visibility = View.GONE
+        setSurfaceBottom(0)
+        if (wasOpen) {
+            WindowInsetsControllerCompat(window, b.keyboardTarget).hide(WindowInsetsCompat.Type.ime())
+            b.keyboardTarget.clearFocus()
+            if (state == State.LIVE) enterImmersive()
+        }
+    }
+
+    private fun layOutForKeyboard(imeHeight: Int) {
+        b.keyBar.visibility = View.VISIBLE
+        b.keyBar.translationY = -imeHeight.toFloat()
+        if (b.keyBar.height > 0) {
+            setSurfaceBottom(imeHeight + b.keyBar.height)
+        } else {
+            // first time shown: its height is known after this layout pass
+            setSurfaceBottom(imeHeight + dp(52f).toInt())
+            b.keyBar.post { if (keyboardOpen && b.keyBar.height > 0) layOutForKeyboard(imeHeight) }
+        }
+    }
+
+    /** Keep the picture above [px] pixels at the bottom (it letterboxes to fit). */
+    private fun setSurfaceBottom(px: Int) {
+        val lp = b.surface.layoutParams as ViewGroup.MarginLayoutParams
+        if (lp.bottomMargin == px) return
+        lp.bottomMargin = px
+        b.surface.layoutParams = lp
+    }
+
+    /** Latched Ctrl / Alt / Super stand out until the next key uses them. */
+    private fun showLatches() {
+        for ((button, keysym) in latchKeys()) {
+            val on = keysym in remoteKeyboard.latched
+            button.backgroundTintList = ColorStateList.valueOf(
+                getColor(if (on) R.color.ink else R.color.surface_4))
+            button.setTextColor(getColor(if (on) R.color.black else R.color.ink))
+        }
+    }
+
+    /**
+     * A keyboard plugged into the phone types on the computer while live
+     * (Back, volume and the like stay the phone's).
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (state == State.LIVE && keysAllowed && !sheetOpen && remoteKeyboard.onKeyEvent(event)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     // ------------------------------------------------------------------ misc
@@ -769,7 +1089,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
     private fun updateGestureExclusion() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val v = b.surface
-        val exclude = state == State.LIVE && touchAllowed && !sheetOpen && v.width > 0 && v.height > 0
+        val exclude = state == State.LIVE && inputLive() && !sheetOpen && v.width > 0 && v.height > 0
         v.systemGestureExclusionRects = if (!exclude) emptyList() else {
             val edge = dp(EDGE_EXCLUSION_WIDTH_DP).toInt()
             val tall = minOf(v.height, dp(EDGE_EXCLUSION_HEIGHT_DP).toInt())
@@ -941,6 +1261,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback, StreamSession.
         private const val DIRECT_CHECK_MS = 2000L      // how often a Wi-Fi stream looks for USB
         private const val DIRECT_RETRY_MS = 30_000L    // after a switch that didn't stick
         private const val PROBE_TIMEOUT_MS = 500
+        private const val PREF_POINTER_MODE = "input.pointer_mode"
+        private const val ROTATE_PROMPT_MS = 5000L     // the question goes away after this
         private const val EDGE_EXCLUSION_WIDTH_DP = 32f
         private const val EDGE_EXCLUSION_HEIGHT_DP = 200f
         private val EMPHASIZED = PathInterpolator(0.2f, 0f, 0f, 1f)

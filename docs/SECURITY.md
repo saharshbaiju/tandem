@@ -20,7 +20,7 @@ link. It also creates the risks below, each of which the protocol removes.
 | # | Risk | Impact if unprotected |
 | --- | --- | --- |
 | 1 | Anyone who can reach the port receives the video | Anyone on the same network (a café, campus or office Wi-Fi), or another account on the PC, could watch the extended screen |
-| 2 | Traffic is plain text: video, the settings banner with the hostname, every touch, and the pairing key itself | A passive sniffer could record the screen and steal the key, then send touches. Touches on an on-screen keyboard reveal what you type |
+| 2 | Traffic is plain text: video, the settings banner with the hostname, every touch and key press, and the pairing key itself | A passive sniffer could record the screen and steal the key, then send touches and keys. Key presses, and touches on an on-screen keyboard, reveal what you type |
 | 3 | The phone cannot tell whether it is talking to the real computer | Someone on the network (ARP spoofing, a fake hotspot) could impersonate the computer, show a fake desktop, and collect your touches |
 | 4 | Any app on the phone can make it connect anywhere. A `tandem://` link can replace the saved computer silently, and an `autoconnect` intent extra connects at once | A malicious app or web page could redirect the phone, and your touches, to an attacker's machine |
 | 5 | The pairing key could be included in app backups | The key could end up in cloud backups or phone-to-phone transfers |
@@ -34,7 +34,8 @@ link. It also creates the risks below, each of which the protocol removes.
 **Protected against:**
 
 - Anyone else on the same network (Wi-Fi, the tethering link, or the LAN) watching
-  the screen, reading touches, or sending touches.
+  the screen, reading touches or key presses, or sending touches, keys or pointer
+  events.
 - A **man in the middle** (ARP spoofing, a rogue access point, or a relay) who
   impersonates the computer to the phone, or the phone to the computer.
 - **Replaying** a recorded connection.
@@ -76,7 +77,7 @@ phone                                                    computer (tandemd)
   │ ◀───────────────────────────────────────────────────────── │
   │  check proof (else abort)                                  │
   │ ◀── ASX1 settings, INPT touch state, NALU video, PING ──── │  only now
-  │ ─── TUCH touches ────────────────────────────────────────▶ │
+  │ ─── TUCH touches, KEYS keys, PNTR pointer ───────────────▶ │  (only what INPT offered)
 ```
 
 The QR code carries everything the phone needs:
@@ -207,6 +208,8 @@ proof and any other `DENY` stay final.
 | Frames from an admitted phone | 4 KB maximum. A larger frame disconnects the phone | `MAX_INCOMING_FRAME` |
 | Frame rate from an admitted phone | 5000 per second (a real phone sends about 100 to 1200). Reading is capped at 256 KB per pass, so a flood can neither grow memory nor starve the video | `MAX_FRAMES_PER_SEC`, `RECV_BUDGET` |
 | Fingers per phone | 5, so one phone can't take every slot of the shared touchscreen | `phone_input.MAX_FINGERS_PER_CLIENT` |
+| Input frames | `TUCH` must be 6 bytes, `KEYS` 5 and `PNTR` 10; anything else is dropped. Unknown touch and pointer actions, keysyms outside 1 to `0x1FFFFFFF` and a `pressed` byte other than 0 or 1 are dropped too | `phone_input.PhoneInput` |
+| Keys and buttons held by a phone | Released when that phone disconnects, or when the input queue overflows, so a vanished phone can't leave Ctrl or a mouse button held | `KeyRouter`, `PointerRouter` |
 
 Text a peer sends (its app version, a malformed hello) is reduced to plain
 letters and digits, or left out, before it reaches the log, because the TUI reads
@@ -259,6 +262,13 @@ recreated on the next start, and every phone must scan the new QR code.
 - **The pairing code field** opens the keyboard in incognito mode
   (`flagNoPersonalizedLearning`), with no suggestions or autofill. The keyboard
   therefore does not learn the code.
+- **Typing on the computer** goes through `KeyboardTargetView`, an invisible
+  view that holds no text: every character is turned into key presses and sent
+  at once, and nothing is stored by the app. The view asks the phone's keyboard
+  for no suggestions and for incognito mode (`flagNoPersonalizedLearning`), so
+  what is typed on the computer, passwords included, is not learned by the
+  keyboard. Keyboards honour that flag; one that ignores it could still learn,
+  as it would in any app.
 - **Saved computers without a valid key** (from before 0.5) cannot connect. The app
   asks for a rescan instead of trying an unauthenticated connection.
 - The TLS socket has one reader thread and one writer thread. Conscrypt, Android's
@@ -294,6 +304,20 @@ recreated on the next start, and every phone must scan the new QR code.
   explains the problem instead of starting.
 - `testsrc.py`, the test pattern generator, uses the same gatekeeper. App testing
   therefore goes through the real security path.
+- **Typing and pointer mode follow the same rules as touch.** From 0.9.0 an
+  admitted phone can also send key presses (`KEYS`) and, in pointer mode, mouse
+  events (`PNTR`). Only phones that passed the pairing handshake are connected,
+  and the daemon accepts these frames only from a phone it authorized in
+  `on_admitted` while that phone was still connected. The virtual keyboard and
+  pointer are created only when touch input is on (`args.touch`; `--no-touch`
+  or *Configure → Touch input → off*), so turning touch off turns all phone
+  input off. `INPT` tells each phone what it may send (`touch`, `keys`,
+  `pointer`), and frames of a kind the computer did not offer are dropped.
+- **Typing reaches the focused window, wherever it is.** Touches only land on
+  the phone's monitor, but key presses go to whichever window has keyboard
+  focus, which may be on another monitor, and pointer mode moves the computer's
+  own pointer. This is no more than a paired phone could already do by tapping
+  a focused window on its monitor, and the same pairing protects it.
 
 ---
 
@@ -385,7 +409,9 @@ path is unit-tested.
 | --- | --- |
 | `linux/secure_link.py` | Key generation and storage, certificate, TLS context, handshake, and lock-out |
 | `linux/tandemd.py` | Single-thread TLS I/O per phone, handshake threads, client cap, drops phones on key reset |
-| `linux/phone_input.py` | Touch only. Admitted phones are told whether touch is on (`INPT`) |
+| `linux/phone_input.py` | Touches, keys and pointer events from admitted phones only. Admitted phones are told what they may send (`INPT`: touch, keys, pointer); frames are size- and range-checked; held keys and buttons are released on disconnect |
+| `linux/keyboard.py`, `linux/uinput_pointer.py`, `linux/uinput_touch.py` | The Hyprland virtual keyboard, pointer and touchscreen (`/dev/uinput`, which needs the one-time access rule). Created only with touch input on |
+| `linux/colour.py` | Colour settings for the encoder; runs `ffmpeg -h filter=…` with a fixed argument list and a 5 s timeout, no shell |
 | `linux/core.py` | QR code with `k`, `f` and `v=2`, the pairing code, and the `openssl` dependency |
 | `linux/tui.py` | Creates the key and certificate before starting, and shows the pairing code |
 | `linux/start-tandem.sh`, `linux/testsrc.py` | Pairing code, and the same gatekeeper |
@@ -393,6 +419,9 @@ path is unit-tested.
 | `android/…/ConnectTarget.kt` | The `f` fingerprint, the `v` check, and the pairing code for typed addresses |
 | `android/…/StreamSession.kt` | TLS and proof before any frame. Final and retryable failures |
 | `android/…/MainActivity.kt` | Link confirmation, debug-only autoconnect, and the pairing-code field |
+| `android/…/RemoteKeyboard.kt`, `android/…/Keysyms.kt` | Typing: sends keys only when `INPT` offered them; the target view stores no text |
+| `android/…/PointerGestures.kt` | Pointer mode: sends `PNTR` only when `INPT` offered it |
+| `android/…/OrientationWatcher.kt` | Reads only the orientation sensor (no permission needed), while live and in front, for the portrait prompt |
 | `AndroidManifest.xml`, `res/xml/data_extraction_rules.xml` | No backups and no cleartext |
 | `linux/update_check.py`, `android/…/UpdateCheck.kt` | The daily latest-release check: a GET to api.github.com, nothing identifying sent, nothing installed |
 

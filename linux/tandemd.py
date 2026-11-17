@@ -156,6 +156,8 @@ def kill_stale():
 #   INPT -> JSON: is touch allowed for this phone? (phone_input.py)
 # phone -> PC:
 #   TUCH -> one touch event (phone_input.py)
+#   KEYS -> one key going down or up, as an X keysym (phone_input.py)
+#   PNTR -> pointer mode: the phone as a mouse (phone_input.py)
 #   KEYQ -> empty: "my decoder needs a fresh keyframe" (it dropped or failed
 #           to decode something). Answered with a GOP replay / new IDR.
 #   PING -> empty heartbeat. A phone that sends them is timed out after
@@ -193,6 +195,9 @@ def build_banner_payload(args, backend_name=""):
         "gop": args.gop,
         "host": socket.gethostname(),
         "backend": backend_name,
+        # the monitor follows the phone's screen (SIZE), so the app can
+        # offer to turn it to portrait
+        "fit": bool(getattr(args, "fit_device", False)),
     }).encode("utf-8")
 
 
@@ -212,6 +217,7 @@ def load_banner_payload(args, backend_name=""):
                 # The file holds the size set in Configure; the monitor may
                 # have been fitted to the phone since (device_fit.py).
                 data["width"], data["height"] = args.width, args.height
+                data["fit"] = bool(getattr(args, "fit_device", False))
                 return json.dumps(data).encode("utf-8")
         except (OSError, ValueError):
             pass
@@ -677,7 +683,8 @@ class Broadcaster:
             elif self.on_device_size:
                 with self._lock:
                     only_phone = self._clients == [client]
-                self.on_device_size(client.addr[0], *size, only_phone)
+                self.on_device_size(client.addr[0], *size, only_phone,
+                                    now=device_fit.wants_now(body))
         elif self.phone_input:
             self.phone_input.on_message(client, frame_type, body)
 
@@ -1314,6 +1321,40 @@ def start_touch(args, backend):
     return surface, ""
 
 
+def start_pointer(args, backend):
+    """Create the backend's virtual mouse for pointer mode, or None.
+    Follows the touch switch, like typing."""
+    create = getattr(backend, "create_pointer", None)
+    if not args.touch or create is None:
+        return None
+    try:
+        pointer = create()
+    except Exception as e:
+        log(f"pointer input: unavailable ({e})")
+        return None
+    log(f"pointer input: ready ({pointer.description})")
+    return pointer
+
+
+def start_keyboard(args, backend):
+    """Create the backend's virtual keyboard, or None.
+
+    Typing follows the touch switch: a computer that turned phone input off
+    gets neither. A backend without create_keyboard() (or one that fails)
+    just means the phone shows no keyboard button.
+    """
+    create = getattr(backend, "create_keyboard", None)
+    if not args.touch or create is None:
+        return None
+    try:
+        keyboard = create()
+    except Exception as e:
+        log(f"keyboard input: unavailable ({e})")
+        return None
+    log(f"keyboard input: ready ({keyboard.description})")
+    return keyboard
+
+
 # --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
@@ -1481,6 +1522,8 @@ def main():
 
     stream = None
     touch_surface = None
+    keyboard = None
+    pointer = None
     phone_input = None
     broadcaster = None
     fit = None
@@ -1498,8 +1541,11 @@ def main():
             return
 
         touch_surface, touch_problem = start_touch(args, backend)
+        keyboard = start_keyboard(args, backend)
+        pointer = start_pointer(args, backend)
         phone_input = PhoneInput(touch_surface=touch_surface,
-                                 unavailable_reason=touch_problem)
+                                 unavailable_reason=touch_problem,
+                                 keyboard=keyboard, pointer=pointer)
         broadcaster = Broadcaster(load_banner_payload(args, backend.name),
                                   phone_input)
         restart_evt = threading.Event()
@@ -1565,6 +1611,16 @@ def main():
                 touch_surface.close()
             except Exception as e:
                 log(f"warning: closing the touch device failed ({e})")
+        if keyboard:
+            try:
+                keyboard.close()
+            except Exception as e:
+                log(f"warning: closing the keyboard failed ({e})")
+        if pointer:
+            try:
+                pointer.close()
+            except Exception as e:
+                log(f"warning: closing the pointer failed ({e})")
         # Only an output that can outlive the daemon (Hyprland's headless
         # output) is kept; the TUI uses that on restart, so not once the TUI
         # itself is gone. Others die with our session anyway.

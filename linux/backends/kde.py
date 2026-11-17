@@ -580,6 +580,133 @@ class KwinTouchscreen:
 # Module hooks (see backends/__init__.py): used without a backend instance
 # --------------------------------------------------------------------------- #
 
+class KwinPointer:
+    """Pointer mode through KWin's fake input: the helper moves the pointer
+    onto our output (from its live position, like touches), presses
+    buttons and scrolls (KWin counts 15 axis units per wheel notch)."""
+
+    AXIS_PER_NOTCH = 15.0
+    NOTCH = 120                       # PNTR scroll units per wheel notch
+
+    def __init__(self, helper):
+        self.description = f"KWin fake input pointer on {helper.output_name}"
+        self._helper = helper
+        self._buttons = set()
+        self._closed = False
+
+    def move(self, x, y):
+        if not self._closed:
+            self._helper.send(f"pmove {_fraction(x)} {_fraction(y)}")
+
+    def button(self, code, pressed):
+        if self._closed:
+            return
+        if pressed:
+            self._buttons.add(code)
+        elif code in self._buttons:
+            self._buttons.discard(code)
+        else:
+            return
+        self._helper.send(f"button {int(code)} {int(bool(pressed))}")
+
+    def scroll(self, dx, dy):
+        if self._closed:
+            return
+        for axis, value in ((0, dy), (1, dx)):
+            if value:
+                amount = value * self.AXIS_PER_NOTCH / self.NOTCH
+                self._helper.send(f"axis {axis} {amount:.3f}")
+
+    def release_all(self):
+        for code in sorted(self._buttons):
+            self.button(code, False)
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            self.release_all()
+        except RuntimeError:
+            pass                    # the helper is gone; KWin let go itself
+        self._closed = True
+
+
+class KwinKeyboard:
+    """Typing through KWin's fake input, on whichever window has focus.
+
+    fake_input v6 (Plasma 6.2+) takes keysyms, and KWin finds the key in the
+    user's layout. v4 and v5 only take key codes, so the keysym is looked up
+    in the layout from kxkbrc here (keyboard.KeyCodeTyper).
+    """
+
+    def __init__(self, helper):
+        self._helper = helper
+        self._down = set()
+        self._closed = False
+        if helper.fake_input_version >= 6:
+            self._typer = None
+            self.description = "KWin fake input keyboard (keysyms)"
+        else:
+            import keyboard
+            keymap = keyboard.Keymap(**plasma_keyboard_layout())
+            self._typer = keyboard.KeyCodeTyper(keymap, self._press_code)
+            self.description = (f"KWin fake input keyboard ({keymap.layout} "
+                                "layout, key codes)")
+
+    def key(self, keysym, pressed):
+        if self._closed:
+            return
+        if self._typer:
+            self._typer.key(keysym, pressed)
+            return
+        if pressed:
+            self._down.add(keysym)
+        elif keysym in self._down:
+            self._down.discard(keysym)
+        else:
+            return
+        self._helper.send(f"keysym {int(keysym)} {int(bool(pressed))}")
+
+    def _press_code(self, code, down):
+        self._helper.send(f"key {int(code)} {int(bool(down))}")
+
+    def release_all(self):
+        if self._typer:
+            self._typer.release_all()
+            return
+        for keysym in sorted(self._down):
+            self.key(keysym, False)
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            self.release_all()
+        except RuntimeError:
+            pass                    # the helper is gone; KWin let go itself
+        self._closed = True
+
+
+def plasma_keyboard_layout(path=None):
+    """The user's first Plasma layout as Keymap keyword arguments, from
+    ~/.config/kxkbrc ([Layout] LayoutList, VariantList, Options, Model).
+    Empty values (xkb's defaults) when it can't be read."""
+    import configparser
+    path = path or os.path.join(
+        os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+        "kxkbrc")
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    try:
+        parser.read(path, encoding="utf-8")
+        section = parser["Layout"]
+    except (configparser.Error, KeyError, OSError, UnicodeDecodeError):
+        return {}
+    first = lambda key: section.get(key, "").split(",")[0].strip()
+    return {"layout": first("LayoutList"), "variant": first("VariantList"),
+            "options": section.get("Options", "").strip(),
+            "model": section.get("Model", "").strip()}
+
+
 def session_confidence():
     """2 in a Plasma Wayland session; 1 when XDG_CURRENT_DESKTOP names KDE
     without Wayland (X11: setup() fails, session_problem() explains); else
@@ -880,6 +1007,26 @@ class KdeBackend:
         self.setup()
         if self._touch and self.helper and self.helper.fake_input_version:
             self._touch.retarget(self.helper)
+
+    def create_pointer(self):
+        helper = self.helper
+        if helper is None or not helper.alive:
+            raise RuntimeError("the KWin virtual output is gone")
+        if helper.fake_input_version < 3:
+            raise RuntimeError("KWin's fake input can't move the pointer "
+                               "(Plasma is too old)" if helper.fake_input_version
+                               else "KWin refused pointer input")
+        return KwinPointer(helper)
+
+    def create_keyboard(self):
+        helper = self.helper
+        if helper is None or not helper.alive:
+            raise RuntimeError("the KWin virtual output is gone")
+        if helper.fake_input_version < 4:
+            raise RuntimeError("KWin's fake input has no keyboard (Plasma "
+                               "is too old)" if helper.fake_input_version
+                               else "KWin refused keyboard input")
+        return KwinKeyboard(helper)
 
     # -- teardown ----------------------------------------------------------- #
 

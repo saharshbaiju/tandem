@@ -43,6 +43,12 @@ data class ServerConfig(
     val codec: String,
     val host: String,
     val backend: String,
+    /**
+     * The computer sizes its monitor to this screen (fit to device), so
+     * turning the phone can turn the monitor. Null from daemons before 0.9,
+     * which don't say (0.8 fits by default).
+     */
+    val fitsDevice: Boolean? = null,
 ) {
     /** The encoder's target bitrate in bits per second, or 0 when the banner doesn't say. */
     val bitrateBps: Long get() = parseBitrate(bitrate)
@@ -131,8 +137,8 @@ class StreamSession(
         fun onFirstFrame(session: StreamSession)
         fun onStreamInfo(session: StreamSession, width: Int, height: Int)
         fun onServerConfig(session: StreamSession, config: ServerConfig)
-        /** The computer's answer to our HELO: may we send touches, and if not, why. */
-        fun onInputState(session: StreamSession, touchAllowed: Boolean, reason: String)
+        /** The computer's answer to our HELO: what input it takes from us. */
+        fun onInputState(session: StreamSession, state: InputState)
         /**
          * The session ended. [final] means retrying can't help (wrong pairing
          * code, a different computer, an outdated version): don't reconnect.
@@ -164,6 +170,8 @@ class StreamSession(
     private var feeder: Feeder? = null
     /** This screen's size in pixels as held, from [setScreenSize]. */
     @Volatile private var screenSize: Pair<Int, Int>? = null
+    /** [screenSize] is a deliberate turn the computer should apply at once. */
+    @Volatile private var screenSizeNow = false
 
     /** The host that answered (one of the target's candidate hosts). */
     @Volatile var connectedHost: String? = null
@@ -196,13 +204,35 @@ class StreamSession(
      * monitor the same size and shape: the picture then fills the screen with
      * no black bars (linux/device_fit.py). Sent right after pairing and again
      * whenever it changes. Daemons that predate it ignore the SIZE frame.
+     *
+     * [now]: the user turned the monitor, so the computer resizes it right
+     * away instead of waiting for the size to settle (a layout settling sends
+     * several sizes in a row; a turn is one deliberate change).
      */
-    fun setScreenSize(width: Int, height: Int) {
+    fun setScreenSize(width: Int, height: Int, now: Boolean = false) {
         if (width <= 0 || height <= 0) return
         val size = width to height
         if (size == screenSize) return
         screenSize = size
+        screenSizeNow = now
         sender?.screenSizeChanged()
+    }
+
+    /**
+     * Queue one key going down or up, as an X keysym (see [Keysyms]). Keys
+     * are never coalesced or reordered; dropped when not connected.
+     */
+    fun sendKey(keysym: Int, pressed: Boolean) {
+        sender?.queueOrdered(FrameWriter.TYPE_KEY, Keysyms.encode(keysym, pressed))
+    }
+
+    /**
+     * Queue a pointer-mode event (see [PointerGestures]). In order with keys;
+     * a MOVE replaces a still-unsent MOVE, like a touch's.
+     */
+    fun sendPointer(event: PointerEvent) {
+        sender?.queueOrdered(FrameWriter.TYPE_POINTER, event.encode(),
+                             coalesce = event.action == PointerEvent.MOVE)
     }
 
     // ------------------------------------------------------------------ reader
@@ -462,17 +492,20 @@ class StreamSession(
             codec = o.optString("codec", ""),
             host = o.optString("host", ""),
             backend = o.optString("backend", ""),
+            fitsDevice = if (o.has("fit")) o.optBoolean("fit") else null,
         )
     } catch (e: Exception) {
         Log.w(TAG, "bad config frame", e)
         null
     }
 
-    /** Parse an INPT frame body: {"touch": bool, "reason": "..."}. */
+    /** Parse an INPT frame body: {"touch", "reason", "keys", "pointer"}. */
     private fun parseInputState(body: ByteArray) {
         try {
             val o = JSONObject(String(body, Charsets.UTF_8))
-            listener.onInputState(this, o.optBoolean("touch", false), o.optString("reason", ""))
+            listener.onInputState(this, InputState(
+                touch = o.optBoolean("touch", false), reason = o.optString("reason", ""),
+                keys = o.optBoolean("keys", false), pointer = o.optBoolean("pointer", false)))
         } catch (e: Exception) {
             Log.w(TAG, "bad input-state frame", e)
         }
@@ -780,6 +813,10 @@ class StreamSession(
     private inner class Sender(private val out: FrameWriter) : Thread("stream-sender") {
         private val lock = Object()
         private val touches = TouchQueue()
+        // KEYS / PNTR frames, in order; [coalescable] marks the last one when
+        // it is a pointer MOVE a newer MOVE may replace
+        private val ordered = ArrayList<Pair<String, ByteArray>>()
+        private var coalescable = false
         private var keyframeWanted = false
         private var lastKeyframeRequestMs = 0L
         /** [screenSize] hasn't gone out yet (it is sent once at the start). */
@@ -789,6 +826,19 @@ class StreamSession(
         fun queueTouches(points: List<TouchPoint>) = synchronized(lock) {
             if (!active) return
             for (p in points) touches.add(p)
+            lock.notifyAll()
+        }
+
+        fun queueOrdered(type: String, body: ByteArray, coalesce: Boolean = false) = synchronized(lock) {
+            if (!active) return
+            if (coalesce && coalescable && ordered.isNotEmpty()) {
+                ordered[ordered.size - 1] = type to body
+                return
+            }
+            // A dead link and a stuck finger on the keyboard: keep the newest.
+            if (ordered.size >= MAX_PENDING_ORDERED) ordered.removeAt(0)
+            ordered += type to body
+            coalescable = coalesce
             lock.notifyAll()
         }
 
@@ -818,8 +868,9 @@ class StreamSession(
             if (!screenSizeWanted) return null
             val (width, height) = screenSize ?: return null
             screenSizeWanted = false
+            val now = if (screenSizeNow) ",\"now\":true" else ""
             return FrameWriter.TYPE_SCREEN_SIZE to
-                """{"width":$width,"height":$height}""".toByteArray(Charsets.US_ASCII)
+                """{"width":$width,"height":$height$now}""".toByteArray(Charsets.US_ASCII)
         }
 
         fun shutdown() = synchronized(lock) {
@@ -833,7 +884,7 @@ class StreamSession(
                 while (active) {
                     val frames = ArrayList<Pair<String, ByteArray>>()
                     synchronized(lock) {
-                        while (active && touches.isEmpty() &&
+                        while (active && touches.isEmpty() && ordered.isEmpty() &&
                             !(screenSizeWanted && screenSize != null)) {
                             val now = SystemClock.elapsedRealtime()
                             val keyframeIn = keyframeDelayMs(now)
@@ -850,6 +901,9 @@ class StreamSession(
                         }
                         takeScreenSize()?.let { frames += it }
                         touches.drainTo(frames)
+                        frames += ordered
+                        ordered.clear()
+                        coalescable = false
                     }
                     if (!active) break
                     if (frames.isEmpty()) frames += FrameWriter.TYPE_PING to EMPTY
@@ -872,6 +926,7 @@ class StreamSession(
         private const val READ_TIMEOUT_MS = 4000
         private const val HANDSHAKE_TIMEOUT_MS = 5000
         private const val HEARTBEAT_MS = 1000L
+        private const val MAX_PENDING_ORDERED = 256
         private const val DSCP_AF41 = 0x88
 
         /** How long to wait for another slice of the current picture (multi-slice streams). */
@@ -1343,6 +1398,14 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
         fmt.setInteger(MediaFormat.KEY_PRIORITY, 0)          // realtime
         if (!tuned) return fmt
 
+        // Tandem streams are BT.709, limited range (linux/colour.py). The
+        // computer labels them so, except with openh264, which can't; then
+        // this is what the decoder uses instead of its own guess, which
+        // differs between phones (GitHub issue #7). A label in the stream
+        // still wins, so older computers look exactly as before.
+        fmt.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+        fmt.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+        fmt.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
         if (fps > 0) fmt.setInteger(MediaFormat.KEY_OPERATING_RATE, fps)
         for ((name, value) in vendorLowLatencyKeys(info, c)) fmt.setInteger(name, value)
         return fmt
@@ -1423,3 +1486,15 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
         )
     }
 }
+
+/**
+ * What the computer takes from this phone (its INPT frame): touches (if not,
+ * [reason] says why), typing, and pointer mode. Daemons before 0.9 send only
+ * touch and reason.
+ */
+data class InputState(
+    val touch: Boolean = false,
+    val reason: String = "",
+    val keys: Boolean = false,
+    val pointer: Boolean = false,
+)

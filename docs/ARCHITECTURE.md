@@ -25,8 +25,11 @@ it can draw into. The output does not have to be physical. So:
 4. Decode and display it with no buffering.
 5. Send touches back and replay them on the virtual monitor through a virtual
    touchscreen, so the phone works as a touch monitor (section 4, stage 5).
+   Key presses from the phone's keyboard, and mouse events in pointer mode, go
+   back the same way (stages 5b and 5c).
 
-The phone is a thin client. It decodes video and reports touches. The
+The phone is a thin client. It decodes video and reports touches, keys and
+pointer events. The
 monitor logic lives on the Linux side, in a backend for each compositor:
 
 ```
@@ -42,8 +45,10 @@ monitor logic lives on the Linux side, in a backend for each compositor:
  │                       │ pipe                                 │        │             │
  │             tandemd.py  (parse, GOP cache,                   │  TCP   │ MediaCodec  │
  │             per-client senders, heartbeats) ─────────────────┼───────▶│  → Surface  │
- │             phone_input.py (pairing, touches) ◀──────────────┼────────┤ touches     │
- │               → uinput touchscreen     (Hyprland)            │        │             │
+ │             phone_input.py (touches, keys, ◀─────────────────┼────────┤ touches,    │
+ │               pointer)                                       │        │ keys,       │
+ │               → uinput touchscreen, keyboard, pointer        │        │ pointer     │
+ │                                        (Hyprland)            │        │             │
  │               → Mutter RemoteDesktop   (GNOME)               │        │             │
  │               → KWin fake input        (KDE, via the helper) │        │             │
  │                       ▲                                      │        │             │
@@ -351,7 +356,16 @@ tandem-kwin-helper --name Tandem --width W --height H
           geometry <x> <y> <logical w> <logical h>   (each xdg-output change)
           failed <KWin's reason> | closed | error <local failure>
   stdin:  down <slot> <fx> <fy> | move <slot> <fx> <fy> | up <slot> | cancel
+          pmove <fx> <fy> | button <evdev button> <0|1> | axis <0|1> <value>
+          keysym <keysym> <0|1> | key <evdev keycode> <0|1>
 ```
+
+The touch commands need `org_kde_kwin_fake_input` v2 or later (KWin's touch
+requests), the pointer commands (`pmove`, `button`, `axis`) v3, `key` v4 and
+`keysym` v6 (Plasma 6.2 and later). The helper binds fake input at up to v6
+and reports the version it got in its `ready` line; a command the bound
+version can't carry is reported on stderr and ignored. Stages 5b and 5c say
+how the daemon uses them.
 
 - **Building.** `backends/kwin_helper.py` compiles the helper on first use
   (`wayland-scanner` client-header and private-code from the vendored protocol
@@ -416,9 +430,10 @@ is a point on the desktop. `--width` and `--height` are then only the size the
 monitor starts at.
 
 1. After pairing, the app sends `SIZE` with its window size in pixels: the
-   whole screen as held (always landscape), since the app draws under the system
-   bars. It sends it again when that changes, for example when a foldable
-   unfolds or the app goes into split screen.
+   whole screen as held, since the app draws under the system bars. That is
+   landscape, or portrait (taller than wide) after the user turns the monitor
+   from the app. It sends it again when that changes, for example when a
+   foldable unfolds or the app goes into split screen.
 2. `Broadcaster` passes the report to `DeviceFit` with one fact attached: is
    this phone the only one connected? Only then is the monitor fitted. With two
    or more phones watching, it stays as it is and the others are letterboxed.
@@ -426,8 +441,10 @@ monitor starts at.
    on the long side or 3840x2160 in area (what every encoder Tandem uses can
    take), and rounds both sides down to even numbers, as encoders want them.
 4. Reports are applied `SETTLE` (0.6 s) after the last one, so the app's layout
-   settling causes one resize, not several. A size equal to the current one
-   does nothing.
+   settling causes one resize, not several. A report marked `"now": true`
+   (`device_fit.wants_now`) is applied at once: the app sends it when the user
+   turns the monitor, which is one deliberate change rather than a layout
+   settling. A size equal to the current one does nothing.
 5. `DeviceFit` asks the capture supervisor for a restart. `supervise_capture`
    stops the encoder, calls `resize_monitor()`, and starts the encoder again at
    the new size. Connected phones get a fresh `ASX1` with the new size, and
@@ -436,6 +453,14 @@ monitor starts at.
 6. The size is saved to `~/.local/state/tandem/device-size.json`. The next
    daemon starts at it, so the same device reconnecting finds the monitor
    already right and nothing moves.
+
+**Portrait.** Because the monitor follows the size the app reports, turning the
+monitor to portrait needs nothing new on the computer: the app switches itself
+to portrait and reports the tall size with `"now": true`, and the monitor is
+resized as above. The banner (`ASX1`) carries `"fit": true|false` so the app
+only offers the turn when the monitor would follow; with *Fit to device* off,
+the app says to switch it on instead. The touchscreen, keyboard and pointer
+need no change: they work in fractions of the monitor, whatever its shape.
 
 Each backend's `resize(width, height)` does the actual work:
 
@@ -608,6 +633,61 @@ Every encoder is configured the same way, for the same reasons:
 | Raw Annex-B, no container | The decoder reads it directly |
 | `keepalive-time=1000` (GNOME, KDE) | These compositors only send frames when something changes, so the last frame is resent every second. KWin 6.7 with PipeWire 1.4 ignores it, and an idle phone monitor there gets almost no frames; the GOP replay still gives a joining phone the picture |
 
+### Colour: BT.709, limited range
+
+The desktop is RGB and H.264 carries YUV. Turning one into the other needs a
+matrix (BT.601 or BT.709) and a range (full, 0 to 255, or limited, 16 to 235),
+and the phone has to undo it with the same two. The parts Tandem uses don't
+agree on a default: ffmpeg's swscale uses BT.601, wf-recorder labels its stream
+full range with no matrix, Mesa's VA-API drivers use BT.601 unless told
+otherwise, openh264 writes no colour information at all, and Android decoders
+guess for unlabelled video, differently from one maker to the next. Before
+0.9.0 the result depended on the GPU, the encoder and the phone: colours could
+be washed out or slightly shifted (GitHub issue #7).
+
+`colour.py` fixes one convention for every stream, at every step:
+
+1. **Convert** RGB to YUV as BT.709, limited range, which is what HD video uses.
+2. **Label** the H.264 stream with it (the SPS's VUI: matrix, range, primaries
+   and transfer), so any decoder knows what it got.
+3. **Tell the phone's decoder** the same thing (`KEY_COLOR_STANDARD`,
+   `KEY_COLOR_RANGE`, `KEY_COLOR_TRANSFER` on the `MediaFormat`, see
+   [`ANDROID.md`](./ANDROID.md)), so a stream without a label (openh264) never
+   depends on the phone's guess. A label in the stream still wins.
+
+How each encoder path gets there:
+
+| Path | Conversion | Label |
+| --- | --- | --- |
+| GStreamer (GNOME, KDE): `vah264enc`, `vah264lpenc`, `vaapih264enc`, `x264enc`, `openh264enc` | The raw caps before the encoder get `colorimetry=bt709` (`colour.gst_caps`), for example `video/x-raw,format=NV12,colorimetry=bt709`, so `videoconvert` or `vapostproc` converts with it | The encoder writes the caps' colorimetry into the stream (openh264 can't; the app's decoder keys cover it) |
+| xdph + `nvh264enc` (Hyprland on NVIDIA) | `glcolorconvert ! video/x-raw(memory:GLMemory),format=NV12,colorimetry=bt709` | As above |
+| wf-recorder + `h264_vaapi` / `hevc_vaapi` | `-F scale_vaapi=format=nv12:out_color_matrix=bt709:out_range=tv`, on the GPU | `-p colorspace=bt709 -p color_primaries=bt709 -p color_trc=bt709 -p color_range=tv` |
+| wf-recorder + `h264_nvenc` | NVENC takes RGB and converts by itself, following the codec options; no filter | The same four `-p` options |
+| wf-recorder + `libx264`, `libopenh264` | `-F scale=out_color_matrix=bt709:out_range=tv,format=yuv420p` (swscale, then 4:2:0) | The same four `-p` options |
+
+Filter options are only used where the installed ffmpeg has them:
+`colour.ffmpeg_filter_options` runs `ffmpeg -hide_banner -h filter=<name>` once
+per filter (wf-recorder links the same libavfilter as the ffmpeg binary) and
+looks for `out_color_matrix` and `out_range`. If `scale_vaapi` lacks them, or
+`scale` is known and lacks them, wf-recorder gets no colour arguments at all
+for that encoder, rather than a label that doesn't match the conversion. With
+no ffmpeg binary to ask, the `scale` filter is assumed to have both (swscale has
+had them for a decade).
+
+**An encoder that refuses the colour settings keeps working.** Each encoder is
+first started with them. If it fails to start that way, the same encoder is
+started again without them (the pipeline as before 0.9.0) before the daemon
+moves on to the next encoder:
+
+- Hyprland (`HyprlandBackend.start_capture`): each candidate is tried with
+  colour, then plain. The one that works is remembered together with whether it
+  ran plain, and a restart in the session uses the same combination.
+- GStreamer (`EncoderSelector`): an encoder that exits with an error within
+  `QUICK_EXIT` after a start with colour is added to `plain_colour` instead of
+  `failed`, and the next start runs it without the colour caps. Only a failure
+  without them marks it failed. The log says *encoder X failed right after
+  starting with the BT.709 colour setting; retrying it without*.
+
 ### Stage 2: NAL parsing and broadcast (`tandemd.py`)
 
 The daemon splits the Annex-B byte stream into NAL units:
@@ -687,17 +767,22 @@ big-endian length, and a body:
 | Type | Direction | Body | When |
 | --- | --- | --- | --- |
 | `NALU` | PC to phone | One Annex-B NAL, start code included, passed straight to the decoder | Video |
-| `ASX1` | PC to phone | JSON settings: `side width height fps scale quality bitrate codec gop host backend` | On connect, and after any live config change |
+| `ASX1` | PC to phone | JSON settings: `side width height fps scale quality bitrate codec gop host backend fit`. `fit` is true when the monitor follows the phone's screen (*Fit to device*), so the app may offer to turn it to portrait | On connect, and after any live config change |
 | `PING` | Both | Empty | After 1 s with nothing else to send. Phone to PC only from current apps |
 | `HELO` `CHAL` `AUTH` `OKAY` `DENY` | Both | The pairing handshake ([`SECURITY.md`](./SECURITY.md) §3) | Once, before anything else. A `DENY` can also come before `OKAY` when the computer is full or the phone is locked out |
-| `INPT` | PC to phone | JSON `{"touch": true\|false, "reason": "<why not>"}` | Right after the phone is admitted |
+| `INPT` | PC to phone | JSON `{"touch": true\|false, "reason": "<why not>", "keys": true\|false, "pointer": true\|false}`: may the phone send touches (and if not, why), can it type, and does it get pointer mode | Right after the phone is admitted |
 | `TUCH` | Phone to PC | 6 bytes: `action u8, finger u8, x u16, y u16` (big-endian) | Every touch change (stage 5) |
+| `KEYS` | Phone to PC | 5 bytes: `keysym u32, pressed u8` (big-endian, `>IB`). An X keysym going down (1) or up (0) | Every key press and release, only after `INPT` said `"keys": true` (stage 5b) |
+| `PNTR` | Phone to PC | 10 bytes: `action u8, button u8, x u16, y u16, dx i16, dy i16` (big-endian, `>BBHHhh`). Action 0 move, 1 button down, 2 button up, 3 scroll; button 1 left, 2 right, 3 middle; x/y as in `TUCH`; dx/dy in 1/120 of a wheel notch, positive right / down | Pointer mode, only after `INPT` said `"pointer": true` (stage 5c) |
 | `KEYQ` | Phone to PC | Empty | The phone's decoder needs a fresh keyframe (see *Keyframe requests and resync* below) |
-| `SIZE` | Phone to PC | JSON `{"width": W, "height": H}`: the app's screen in pixels, as held | Right after pairing, and whenever it changes (see *Fit to device* in stage 0) |
+| `SIZE` | Phone to PC | JSON `{"width": W, "height": H}`: the app's screen in pixels, as held, plus `"now": true` when the user turned the monitor (apply it without the settle wait) | Right after pairing, whenever it changes, and on a turn to or from portrait (see *Fit to device* in stage 0) |
 
 After the handshake, both ends ignore unknown message types, so new types can be
-added without breaking older peers. An older daemon ignores `KEYQ`, `SIZE` and
-the phone's `PING`, and an older app never sends them. The daemon refuses
+added without breaking older peers. An older daemon ignores `KEYQ`, `SIZE`,
+`KEYS`, `PNTR` and the phone's `PING`, and an older app never sends them. An
+older daemon's `INPT` has no `keys` or `pointer`, which the app reads as false,
+so it never sends `KEYS` or `PNTR` there. An older daemon ignores `now` and
+applies the size after the settle wait; an older app ignores `fit`. The daemon refuses
 phone-to-PC frames larger than 4 KB, and 1 KB during the handshake.
 
 Each phone gets one I/O thread. Its queues hold whole frames, and the same
@@ -847,8 +932,9 @@ keyframe, the phone sends `KEYQ` (stage 3). See [`ANDROID.md`](./ANDROID.md).
 
 Touching the phone's screen acts on the virtual monitor, the way it would on a
 touchscreen monitor, and the computer's mouse pointer does not move. This is the
-central design decision. The phone's touches are injected as a virtual
-touchscreen, never as a mouse. A touchscreen delivers each touch to the window
+central design decision. In the app's default *Touch* mode the phone's touches
+are injected as a virtual touchscreen, never as a mouse. (*Pointer* mode, stage
+5c, is the one deliberate exception, for apps that only drag with a mouse.) A touchscreen delivers each touch to the window
 under the finger (Wayland `wl_touch`), so the laptop's touchpad keeps working
 while someone taps the phone.
 
@@ -980,6 +1066,102 @@ monitor, also after it moved to the left side. On a real phone, over USB with `a
 Hz: taps, scrolling and pinch all work smoothly. The test recorded 138 touches,
 and every finger-down had a matching finger-up.
 
+### Stage 5b: typing (phone to PC, `keyboard.py`)
+
+```
+phone keyboard / key bar / plugged-in keyboard ─▶ RemoteKeyboard ─▶ KEYS (keysym, pressed)
+   ─TLS─▶ PhoneInput (typing offered? phone authorized?) ─▶ InputWorker queue
+   ─▶ KeyRouter (what each phone holds) ─▶ backend keyboard ─▶ focused window
+```
+
+**Keysyms, not key codes.** The phone sends X keysyms: what the user meant
+(`a`, `A`, `é`, Return, Control_L), not which physical key to press, because it
+can't know the computer's keyboard layout. Latin-1 characters are their own
+keysym and every other character is `0x01000000 | code point`. The phone sends
+a press and a release for each key; key repeat is the computer's job, as for
+any keyboard. The daemon accepts keysyms from 1 to `0x1FFFFFFF` (29 bits) and
+`pressed` 0 or 1, and drops anything else.
+
+**Held keys are let go.** `KeyRouter` (`phone_input.py`) remembers which keys
+each phone holds down and ignores a release it never saw pressed. When a phone
+disconnects, its held keys are released, ordinary keys before modifiers, so a
+phone that vanishes mid-shortcut can't leave Ctrl stuck down, and Ctrl+C can't
+turn into a bare C. Keys go through the same `InputWorker` queue as touches,
+never coalesced and always in order. If that queue overflows, held keys are
+released too.
+
+How a keysym becomes a key press depends on the desktop:
+
+| Desktop | Device | How the keysym is typed |
+| --- | --- | --- |
+| GNOME | `MutterKeyboard`, on the RemoteDesktop session that carries touch | `NotifyKeyboardKeysym(keysym, pressed)`. Mutter finds the key in the user's layout itself, so any character can be typed. Calls are asynchronous and in order on their own `_DBusWorker` |
+| KDE Plasma 6.2 and later | `KwinKeyboard`, helper command `keysym <keysym> <0\|1>` | `org_kde_kwin_fake_input` v6 `keyboard_keysym`. KWin finds the key in the user's layout |
+| KDE Plasma before 6.2 (fake input v4 or v5) | `KwinKeyboard`, helper command `key <evdev code> <0\|1>` | `keyboard_key` with a key code. The daemon looks the keysym up itself (`keyboard.KeyCodeTyper`) in the first layout of `~/.config/kxkbrc` (`[Layout]` `LayoutList`, `VariantList`, `Options`, `Model`; `plasma_keyboard_layout`) |
+| Hyprland | `keyboard.VirtualKeyboard`, a uinput keyboard named `tandem-keyboard` | Key codes, looked up in the layout from `hyprctl getoption input:kb_layout`, `kb_variant`, `kb_options` and `kb_model` (`hyprland_layout`, first layout only). Hyprland gives every keyboard that layout, so the codes come out as the intended characters |
+
+**The key-code lookup** (`keyboard.Keymap`). libxkbcommon, loaded through
+`ctypes` (every Wayland desktop has it), compiles a keymap from the same RMLVO
+names the compositor uses. For each key and shift level, the keysyms and the
+modifiers that reach that level are indexed, so a keysym maps to an evdev key
+code plus the modifier keys to hold: Shift for `A`, AltGr for `@` on a German
+layout. Only the first layout of a multi-layout setting is searched; a uinput
+keyboard types in whatever layout is active, and the first is the usual one.
+`KeyCodeTyper` presses the needed modifiers around the key, unless they are
+already held, and presses modifier keysyms the phone sends itself (Ctrl for
+Ctrl+C) as keys. A character the layout has no key for is skipped and logged
+once.
+
+The keyboard is created by `start_keyboard` only when touch input is on
+(`args.touch`): a computer that turned phone input off gets no typing either.
+A backend without `create_keyboard()`, or one whose `create_keyboard()` fails
+(no uinput access on Hyprland, no RemoteDesktop session on GNOME, fake input
+older than v4 or refused on KDE), logs *keyboard input: unavailable (…)*, and
+phones get `"keys": false`.
+
+### Stage 5c: pointer mode (phone to PC, `uinput_pointer.py`)
+
+Many Linux apps only drag with a mouse: Chrome's tabs, window title bars, text
+selection. They ignore touch drags, so for them the app has a *Pointer* mode
+that turns the phone into a mouse (gestures in [`ANDROID.md`](./ANDROID.md)).
+Unlike touch, it moves the computer's own mouse pointer; that is what it is for.
+
+```
+phone: MotionEvent ─▶ PointerGestures ─▶ PNTR (action, button, x, y, dx, dy)
+   ─TLS─▶ PhoneInput (pointer offered? phone authorized?) ─▶ InputWorker queue
+   ─▶ PointerRouter (buttons each phone holds) ─▶ backend pointer ─▶ compositor
+```
+
+`PointerRouter` (`phone_input.py`) moves the pointer to x/y for every move,
+down and up, then presses or releases the button (1 left `BTN_LEFT`, 2 right
+`BTN_RIGHT`, 3 middle `BTN_MIDDLE`), and scrolls for action 3. It remembers the
+buttons each phone holds and releases them when the phone disconnects, so a
+vanished phone can't leave a drag hanging. In `InputWorker`, a pointer move
+replaces a queued move of the same phone, like a finger's, while clicks and
+scrolls keep their order and a queued move is never moved after them.
+
+| Desktop | Device | Moves, buttons, scrolling |
+| --- | --- | --- |
+| Hyprland | `uinput_pointer.VirtualPointer`, an absolute uinput mouse named `tandem-pointer` | The device's range (0..65535) spans the whole layout: the box around every active monitor, which is what the compositor maps an unbound absolute pointer onto. A fraction of the phone's monitor becomes a position in that box (`hyprland.layout_geometry`, re-read at most twice a second). Buttons are `EV_KEY`; scrolling is `REL_WHEEL_HI_RES` / `REL_HWHEEL_HI_RES` in 1/120 notch units plus whole `REL_WHEEL` / `REL_HWHEEL` notches |
+| GNOME | `MutterPointer`, on the RemoteDesktop session | `NotifyPointerMotionAbsolute(stream, x, y)` on the virtual monitor's stream, `NotifyPointerButton`, and `NotifyPointerAxisDiscrete` in whole wheel steps (the call every Mutter version has; the remainder is carried over). Asynchronous like the touchscreen: while four calls are unanswered, moves are coalesced, and a held-back move is sent before a click so the click lands where it should |
+| KDE Plasma | `KwinPointer`, helper commands `pmove <fx> <fy>`, `button <code> <0\|1>`, `axis <0 vertical\|1 horizontal> <value>` | `org_kde_kwin_fake_input` v3: `pointer_motion_absolute` to the global position of that point of our output (tracked with `xdg-output`, like touches), `button`, and `axis` at 15 axis units per wheel notch |
+
+The pointer is created by `start_pointer` only when touch input is on
+(`args.touch`). A backend without `create_pointer()`, or one whose call fails
+(no uinput access on Hyprland, no RemoteDesktop session on GNOME, fake input
+older than v3 on KDE), logs *pointer input: unavailable (…)*, and phones get
+`"pointer": false`.
+
+**Who may type or point.** Typing and pointer mode follow the same rules as
+touch: only phones that passed the pairing handshake are connected at all, and
+a phone is authorized for input once `on_admitted` has run for it while it is
+still connected. A phone is authorized when any of touch, keys or pointer is
+available, and frames of a kind the computer did not offer are dropped.
+`--no-touch` (Touch input off in Configure) turns off all three.
+
+**Tested.** Typing and pointer mode were tested with a real phone on Hyprland.
+The GNOME and KDE keyboard and pointer paths are implemented but not yet tested
+on real hardware.
+
 ---
 
 ## 5. End-to-end latency budget
@@ -1018,11 +1200,14 @@ tui.py ──spawns──▶ tandemd.py --keep-output --banner-file … --parent
                        │                           (KDE: tandem-kwin-helper runs beside it)
                        ├─ supervise_capture()      parse the pipe; restart the encoder if it exits
                        ├─ start_touch()            touch surface (uinput / RemoteDesktop / KWin fake input) + InputWorker
+                       ├─ start_keyboard()         virtual keyboard (only with touch on)
+                       ├─ start_pointer()          virtual pointer for pointer mode (only with touch on)
                        ├─ accept thread            TCP [::]:5000, one I/O thread per phone
                        ├─ keyframe thread          request_keyframe() / encoder restart for stuck phones
                        ├─ control thread           SIGUSR1 → re-read banner → apply side/scale live
                        └─ on exit                  stop capture, close clients, close the input worker,
-                                                   remove the touch device, remove monitor
+                                                   remove the touch, keyboard and pointer devices
+                                                   (releasing held keys and buttons), remove monitor
                                                    (unless --keep-output on Hyprland; the
                                                    backend's honors_keep_output says so)
 ```
@@ -1135,6 +1320,8 @@ next to each rule explain the details.
 | The stream stops for good when the encoder exits | Capture ended the daemon | `supervise_capture` restarts the encoder with backoff, keeping the monitor and the phones |
 | Ctrl+C or a closed terminal leaves the virtual monitor behind | The daemon and encoder shared the terminal's process group, and cleanup ran only while the daemon was alive | The daemon runs in its own session, `--parent-pid` stops it with the TUI, and `needs_teardown` drives cleanup |
 | Touches stall the video | Touch injection ran on the phone's I/O thread, and Mutter's D-Bus replies blocked it | `InputWorker` on Hyprland and `_DBusWorker` on GNOME inject on their own threads |
+| Colours washed out or slightly shifted (issue #7) | Each part picked its own RGB to YUV matrix and range (BT.601 or BT.709, full or limited), and the phone guessed differently | One convention, BT.709 limited range, set at the conversion, written into the stream and given to the phone's decoder (`colour.py`, *Colour* in stage 1). An encoder that refuses the settings is retried without them |
+| A Ctrl or mouse button stays held after a phone vanishes | The phone disconnected between a press and its release | `KeyRouter` and `PointerRouter` remember what each phone holds and release it when the phone disconnects, letters before modifiers |
 | KDE: the phone's monitor cannot be created again after it was disabled (KWin 6.7) | KDE bug 527747: KWin remembers the disabled output's name and answers `Could not find output` | Retry as `Tandem-2` … `Tandem-5`, logging why; the error names `~/.config/kwinoutputconfig.json` if all five fail |
 | KDE: `applying config failed! Position of enabled output … is negative` | KWin refuses negative positions, so the phone cannot go left of or above a monitor at 0,0 | Shift the other outputs right or down in the same `kscreen-doctor` call, keeping their modes and arrangement, and shift them back when the phone returns or leaves |
 | KDE: KWin 6.7 gives the helper neither protocol | KWin 6.0 to 6.7 only grant them to a binary named in a desktop entry, and ignore an entry rewritten in place | Write the entry by temp file and rename, with an absolute `Exec=`, and retry once after 2 s |
@@ -1157,5 +1344,5 @@ next to each rule explain the details.
 - niri, once a niri release can create virtual outputs ([niri pull request
   #3800](https://github.com/niri-wm/niri/pull/3800)).
 - A Sway / wlroots backend.
-- Pen input with pressure and hover, and a keyboard on the phone.
+- Pen input with pressure and hover.
 - A latency overlay for tuning.

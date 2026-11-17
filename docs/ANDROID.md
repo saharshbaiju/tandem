@@ -1,8 +1,9 @@
 # Tandem Android app
 
 The phone is a thin client. It connects, decodes H.264 with the hardware
-decoder, puts each frame on screen as soon as it is ready, and sends touches back
-so the phone works as a touch monitor. This document covers the UI, the
+decoder, puts each frame on screen as soon as it is ready, and sends touches,
+key presses and pointer events back, so the phone works as a touch monitor with a
+keyboard. This document covers the UI, the
 components, how a frame moves through the app, and how to develop and debug it.
 The Linux side is described in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
@@ -115,8 +116,11 @@ over the desktop. The only chrome is a slim handle on the right edge. It fades
 after about 3 s, and a tap on the video brings it back. The handle opens a side
 sheet with the stream's details: the computer's name, the link (USB tethering,
 Wi-Fi or adb) and address, resolution, refresh rate, scale, position, quality,
-desktop (Hyprland or GNOME), and touch (on or off, and why). The sheet also has
-a **Disconnect** button. Back closes the sheet. While live, Back opens the sheet
+desktop (Hyprland, GNOME or KDE Plasma), and touch (on, off and why, or
+*Pointer*). Under the details are a **Touch / Pointer** switch (a finger icon
+and an arrow icon, see *Pointer mode* below), a **rotate** button (see
+*Portrait*), a **Keyboard** button (see *Typing*) and **Disconnect**. Back
+closes the sheet. While live, Back opens the sheet
 instead of disconnecting, so an accidental edge swipe never drops the stream.
 Disconnecting is a deliberate tap in the sheet. Back while connecting cancels the
 attempt. A status pill appears only while the picture may be frozen: *Connecting…*
@@ -131,13 +135,88 @@ new size arrives as a new SPS, and the decoder and the letterbox follow it as th
 do for any resolution change. See *Fit to device* in
 [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
+**Portrait** (`OrientationWatcher`, `MainActivity.setPortrait`). The app runs
+locked to landscape (`userLandscape` in the manifest), and while streaming it
+keeps the screen locked to whichever orientation was picked. When the phone is
+turned in the hand to the other orientation while live, a prompt appears at
+once, drawn upright the way the phone is now held: *Turn the monitor to
+portrait too?* (or *back to landscape?*) with a **Turn** button and a bar that
+runs down for 5 s, after which the prompt goes away. There is no *don't ask
+again*: the prompt only appears on a turn, and turning the phone back and
+turning it again asks again. **Turn** switches the app to portrait
+(`SCREEN_ORIENTATION_USER_PORTRAIT`) and at the same moment sends the turned
+size in a `SIZE` frame marked `"now": true`, so the computer resizes its
+virtual monitor to a tall one without waiting for the layout to settle. The
+**rotate** button in the side sheet does the same at any time, in either
+direction. No prompt is shown when the phone's auto-rotate is locked
+(`Settings.System.ACCELEROMETER_ROTATION` is 0), when the side sheet is open,
+or when the computer's banner says the monitor does not follow the phone
+(`"fit": false`, *Fit to device* off). In that last case the rotate button
+shows a toast instead: *To turn the monitor, switch on "Fit to device" in
+Tandem on the computer.* A daemon that sends no `fit` field (one older than
+0.9.0, where fitting is the default) is treated as fitting. Back on the connect screen the app is
+landscape again.
+
+**Typing** (`RemoteKeyboard`, `KeyboardTargetView`, `Keysyms`). The sheet's
+**Keyboard** button opens the phone's own on-screen keyboard (Gboard or any
+other). What it types goes to whichever window has focus on the computer. The
+keyboard types into an invisible view (`KeyboardTargetView`) that holds no
+text: every character becomes a key press sent to the computer. A **key bar**
+sits at the bottom of the screen, above the keyboard, with **Esc**, **Tab**,
+**Ctrl**, **Alt**, **Super**, **Del** and the four arrows, then a
+**minimise** button and a **close** button:
+
+- **Ctrl, Alt and Super are latched.** Tap Ctrl, then C, and the computer gets
+  Ctrl+C; the latch then lets go by itself. A latched key is drawn white until
+  it is used. Tapping a latched Ctrl or Alt again cancels it. Tapping a latched
+  Super again presses Super on its own (the app launcher or overview on most
+  desktops). Latches also apply to keys from the phone's keyboard.
+- **Minimise** hides the phone's keyboard and keeps the key bar; tapped again,
+  it brings the keyboard back. **Close** hides both and puts the picture back.
+- **Back** first hides the phone's keyboard (the keyboard itself handles that),
+  and a second Back closes the key bar.
+- **Docked or floating.** With a docked keyboard the picture shrinks to fit the
+  space above the key bar (it letterboxes, so the whole desktop stays in view).
+  A floating keyboard, such as Gboard's *Floating* mode, takes no height, so the
+  key bar stays at the bottom of the screen and the picture keeps nearly the
+  whole screen. The activity uses `adjustResize`, and the key bar follows the
+  IME insets.
+- **A hardware keyboard** plugged into the phone (USB or Bluetooth) types on the
+  computer whenever the stream is live and the sheet is closed, without opening
+  anything. Back, Home, volume, power and the assistant keys stay the phone's.
+
+The Keyboard button is dimmed, and shows a toast explaining why, when the
+computer did not offer typing (`INPT "keys": false`: touch input is off on the
+computer, the desktop could not give a keyboard, or the daemon predates 0.9.0).
+
+**Pointer mode** (`PointerGestures`). Many Linux apps only drag with a mouse:
+Chrome's tabs, window title bars, text selection. The sheet's **Touch /
+Pointer** switch picks how touches act. **Touch** (the finger icon, the
+default) sends them as a touchscreen, as described below. **Pointer** (the
+arrow icon) makes the phone a mouse whose pointer goes where the finger is:
+
+| Gesture | What the computer gets |
+| --- | --- |
+| Tap | Left click (two quick taps: a double click) |
+| Touch, then move | Left button pressed where the finger first touched, then a drag |
+| Touch and hold (500 ms) | Right click |
+| Two-finger tap | Right click |
+| Two-finger drag | Scroll; the content follows the fingers |
+
+Unlike touch, pointer mode moves the computer's own mouse pointer. The choice
+is saved (`input.pointer_mode`) and applies to every later session. When the
+computer does not offer it (`INPT "pointer": false`), choosing Pointer shows
+*Pointer mode needs Tandem 0.9 or newer on your computer* and the switch stays on
+Touch. The sheet's touch row says *Pointer* while it is on, with a short hint.
+
 **Touch.** When the computer has touch input on, every touch on the video goes
 to the computer (section 4.6). Tap, drag, scroll, long-press and pinch are handled
 by the desktop apps, as they would be on a real touchscreen. The computer's mouse
 pointer stays where it is. Touches on the black letterbox bars, the edge handle
 and the open sheet stay on the phone. When touch is off or unavailable on the
 computer, a tap on the video brings back the edge handle instead, and the sheet's
-*Touch* row explains why.
+*Touch* row explains why. In pointer mode, touches go to `PointerGestures`
+instead (see *Pointer mode* above).
 
 **Security.** The app connects only with the computer's pairing key. A QR code
 also pins the computer's TLS certificate ([`SECURITY.md`](./SECURITY.md)).
@@ -164,12 +243,20 @@ app/src/main/java/io/github/saharshbaiju/tandem/
   MainActivity.kt          UI state machine, scanner, transitions, side sheet, lifecycle
   StreamSession.kt         connect (raced on all hosts) → TLS + pairing → socket reader;
                            Feeder (access units, recovery), VideoDecoder (async MediaCodec),
-                           Sender (touches, KEYQ, PING), BacklogMeter
+                           Sender (touches, keys, pointer, KEYQ, PING, SIZE), BacklogMeter
   SecureChannel.kt         TLS with certificate pinning, pairing-key proofs (HMAC),
                            pairing-code format (mirrors linux/secure_link.py)
   FrameReader.kt           the daemon's framed protocol: NALU / ASX1 / PING / INPT
-  FrameWriter.kt           phone-to-computer frames: HELO / AUTH / TUCH / KEYQ / PING / SIZE
+  FrameWriter.kt           phone-to-computer frames: HELO / AUTH / TUCH / KEYS / PNTR /
+                           KEYQ / PING / SIZE
   TouchForwarder.kt        MotionEvent → TUCH (fractions of the video picture); TouchQueue
+  PointerGestures.kt       pointer mode: taps, drags, holds, two-finger scrolls → PNTR
+                           (PointerEvent)
+  RemoteKeyboard.kt        typing: phone keyboard, key bar latches, hardware keyboards;
+                           KeyboardTargetView (the invisible view the IME types into)
+  Keysyms.kt               X keysyms for characters and Android key codes, the KEYS body;
+                           TextToKeys (composing / autocorrect edits → key presses)
+  OrientationWatcher.kt    how far the phone is turned from the screen, for the portrait prompt
   ConnectTarget.kt         tandem:// QR and deep-link parsing, manual entry, persistence
   UpdateCheck.kt           "a newer Tandem is out": latest GitHub release, once a day
   RippleRevealLayout.kt    water ripple and reveal (AGSL on Android 13+, canvas fallback)
@@ -178,7 +265,8 @@ app/src/main/java/io/github/saharshbaiju/tandem/
   AsciiType.kt             shared by both: density ramp, letterforms, word → character cells
   AspectRatioSurfaceView.kt  letterboxes the video to the stream's aspect ratio, clear of the cutout
 app/src/main/res/
-  layout/activity_main.xml connect screen, (re)connecting pill, edge handle, side sheet, splash
+  layout/activity_main.xml connect screen, (re)connecting pill, edge handle, side sheet,
+                           rotate prompt, key bar, splash
   values/themes.xml        Material 3 dark theme, OLED black (palette in values/colors.xml)
   drawable/ic_*.xml        Material icons
   font/tandem_*.ttf        subset of Geist Mono Bold and Archivo Black for the ASCII views (see android/fonts/)
@@ -241,8 +329,8 @@ The activity moves through `IDLE → CONNECTING → LIVE ⇄ RECONNECTING → ID
   judder, and touches are sampled at the panel's full rate. The request is
   cleared when idle. `Surface.setFrameRate` is not used: it invites the system to
   drop a 120 Hz panel to 60 Hz, which doubles the vsync wait.
-- **Back gesture** (Android 10 and later). While live with touch on and the
-  sheet closed, a 32 × 200 dp strip in the middle of each side edge is excluded
+- **Back gesture** (Android 10 and later). While live with touch on (or pointer
+  mode on and offered by the computer) and the sheet closed, a 32 × 200 dp strip in the middle of each side edge is excluded
   from the system back gesture, so horizontal drags near the edge reach the
   computer.
 - **Display cutout.** The cutout insets are passed to the video view, which
@@ -252,6 +340,18 @@ The activity moves through `IDLE → CONNECTING → LIVE ⇄ RECONNECTING → ID
   explains why.
 - `uiMode` is listed in `configChanges`, so a system light or dark switch cannot
   restart the activity and end a live stream. The app is always black anyway.
+  `orientation` and `screenSize` are listed too, so turning the monitor to
+  portrait relays out the views without restarting the activity or the stream.
+- **Orientation watching.** `OrientationWatcher` (an `OrientationEventListener`
+  plus the display's rotation) runs only while live and while the window has
+  focus. It reports the phone's turn from the screen as drawn: 0, 90, 180 or
+  270 degrees. A turn counts once the phone is within 30 degrees of it, so a
+  phone held near 45 degrees does not flicker between two answers. 90 and 270
+  show the portrait prompt; 0 hides it and lets the next turn ask again.
+- **Input state.** `setInputState` takes the current session's `INPT`. If
+  `keys` is false the key bar closes and any latches are dropped; if `pointer`
+  is false a drag in progress is let go. Leaving LIVE closes the keyboard, and
+  reaching IDLE turns the app back to landscape.
 
 ### 4.2 `StreamSession`: the decode engine
 
@@ -262,7 +362,7 @@ A session runs on four threads, so that no stage waits on another:
 | Socket reader (`StreamSession.run`) | `DISPLAY` | Connects, runs the handshake, then only reads frames. It never waits on the decoder |
 | `Feeder` (`stream-decode`) | `URGENT_DISPLAY` | Owns the codec. Builds access units, feeds the decoder, recovers locally |
 | `VideoDecoder` callbacks (`stream-decoder`, a `HandlerThread`) | `URGENT_DISPLAY` | `MediaCodec` in asynchronous mode. Each decoded frame is released to the Surface at once |
-| `Sender` | | Writes touches, `KEYQ`, `PING` and `SIZE` in batches |
+| `Sender` | | Writes touches, `KEYS`, `PNTR`, `KEYQ`, `PING` and `SIZE` in batches |
 
 The Sender is started before the Feeder, so a keyframe request the Feeder makes
 straight away is not lost.
@@ -302,8 +402,12 @@ activity as `onStopped(session, reason, final, retryAfterMs)`.
 **Read frames** with a 4 s socket timeout. The daemon sends `PING` every
 second, and the Sender sends one after 1 s with nothing else to send, which
 turns on the daemon's read timeout for this phone. `ASX1` becomes a
-`ServerConfig`, which the side sheet shows. `INPT {"touch": …, "reason": …}`
-goes to `onInputState`, which sets touch on or off. `NALU` goes to the Feeder's
+`ServerConfig`, which the side sheet shows; its `fit` field (`fitsDevice`,
+null from daemons that don't send it) says whether the monitor follows the
+phone's screen. `INPT {"touch": …, "reason": …, "keys": …, "pointer": …}` becomes
+an `InputState` and goes to `onInputState`, which sets touch on or off and
+enables or disables typing and pointer mode. A daemon before 0.9.0 sends no
+`keys` or `pointer`, which reads as false. `NALU` goes to the Feeder's
 queue.
 
 **Access units, not NAL units** (`AccessUnitAssembler`, `H264`). Hardware
@@ -334,7 +438,14 @@ then *plain*, then the next candidate is tried. Both set `csd-0` and `csd-1` to
 SPS and PPS, `KEY_LOW_LATENCY` (Android 11 and later) and `KEY_PRIORITY` 0
 (realtime). Tuned adds `KEY_OPERATING_RATE` and vendor low-latency keys. On
 Android 12 and later, only keys the codec lists in `supportedVendorParameters`
-are used. On older versions they are chosen by the codec name's vendor (qti,
+are used. Tuned also sets the colour keys `KEY_COLOR_STANDARD` =
+`COLOR_STANDARD_BT709`, `KEY_COLOR_RANGE` = `COLOR_RANGE_LIMITED` and
+`KEY_COLOR_TRANSFER` = `COLOR_TRANSFER_SDR_VIDEO`: Tandem streams are BT.709,
+limited range (`linux/colour.py`). The computer labels its stream the same
+way, except with openh264, which writes no colour information; the format
+then decides, instead of each phone's own guess, which differs between makers
+(GitHub issue #7). A label in the stream still wins, so streams from older
+computers look as before. On older versions they are chosen by the codec name's vendor (qti,
 exynos, amlogic, hisi). Tuned also sets `KEY_MAX_INPUT_SIZE` to the largest of
 width × height × 3/2, the largest access unit seen so far, and 1 MiB, capped at
 24 MiB. Input buffers sized for a guessed 1080p resolution would silently drop
@@ -406,7 +517,20 @@ newer daemons stay compatible. `FrameWriter` is the mirror image, for `HELO`,
 (`TYPE_PING`, empty). It assembles each frame and writes it in one synchronised
 call, so two frames can never interleave on the socket. `sendAll` writes
 several frames with one write and one flush. Older daemons ignore `KEYQ` and the
-phone's `PING`.
+phone's `PING`. The other phone-to-computer types are `KEYS` (`TYPE_KEY`) and
+`PNTR` (`TYPE_POINTER`), sent only when the computer's `INPT` offered them,
+and `SIZE` (`TYPE_SCREEN_SIZE`):
+
+| Type | Body | Meaning |
+| --- | --- | --- |
+| `KEYS` | 5 bytes, big-endian: keysym u32, pressed u8 | One key going down (1) or up (0), as an X keysym (`Keysyms.encode`). A tap is a press and a release; key repeat is the computer's job |
+| `PNTR` | 10 bytes, big-endian: action u8, button u8, x u16, y u16, dx i16, dy i16 | Pointer mode (`PointerEvent.encode`). Action 0 move, 1 button down, 2 button up, 3 scroll. Button 1 left, 2 right, 3 middle (the app sends only left and right). x/y are fractions of the picture scaled to 0..65535, as in `TUCH`. dx/dy are the scroll in 1/120 of a wheel notch, positive right / down |
+| `SIZE` | JSON `{"width": W, "height": H}`, plus `"now": true` for a deliberate turn | This screen's size as held. `now` asks the computer to apply it at once rather than after its 0.6 s settle |
+
+In the Sender, `KEYS` and `PNTR` share one ordered queue (at most 256 frames;
+on overflow the oldest goes), so a key never overtakes a click or another key.
+A pointer `MOVE` replaces a still-unsent `MOVE` at the end of that queue, like a
+touch's move.
 
 ### 4.4 `ConnectTarget`
 
@@ -486,7 +610,64 @@ computer's virtual monitor. Touches on the letterbox bars never reach the view.
 Gestures such as long-press, scroll and pinch are interpreted by the desktop apps.
 
 Touch state resets to *off* whenever a session starts or stops. It turns on only
-from the current session's `INPT`, so a stale answer cannot switch it on.
+from the current session's `INPT`, so a stale answer cannot switch it on. The
+same holds for typing and pointer mode.
+
+### 4.7 Typing (`RemoteKeyboard`, `KeyboardTargetView`, `Keysyms`, `TextToKeys`)
+
+Keys travel as **X keysyms**: what the user meant (`a`, `É`, Return,
+Control_L), never a key position. The phone can't know the computer's keyboard
+layout, so the computer finds the key in its own layout
+([`ARCHITECTURE.md`](./ARCHITECTURE.md)). `Keysyms.forCodePoint` maps a
+character to its keysym: Latin-1 characters are their own keysym, everything
+else is `0x01000000 | code point`, and newline, tab and backspace become
+Return, Tab and BackSpace. `Keysyms.forKeyCode` maps non-character Android key
+codes (arrows, Home/End, Page Up/Down, Insert, Delete, modifiers, Caps Lock,
+F1 to F12, space) for hardware keyboards.
+
+- **The on-screen keyboard** types into `KeyboardTargetView`, a focusable view
+  with an `InputConnection` and no text. The editor info asks for no
+  suggestions, no fullscreen (extract) mode in landscape, and Enter as a plain
+  key. Keyboards don't only type characters: with swipe typing or autocorrect
+  they show a word while composing it and then change it. `TextToKeys` keeps
+  what it has typed for the current word and, on each change, presses
+  Backspace for what no longer matches and types the rest, so autocorrect
+  works on the computer too. The field is always empty apart from the word
+  being composed, so Backspace on it reaches the app as a key event, which is
+  what most keyboards send then.
+- **Hardware keyboards.** `MainActivity.dispatchKeyEvent` passes key events to
+  `RemoteKeyboard.onKeyEvent` while live, with typing offered and the sheet
+  closed. Press and release are sent as they happen (so Shift and Ctrl can be
+  held), repeats are dropped (the computer repeats a held key itself), and
+  phone keys (Back, Home, App switch, volume, power, camera, search, assistant)
+  are never sent.
+- **Latches.** `toggleLatch` holds Ctrl, Alt or Super for the next key: that
+  key's press is wrapped in the latched modifiers' press and release.
+- **Letting go.** `releaseAll` releases anything still held when the keyboard
+  closes or the link drops. The computer also releases every key a phone held
+  when it disconnects.
+
+### 4.8 Pointer mode (`PointerGestures`)
+
+`forwardTouch` gives touches to `PointerGestures.onTouch` when pointer mode is
+chosen and the computer's `INPT` said `"pointer": true`; otherwise to
+`TouchForwarder` when touch is on. A touch first only moves the pointer there
+(`MOVE`) and stays *pending* until it is clear what it is, so a tap never
+starts a small accidental drag:
+
+- moved more than 8 dp: `DOWN` left at the first touch point, then `MOVE`s
+  (a drag);
+- lifted: `DOWN` and `UP` left (a click);
+- held for 500 ms: `DOWN` and `UP` right (a right click); moving afterwards only
+  moves the pointer;
+- a second finger: two-finger mode. Lifting without moving is a right click;
+  moving scrolls by the fingers' centroid, 40 dp per wheel notch, sent as
+  `SCROLL` in 1/120 notch steps (fingers moving up scroll down, as on a
+  touchscreen).
+
+`cancel()` lets go of a drag when the mode is switched, the stream stops or the
+computer withdraws pointer mode. The computer also releases held buttons when a
+phone disconnects.
 
 ---
 
@@ -557,13 +738,17 @@ the protocol, heartbeats and GOP replay. It does this without creating a monitor
 ```bash
 python3 linux/testsrc.py --width 2400 --height 1080 --fps 60   # port 5000
 python3 linux/testsrc.py --static     # 2 s of video, then silence: tests GOP replay
-python3 linux/testsrc.py --log-touch  # accept touches from paired phones, print them
+python3 linux/testsrc.py --log-touch  # accept touches, keys and pointer events, print them
 ```
 
 Phones pair with it exactly as they do with the real daemon. It prints the QR link
 and the pairing code. With `--log-touch`, every touch is printed as a fraction of
-the picture (for example, `touch down  slot 0  x=0.500 y=0.500`). This lets you
-test the touch path with `adb shell input tap` or `swipe` on the emulator.
+the picture (for example, `touch down  slot 0  x=0.500 y=0.500`), every key with
+its keysym and character (`key down  0x61 'a'`), and every pointer-mode event
+(`pointer move  x=0.500 y=0.500`, `pointer left down`, `pointer scroll dx=0
+dy=120`). The daemon offers typing and pointer mode in that case, so the
+Keyboard button and the Pointer switch work. This lets you test the input
+paths with `adb shell input tap`, `swipe` or `text` on the emulator.
 
 The Android emulator reaches the PC at `10.0.2.2`, so a printed link with
 `h=10.0.2.2` connects the emulator to the test daemon. A Google Play system image
@@ -596,9 +781,12 @@ video still goes straight to the PC.
 
 - **TCP only.** This works well over USB. Lossy Wi-Fi can cause brief freezes,
   because of head-of-line blocking. RTP over UDP with FEC is planned.
-- **Touch only.** There is no pen pressure, no hover, and no on-screen keyboard for
-  typing on the computer yet. Desktop apps that ignore touch events also ignore the
-  phone.
+- **No pen.** There is no pen pressure and no hover. Desktop apps that ignore
+  touch events ignore touch mode; pointer mode works with them, as a mouse.
+- **Keys are keysyms.** On Hyprland, and on KDE before Plasma 6.2, the computer
+  types a character only if its own keyboard layout has a key for it; others
+  are skipped. Key combinations the phone's system keeps (Back, Home) never
+  reach the computer.
 - **H.264 only.** HEVC would reduce the bitrate. A banner announcing another codec
   ends the session with a final, clear message.
 - **Multi-slice streams wait up to 8 ms** for the next NAL, because the daemon

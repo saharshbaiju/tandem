@@ -41,6 +41,8 @@ import sys
 import threading
 import time
 
+import colour
+
 # Hardware encoders first; the VA plugins only register an element when the
 # driver can really encode H.264, so "element exists" is a usable probe.
 ENCODERS = ("vah264enc", "vah264lpenc", "vaapih264enc", "x264enc", "openh264enc")
@@ -302,7 +304,7 @@ def videoconvert():
     return _with_props("videoconvert", n_threads=min(4, os.cpu_count() or 1))
 
 
-def encoder_chain(enc, kbps, gop, fps=60):
+def encoder_chain(enc, kbps, gop, fps=60, pin_colour=True):
     """GStreamer elements from raw frames to H.264 for `enc`.
 
     Every chain is single-slice and B-frame free: the phone's hardware decoder
@@ -311,24 +313,31 @@ def encoder_chain(enc, kbps, gop, fps=60):
     VBV_FRAMES frames where the element exposes one. The encoder input is
     always pinned to a 4:2:0 format (NV12 / I420): left to negotiate, x264
     would pick 4:4:4 from an RGB source, which phones can't decode.
+
+    pin_colour: also pin the conversion to BT.709 limited range, which the
+    encoder then writes into the stream (colour.py). Off only for the retry
+    of an encoder that wouldn't start with it.
     """
+    def raw(caps):
+        return colour.gst_caps(caps) if pin_colour else caps
+
     if enc in ("vah264enc", "vah264lpenc"):
-        conv = ("vapostproc ! video/x-raw(memory:VAMemory),format=NV12"
+        conv = ("vapostproc ! " + raw("video/x-raw(memory:VAMemory),format=NV12")
                 if gst_inspect("vapostproc")
-                else f"{videoconvert()} ! video/x-raw,format=NV12")
+                else f"{videoconvert()} ! " + raw("video/x-raw,format=NV12"))
         return f"{conv} ! " + _with_props(
             enc, f"rate-control={_bitrate_mode(enc)}", f"bitrate={kbps}",
             f"key-int-max={gop}", "b-frames=0", "target-usage=7",
             cpb_size=vbv_kbits(kbps, fps))
     if enc == "vaapih264enc":
-        return (f"{videoconvert()} ! video/x-raw,format=NV12 ! " + _with_props(
+        return (f"{videoconvert()} ! {raw('video/x-raw,format=NV12')} ! " + _with_props(
             enc, f"rate-control={_bitrate_mode(enc)}", f"bitrate={kbps}",
             f"keyframe-period={gop}", "max-bframes=0",
             cpb_length=vbv_ms(fps)))
     if enc == "x264enc":
         # sliced-threads=false keeps one slice per frame; 2 frame threads cost
         # ~1 frame of latency but keep 1080p60 realtime on modest CPUs.
-        return (f"{videoconvert()} ! video/x-raw,format=I420 ! " + _with_props(
+        return (f"{videoconvert()} ! {raw('video/x-raw,format=I420')} ! " + _with_props(
             enc, "tune=zerolatency", "speed-preset=ultrafast",
             f"bitrate={kbps}", f"key-int-max={gop}", "bframes=0", "threads=2",
             "sliced-threads=false", "byte-stream=true",
@@ -336,7 +345,7 @@ def encoder_chain(enc, kbps, gop, fps=60):
     if enc == "openh264enc":
         # openh264 has no VBV-size property; its bitrate mode is already
         # frame-level and skips frames rather than buffering them.
-        return (f"{videoconvert()} ! video/x-raw,format=I420 ! openh264enc "
+        return (f"{videoconvert()} ! {raw('video/x-raw,format=I420')} ! openh264enc "
                 f"usage-type=screen rate-control=bitrate bitrate={kbps * 1000} "
                 f"gop-size={gop} complexity=low")
     raise ValueError(f"unsupported encoder {enc}")
@@ -366,7 +375,8 @@ def gst_launch(desc):
     return ["gst-launch-1.0", "-q"] + desc.split()
 
 
-def build_pipeline(node, width, height, kbps, gop, enc, fd=3, fps=60):
+def build_pipeline(node, width, height, kbps, gop, enc, fd=3, fps=60,
+                   pin_colour=True):
     """gst-launch argv: PipeWire node -> H.264 Annex-B access units on `fd`.
 
     The width/height caps decide the frame size the encoder sees. For
@@ -375,7 +385,7 @@ def build_pipeline(node, width, height, kbps, gop, enc, fd=3, fps=60):
     """
     desc = (f"{pipewiresrc(node)} ! video/x-raw,width={width},height={height} "
             f"! {LEAKY_QUEUE} "
-            f"! {encoder_chain(enc, kbps, gop, fps)} "
+            f"! {encoder_chain(enc, kbps, gop, fps, pin_colour)} "
             f"! h264parse config-interval=-1 "
             f"! video/x-h264,stream-format=byte-stream,alignment=au "
             f"! fdsink fd={fd} sync=false")
@@ -445,7 +455,7 @@ def _encoders_for(args, backend_label):
     return candidates
 
 
-def start_encoder(node, args, encoder):
+def start_encoder(node, args, encoder, pin_colour=True):
     """Encode PipeWire `node` with `encoder` at the size, bitrate, GOP and
     frame rate in tandemd's `args`; returns (proc, stream) as
     spawn_pipeline() does, after logging the command line.
@@ -459,7 +469,8 @@ def start_encoder(node, args, encoder):
     def pipeline_writing_to(fd):
         command = build_pipeline(node, args.width, args.height,
                                  bitrate_kbps(args.bitrate), args.gop,
-                                 encoder, fd=fd, fps=fps)
+                                 encoder, fd=fd, fps=fps,
+                                 pin_colour=pin_colour)
         log(f"encoder {encoder}; capture cmd: " + " ".join(command))
         return command
 
@@ -504,18 +515,26 @@ class EncoderSelector:
         self.backend_label = backend_label
         self.working = None       # the encoder that started last
         self.failed = set()       # encoders that failed in this session
-        self._last = None         # (proc, start time) of the last start
+        self.plain_colour = set() # encoders that failed with the colour pin
+        self._last = None         # (proc, start time, pinned) of the last start
 
     def _note_how_the_last_one_ended(self):
         """Mark the last started encoder failed if it ended with an error
         soon after starting. Stopped by us (stop_capture) is not a failure."""
         if self._last is None:
             return
-        proc, started = self._last
+        proc, started, pinned = self._last
         self._last = None
         if (ended_with_an_error(proc)
                 and time.monotonic() - started < QUICK_EXIT
                 and self.working is not None):
+            if pinned:
+                # Before giving up on it: the same encoder without the colour
+                # pin, so a GStreamer that rejects it keeps its encoder.
+                log(f"encoder {self.working} failed right after starting with "
+                    "the BT.709 colour setting; retrying it without")
+                self.plain_colour.add(self.working)
+                return
             log(f"encoder {self.working} failed right after starting (exit "
                 f"code {proc.returncode}); trying the next one")
             self.failed.add(self.working)
@@ -540,7 +559,9 @@ class EncoderSelector:
         for encoder in self.candidates():
             tried.append(encoder)
             try:
-                proc, stream = start_encoder(node, self.args, encoder)
+                pinned = encoder not in self.plain_colour
+                proc, stream = start_encoder(node, self.args, encoder,
+                                             pin_colour=pinned)
             except EncoderUnusable as e:
                 log(f"encoder {encoder} can't be used: {e}; trying the next one")
                 self.failed.add(encoder)
@@ -548,7 +569,7 @@ class EncoderSelector:
             if encoder != tried[0]:
                 log(f"using encoder {encoder}")
             self.working = encoder
-            self._last = (proc, time.monotonic())
+            self._last = (proc, time.monotonic(), pinned)
             return proc, stream
         raise RuntimeError("no H.264 encoder can be used on this system "
                            f"(tried: {', '.join(tried)}); see the encoder "

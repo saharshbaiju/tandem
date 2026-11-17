@@ -29,6 +29,8 @@ import os
 import sys
 import time
 
+import colour
+
 from . import gnome   # shared GStreamer probing helpers
 
 try:
@@ -173,7 +175,7 @@ def close_leftover_session():
         close_session(path)
 
 
-def build_pipeline(node, kbps, gop, fd, fps=60):
+def build_pipeline(node, kbps, gop, fd, fps=60, pin_colour=True):
     """gst-launch argv: DMA-BUF frames of `node` -> NVENC -> Annex-B on fd.
 
     Every property beyond the basics is probed, so an older nvcodec plugin
@@ -194,11 +196,16 @@ def build_pipeline(node, kbps, gop, fd, fps=60):
         enc += " preset=p1 tune=ultra-low-latency"     # GStreamer 1.24+
     else:
         enc += " preset=low-latency-hp"
+    # BT.709 limited, written into the stream (colour.py); pin_colour=False
+    # is the retry for a GStreamer whose glcolorconvert won't take it.
+    nv12 = "video/x-raw(memory:GLMemory),format=NV12"
+    if pin_colour:
+        nv12 = colour.gst_caps(nv12)
     desc = (f"{gnome.pipewiresrc(node)} "
             f"! video/x-raw(memory:DMABuf) "
             f"! {gnome.LEAKY_QUEUE} "
             f"! glupload ! glcolorconvert "
-            f"! video/x-raw(memory:GLMemory),format=NV12 "
+            f"! {nv12} "
             f"! {enc} "
             f"! h264parse config-interval=-1 "
             f"! video/x-h264,stream-format=byte-stream,alignment=au "

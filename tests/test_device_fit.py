@@ -56,6 +56,12 @@ class FitSizeTest(unittest.TestCase):
         self.assertLessEqual(w * h, device_fit.MAX_AREA)
         self.assertEqual(w, h)
 
+    def test_a_phone_turned_to_portrait_gets_a_tall_monitor(self):
+        self.assertEqual(device_fit.fit_size(1080, 2400), (1080, 2400))
+        w, h = device_fit.fit_size(2160, 7680)
+        self.assertEqual(max(w, h), h)
+        self.assertLessEqual(h, device_fit.MAX_LONG_SIDE)
+
     def test_too_small_is_none(self):
         self.assertIsNone(device_fit.fit_size(300, 200))
 
@@ -120,6 +126,19 @@ class DeviceFitTest(unittest.TestCase):
         self.assertIsNone(self.fit.take_wanted())
         self.assertIn("more than one phone is connected", self.logged[0])
 
+    def test_a_turn_is_applied_without_the_settle_wait(self):
+        slow = device_fit.DeviceFit(lambda: self.size, self.restarts.release,
+                                    self.logged.append, settle=5.0)
+        self.addCleanup(slow.stop)
+        slow.on_size("phone", 1080, 2400, True, now=True)
+        self.assertTrue(self.restarted(timeout=1.0))
+        self.assertEqual(slow.take_wanted(), (1080, 2400))
+
+    def test_the_now_flag(self):
+        self.assertTrue(device_fit.wants_now(b'{"width":1,"height":2,"now":true}'))
+        for body in (b'{"width":1,"height":2}', b'{"now":1}', b"[]", b"junk"):
+            self.assertFalse(device_fit.wants_now(body), body)
+
     def test_a_bogus_size_is_ignored(self):
         self.fit.on_size("phone", 100, 50, True)
         self.assertFalse(self.restarted(timeout=0.2))
@@ -132,7 +151,8 @@ class SizeFrameTest(unittest.TestCase):
     def setUp(self):
         self.b = tandemd.Broadcaster(b"{}")
         self.reports = []
-        self.b.on_device_size = lambda *report: self.reports.append(report)
+        self.b.on_device_size = (lambda *report, now=False:
+                                 self.reports.append(report + (now,)))
         self.phone = types.SimpleNamespace(addr=("10.0.0.5", 4000))
 
     def send(self, body):
@@ -141,12 +161,17 @@ class SizeFrameTest(unittest.TestCase):
     def test_the_only_phone(self):
         self.b._clients = [self.phone]
         self.send(b'{"width":2400,"height":1080}')
-        self.assertEqual(self.reports, [("10.0.0.5", 2400, 1080, True)])
+        self.assertEqual(self.reports, [("10.0.0.5", 2400, 1080, True, False)])
 
     def test_one_of_two_phones(self):
         self.b._clients = [self.phone, object()]
         self.send(b'{"width":2400,"height":1080}')
-        self.assertEqual(self.reports, [("10.0.0.5", 2400, 1080, False)])
+        self.assertEqual(self.reports, [("10.0.0.5", 2400, 1080, False, False)])
+
+    def test_a_turn_says_now(self):
+        self.b._clients = [self.phone]
+        self.send(b'{"width":1080,"height":2400,"now":true}')
+        self.assertEqual(self.reports, [("10.0.0.5", 1080, 2400, True, True)])
 
     def test_garbage_is_logged_not_passed_on(self):
         self.b._clients = [self.phone]
@@ -349,6 +374,16 @@ class FitSettingTest(unittest.TestCase):
         self.assertNotIn("--fit-device", cfg.tandemd_args())
         tui._apply_resolution(cfg, 0)
         self.assertTrue(cfg.fit_device)
+
+    def test_the_banner_says_so(self):
+        # the app offers to turn the monitor to portrait only when it fits
+        args = types.SimpleNamespace(
+            side="right", width=2400, height=1080, fps=60, scale=1.0,
+            quality="balanced", bitrate="12M", codec="h264", gop=60,
+            fit_device=True, banner_file=None)
+        self.assertTrue(json.loads(tandemd.load_banner_payload(args))["fit"])
+        args.fit_device = False
+        self.assertFalse(json.loads(tandemd.load_banner_payload(args))["fit"])
 
     def test_changing_it_restarts_the_stream(self):
         self.assertIn("fit_device", tui.RESTART_KEYS)

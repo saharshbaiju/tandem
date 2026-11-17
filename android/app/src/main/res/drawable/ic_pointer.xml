@@ -1,0 +1,15 @@
+<!-- A mouse pointer, drawn to match Material's rounded icons (Material has
+     no plain arrow pointer in this set). The stroke rounds its corners. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+  <path
+      android:fillColor="@android:color/white"
+      android:strokeColor="@android:color/white"
+      android:strokeWidth="1.6"
+      android:strokeLineJoin="round"
+      android:pathData="M6.5,3.5L6.5,18.2L10.3,14.6L12.9,20.4L15.2,19.4L12.6,13.6L17.8,13.6Z"/>
+</vector>

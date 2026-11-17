@@ -458,6 +458,146 @@ class MutterTouchscreen:
             self._send_motion(slot, px, py)
 
 
+class MutterPointer:
+    """Pointer mode through the RemoteDesktop session: absolute motion on
+    our stream, buttons, and scrolling as whole wheel steps (the discrete
+    axis call every Mutter version has). Asynchronous like the touchscreen;
+    motion is coalesced while calls are unanswered."""
+
+    MAX_IN_FLIGHT = 4
+    NOTCH = 120                       # PNTR scroll units per wheel step
+
+    def __init__(self, bus, rd_session, stream_path, width, height):
+        self.description = "Mutter RemoteDesktop pointer on the virtual monitor"
+        self._bus = bus
+        self._session = rd_session
+        self._stream = stream_path
+        self._width = width
+        self._height = height
+        self._buttons = set()
+        self._wheel_rest = [0, 0]         # vertical, horizontal
+        self._warned = False
+        self._worker = _DBusWorker("tandem-mutter-pointer")
+        self._in_flight = 0               # worker-thread state
+        self._pending_motion = None
+
+    def move(self, x, y):
+        px = min(max(x, 0.0), 1.0) * (self._width - 1)
+        py = min(max(y, 0.0), 1.0) * (self._height - 1)
+        self._worker.run(lambda: self._send_motion(px, py))
+
+    def button(self, code, pressed):
+        if pressed:
+            self._buttons.add(code)
+        elif code in self._buttons:
+            self._buttons.discard(code)
+        else:
+            return
+        self._worker.run(lambda: self._send_now(
+            "NotifyPointerButton", "(ib)", (code, pressed)))
+
+    def scroll(self, dx, dy):
+        for axis, value in ((0, dy), (1, dx)):
+            if not value:
+                continue
+            self._wheel_rest[axis] += value
+            steps = int(self._wheel_rest[axis] / self.NOTCH)
+            if steps:
+                self._wheel_rest[axis] -= steps * self.NOTCH
+                self._worker.run(lambda a=axis, s=steps: self._send_now(
+                    "NotifyPointerAxisDiscrete", "(ui)", (a, s)))
+
+    def release_all(self):
+        for code in sorted(self._buttons):
+            self.button(code, False)
+
+    def close(self):
+        self.release_all()
+        self._worker.drain(1.0)
+        self._worker.stop()
+
+    # -- worker thread ------------------------------------------------------ #
+
+    def _send_motion(self, px, py):
+        if self._in_flight >= self.MAX_IN_FLIGHT:
+            self._pending_motion = (px, py)
+            return
+        self._pending_motion = None
+        self._call("NotifyPointerMotionAbsolute", "(sdd)",
+                   (self._stream, px, py))
+
+    def _send_now(self, method, signature, values):
+        held, self._pending_motion = self._pending_motion, None
+        if held:                           # the click lands where it should
+            self._call("NotifyPointerMotionAbsolute", "(sdd)",
+                       (self._stream, *held))
+        self._call(method, signature, values)
+
+    def _call(self, method, signature, values):
+        self._bus.call(RD_BUS, self._session, RD_SESSION_IFACE, method,
+                       GLib.Variant(signature, values), None,
+                       Gio.DBusCallFlags.NO_AUTO_START, 1000, None,
+                       self._on_reply, None)
+        self._in_flight += 1
+
+    def _on_reply(self, bus, result, *_user_data):
+        self._in_flight -= 1
+        try:
+            bus.call_finish(result)
+        except Exception as e:
+            if not self._warned:
+                self._warned = True
+                log(f"warning: pointer event rejected by Mutter ({e})")
+        if self._pending_motion and self._in_flight < self.MAX_IN_FLIGHT:
+            self._send_motion(*self._pending_motion)
+
+
+class MutterKeyboard:
+    """Typing through the same RemoteDesktop session as touch.
+
+    Mutter takes keysyms (NotifyKeyboardKeysym) and finds the key in the
+    user's layout itself, so any character the phone sends can be typed.
+    Calls go out asynchronously, in order, from their own D-Bus worker.
+    """
+
+    def __init__(self, bus, rd_session):
+        self.description = "Mutter RemoteDesktop keyboard"
+        self._bus = bus
+        self._session = rd_session
+        self._down = set()
+        self._warned = False
+        self._worker = _DBusWorker("tandem-mutter-keys")
+
+    def key(self, keysym, pressed):
+        if pressed:
+            self._down.add(keysym)
+        elif keysym in self._down:
+            self._down.discard(keysym)
+        else:
+            return
+        self._worker.run(lambda: self._bus.call(
+            RD_BUS, self._session, RD_SESSION_IFACE, "NotifyKeyboardKeysym",
+            GLib.Variant("(ub)", (keysym, pressed)), None,
+            Gio.DBusCallFlags.NO_AUTO_START, 1000, None, self._on_reply, None))
+
+    def release_all(self):
+        for keysym in sorted(self._down):
+            self.key(keysym, False)
+
+    def close(self):
+        self.release_all()
+        self._worker.drain(1.0)
+        self._worker.stop()
+
+    def _on_reply(self, bus, result, *_user_data):
+        try:
+            bus.call_finish(result)
+        except Exception as e:
+            if not self._warned:
+                self._warned = True
+                log(f"warning: key press rejected by Mutter ({e})")
+
+
 # --------------------------------------------------------------------------- #
 # backend
 # --------------------------------------------------------------------------- #
@@ -585,6 +725,19 @@ class GnomeBackend:
         if self._touch:
             self._touch.retarget(self.remote_desktop, self.stream,
                                  width, height)
+
+    def create_pointer(self):
+        if not self.remote_desktop:
+            raise RuntimeError(self.touch_problem
+                               or "GNOME gave no remote-desktop session")
+        return MutterPointer(self.bus, self.remote_desktop, self.stream,
+                             self.a.width, self.a.height)
+
+    def create_keyboard(self):
+        if not self.remote_desktop:
+            raise RuntimeError(self.touch_problem
+                               or "GNOME gave no remote-desktop session")
+        return MutterKeyboard(self.bus, self.remote_desktop)
 
     def start_capture(self):
         """Start the encoder on our PipeWire node; returns its H.264 stream.
