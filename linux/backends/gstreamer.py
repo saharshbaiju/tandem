@@ -19,8 +19,9 @@ finding its node, placing it) stays in each backend.
 
 Encoder rules every chain follows: one slice per frame and no B-frames (the
 phone's hardware decoder wants exactly one complete access unit per input
-buffer), the fastest preset with no lookahead, and a rate-control buffer of
-VBV_FRAMES frames so a keyframe can't grow big enough to stall the Wi-Fi link.
+buffer), the fastest preset with no lookahead, no frame held back inside the
+encoder, and a rate-control buffer of VBV_FRAMES frames so a keyframe can't
+grow big enough to stall the Wi-Fi link.
 
 Every encoder setting is checked against what the installed element accepts
 before gst-launch sees it (setting_value): a VA driver lists only the rate
@@ -304,12 +305,21 @@ def videoconvert():
     return _with_props("videoconvert", n_threads=min(4, os.cpu_count() or 1))
 
 
+def fixed_rate(fps):
+    """'capssetter … ! ' relabelling the caps with a constant `fps`, or ''
+    without capssetter (gst-plugins-good). Only the caps change: frames still
+    pass the moment they arrive."""
+    if not gst_inspect("capssetter"):
+        return ""
+    return f"capssetter caps=video/x-raw,framerate={int(fps)}/1 ! "
+
+
 def encoder_chain(enc, kbps, gop, fps=60, pin_colour=True):
     """GStreamer elements from raw frames to H.264 for `enc`.
 
     Every chain is single-slice and B-frame free: the phone's hardware decoder
-    wants exactly one complete access unit per input buffer. Each one is also
-    set up for low latency: fastest preset, no lookahead, and a VBV of
+    wants exactly one complete access unit per input buffer. None holds a
+    frame back (see the x264 branch). Each one is also set up for low latency: fastest preset, no lookahead, and a VBV of
     VBV_FRAMES frames where the element exposes one. The encoder input is
     always pinned to a 4:2:0 format (NV12 / I420): left to negotiate, x264
     would pick 4:4:4 from an RGB source, which phones can't decode.
@@ -335,11 +345,22 @@ def encoder_chain(enc, kbps, gop, fps=60, pin_colour=True):
             f"keyframe-period={gop}", "max-bframes=0",
             cpb_length=vbv_ms(fps)))
     if enc == "x264enc":
-        # sliced-threads=false keeps one slice per frame; 2 frame threads cost
-        # ~1 frame of latency but keep 1080p60 realtime on modest CPUs.
-        return (f"{videoconvert()} ! {raw('video/x-raw,format=I420')} ! " + _with_props(
+        # No frame may wait inside x264. A screen sends a frame only when
+        # something changed, so a frame held back is shown only when the next
+        # change comes: a click's result could take seconds (issue #6).
+        # x264 holds frames in two cases, both avoided here:
+        #   - frame threads: each thread past the first holds one more frame.
+        #     One thread it is; ultrafast keeps 1080p60 on one core, and a
+        #     slower CPU drops frames at the leaky queue instead of lagging.
+        #     (Sliced threads would hold none, but split a frame into slices.)
+        #   - a variable frame rate: the 0/1 that PipeWire's damage-driven
+        #     streams announce makes x264 hold one frame. x264 encodes at a
+        #     constant rate anyway (zerolatency sets force-cfr), so the caps
+        #     are relabelled with the nominal rate (fixed_rate).
+        return (f"{videoconvert()} ! {raw('video/x-raw,format=I420')} ! "
+                f"{fixed_rate(fps)}" + _with_props(
             enc, "tune=zerolatency", "speed-preset=ultrafast",
-            f"bitrate={kbps}", f"key-int-max={gop}", "bframes=0", "threads=2",
+            f"bitrate={kbps}", f"key-int-max={gop}", "bframes=0", "threads=1",
             "sliced-threads=false", "byte-stream=true",
             vbv_buf_capacity=vbv_ms(fps)))
     if enc == "openh264enc":

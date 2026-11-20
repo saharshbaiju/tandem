@@ -17,8 +17,9 @@ EXPECTED_DESCRIPTION = (
     "keepalive-time=1000 ! video/x-raw,width=2400,height=1080 "
     "! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 "
     "leaky=downstream ! videoconvert n-threads=4 ! video/x-raw,format=I420,colorimetry=bt709 "
+    "! capssetter caps=video/x-raw,framerate=60/1 "
     "! x264enc tune=zerolatency speed-preset=ultrafast bitrate=12000 "
-    "key-int-max=30 bframes=0 threads=2 sliced-threads=false "
+    "key-int-max=30 bframes=0 threads=1 sliced-threads=false "
     "byte-stream=true vbv-buf-capacity=33 ! h264parse config-interval=-1 "
     "! video/x-h264,stream-format=byte-stream,alignment=au "
     "! fdsink fd={fd} sync=false")
@@ -41,7 +42,8 @@ class GnomeCaptureTest(unittest.TestCase):
         gstreamer._inspect_cache.update({
             "x264enc": "  vbv-buf-capacity    : x\n",
             "pipewiresrc": "  keepalive-time      : x\n",
-            "videoconvert": "  n-threads           : x\n"})
+            "videoconvert": "  n-threads           : x\n",
+            "capssetter": "  caps                : x\n"})
         for missing in ("vah264enc", "vah264lpenc", "vaapih264enc",
                         "openh264enc", "vapostproc"):
             gstreamer._inspect_cache[missing] = ""

@@ -208,7 +208,7 @@ class PipelineTest(unittest.TestCase):
     ELEMENTS = {"x264enc": ("vbv-buf-capacity",), "openh264enc": (),
                 "vah264enc": ("cpb-size",), "vaapih264enc": ("cpb-length",),
                 "videoconvert": ("n-threads",),
-                "pipewiresrc": ("keepalive-time",)}
+                "pipewiresrc": ("keepalive-time",), "capssetter": ("caps",)}
 
     def setUp(self):
         self.inspect = FakeInspect(self.ELEMENTS)
@@ -219,12 +219,21 @@ class PipelineTest(unittest.TestCase):
         self.addCleanup(cpu_patch.stop)
 
     def test_x264_chain(self):
+        # No frame waits inside x264 (issue #6): one thread, one slice, and
+        # a constant frame rate in the caps.
         self.assertEqual(
             gstreamer.encoder_chain("x264enc", 12000, 30, 60),
-            "videoconvert n-threads=4 ! video/x-raw,format=I420,colorimetry=bt709 ! x264enc "
+            "videoconvert n-threads=4 ! video/x-raw,format=I420,colorimetry=bt709 ! "
+            "capssetter caps=video/x-raw,framerate=60/1 ! x264enc "
             "tune=zerolatency speed-preset=ultrafast bitrate=12000 "
-            "key-int-max=30 bframes=0 threads=2 sliced-threads=false "
+            "key-int-max=30 bframes=0 threads=1 sliced-threads=false "
             "byte-stream=true vbv-buf-capacity=33")
+
+    def test_x264_chain_without_capssetter(self):
+        with FakeInspect({k: v for k, v in self.ELEMENTS.items() if k != "capssetter"}):
+            chain = gstreamer.encoder_chain("x264enc", 12000, 30, 60)
+        self.assertNotIn("capssetter", chain)
+        self.assertIn("! x264enc tune=zerolatency", chain)
 
     def test_openh264_chain(self):
         self.assertEqual(

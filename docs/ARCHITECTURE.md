@@ -630,6 +630,7 @@ Every encoder is configured the same way, for the same reasons:
 | CBR at the quality preset's bitrate | No bitrate spikes that stall the link |
 | A rate-control buffer of 2 frames (`cpb-size` on `vah264enc`/`vah264lpenc`, `cpb-length` on `vaapih264enc`, `vbv-buf-capacity` on `x264enc`, `vbv-buffer-size` on `nvh264enc`), each set only if the element has it | Encoders defaulted to 0.6 to 1.5 s, which let each keyframe arrive as one big burst and caused a latency spike every GOP. `openh264enc` has no such property |
 | One slice per frame (`sliced-threads=false` for x264) | The phone's hardware decoder wants one complete access unit per input buffer |
+| No frame held inside x264: `threads=1`, and `capssetter caps=video/x-raw,framerate=<fps>/1` in front of `x264enc` (when gst-plugins-good has it) | GNOME and KWin send a frame only when something changes, so a frame the encoder holds back appears only with the next change. A click's result could show up seconds late (issue #6). Each x264 frame thread past the first holds one frame (the old `threads=2` held two with the variable rate below), and the `framerate=0/1` that a damage-driven PipeWire stream announces makes x264 hold one more. x264 encodes at a constant rate anyway (`tune=zerolatency` sets force-cfr), so only the caps label changes. One core of ultrafast keeps up with 1080p60; a slower CPU drops frames at the leaky queue instead of falling behind |
 | Raw Annex-B, no container | The decoder reads it directly |
 | `keepalive-time=1000` (GNOME, KDE) | These compositors only send frames when something changes, so the last frame is resent every second. KWin 6.7 with PipeWire 1.4 ignores it, and an idle phone monitor there gets almost no frames; the GOP replay still gives a joining phone the picture |
 
@@ -1179,7 +1180,7 @@ Glass to glass over USB, with Hyprland and VA-API:
 | **Total** | **About 25 to 45 ms** |
 
 On GNOME with a software encoder, add about 5 to 15 ms for `videoconvert` and
-x264. Frame threading (`threads=2`) costs about one frame. A VA-API GStreamer
+x264, which runs on one thread and holds no frame back. A VA-API GStreamer
 encoder brings the total back in line with Hyprland.
 
 Over Wi-Fi the transport row becomes about 5 to 20 ms, so about 30 to 60 ms in
