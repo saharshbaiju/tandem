@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "io.github.saharshbaiju.tandem"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 36
         versionCode = 17
         versionName = "0.9.1"

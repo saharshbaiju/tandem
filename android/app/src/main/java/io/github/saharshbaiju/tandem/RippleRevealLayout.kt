@@ -19,6 +19,7 @@ import androidx.annotation.RequiresApi
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.max
+import android.graphics.Region
 
 /**
  * The connect screen's container, able to "dissolve like water" into the live
@@ -156,7 +157,7 @@ class RippleRevealLayout @JvmOverloads constructor(
         if (revealRadius > 0f) {
             hole.reset()
             hole.addCircle(originX, originY, revealRadius, Path.Direction.CW)
-            canvas.clipOutPath(hole)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {    canvas.clipOutPath(hole)} else {    @Suppress("DEPRECATION")    canvas.clipPath(hole, Region.Op.DIFFERENCE)}
         }
         super.dispatchDraw(canvas)
         canvas.restoreToCount(save)

@@ -47,7 +47,7 @@ DAEMON_LOG_PATH = os.path.join(STATE_DIR, "tandemd.log")
 PAIRING_KEY_PATH = secure_link.PAIRING_KEY_PATH
 
 # Quality preset -> CBR bitrate handed to the encoder.
-QUALITY = {"low": "4M", "medium": "8M", "high": "12M", "ultra": "20M"}
+QUALITY = {"minimum": "500K", "very_low": "750K", "low": "1M", "low_plus": "1.5M", "medium_low": "2M", "medium": "3M", "medium_high": "4M", "high": "6M", "very_high": "8M", "ultra": "12M", "extreme": "16M", "maximum": "20M"}
 
 # Android USB tethering (RNDIS/NCM) is the wired transport: it needs NO USB
 # debugging. The phone becomes a USB network gadget, runs a DHCP server, and
@@ -69,22 +69,22 @@ RES_PRESETS = [
 class Config:
     backend: str = "auto"          # auto or a name in backends.NAMES
     output: str = "EXT-1"
-    side: str = "right"            # right / left / up / down
-    width: int = 1920
-    height: int = 1080
+    side: str = "left"            # right / left / up / down
+    width: int = 1280
+    height: int = 720
     # Size the monitor to the phone or tablet watching it (no black bars).
     # width x height is then only the size before the first phone connects.
-    fit_device: bool = True
-    fps: int = 60
+    fit_device: bool = False
+    fps: int = 30
     scale: float = 1.0             # desktop scale of the virtual monitor
-    quality: str = "high"          # low / medium / high / ultra
+    quality: str = "low"          # low / medium / high / ultra
     # "auto" (the best one that works) or one of encoder_choices() to try
     # first. Either way the backend falls back to another encoder if that
     # one can't start.
     encoder: str = "auto"
     codec: str = "h264"            # the app decodes h264
     gop: int = 30                  # keyframe interval (frames)
-    transport: str = "usb"         # usb / wifi (preferred address in the QR)
+    transport: str = "wifi"         # usb / wifi (preferred address in the QR)
     port: int = 5000
     va_device: str = "/dev/dri/renderD128"
     touch: bool = True             # let paired phones control the monitor

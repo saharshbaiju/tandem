@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import androidx.core.content.res.ResourcesCompat
 
 /**
  * The ASCII look shared by the splash ([AsciiSplashView]) and the connect
@@ -31,13 +32,13 @@ object AsciiType {
     /** Monospace paint for the characters themselves (Geist Mono Bold). */
     fun glyphPaint(context: Context, color: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.color = color
-        typeface = context.resources.getFont(R.font.tandem_ascii_mono)
+        typeface = ResourcesCompat.getFont(context, R.font.tandem_ascii_mono)
     }
 
     /** The wordmark's letterforms: heavy and a little wide, like Archivo on the site. */
     fun wordPaint(context: Context) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        typeface = context.resources.getFont(R.font.tandem_wordmark)
+        typeface = ResourcesCompat.getFont(context, R.font.tandem_wordmark)
         textScaleX = 1.15f
         textAlign = Paint.Align.CENTER
     }
