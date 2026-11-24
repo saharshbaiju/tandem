@@ -1403,9 +1403,11 @@ internal class VideoDecoder(private val surface: Surface, private val events: Ev
         // this is what the decoder uses instead of its own guess, which
         // differs between phones (GitHub issue #7). A label in the stream
         // still wins, so older computers look exactly as before.
-        fmt.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
-        fmt.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
-        fmt.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+	if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+	    fmt.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+	    fmt.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+	    fmt.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+	}
         if (fps > 0) fmt.setInteger(MediaFormat.KEY_OPERATING_RATE, fps)
         for ((name, value) in vendorLowLatencyKeys(info, c)) fmt.setInteger(name, value)
         return fmt

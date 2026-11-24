@@ -575,7 +575,7 @@ def configure_screen(win, cfg, live=False):
         ("Resolution", "resolution", None, None),
         ("Refresh (FPS)", "choice", "fps", [30, 60, 120]),
         ("Desktop scale", "choice", "scale", [1.0, 1.25, 1.5, 2.0]),
-        ("Quality", "choice", "quality", ["low", "medium", "high", "ultra"]),
+	("Quality", "choice", "quality", ["minimum", "very_low", "low", "low_plus", "medium_low", "medium", "medium_high", "high", "very_high", "ultra", "extreme", "maximum"]),
         ("Encoder", "encoder", "encoder", None),
         ("Keyframe interval", "choice", "gop", [15, 30, 60]),
         ("Preferred link", "choice", "transport", ["usb", "wifi"]),
